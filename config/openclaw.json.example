@@ -189,7 +189,7 @@
                                   },
                      "discord":  {
                                      "enabled":  false,
-                                     "token":  "MTQ2Nzg4NzUyOTkzOTE3MzQ3OQ.G6jAV5.xN0qkHLX1cmFZm2xnheaRfhpzsZFOc4KqBeR7g",
+                                     "token":  "YOUR_DISCORD_BOT_TOKEN_HERE",
                                      "allowBots":  true,
                                      "groupPolicy":  "open",
                                      "actions":  {
@@ -672,5 +672,6 @@
                                }
               }
 }
+
 
 
