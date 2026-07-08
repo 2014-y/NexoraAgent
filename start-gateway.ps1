@@ -30,29 +30,17 @@ Write-Host ''
 Write-Host 'Starting Gateway...' -ForegroundColor Gray
 Write-Host ''
 
+# Run in background so this script can close cleanly
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $node
-$psi.Arguments = "`"$indexJs`" gateway run"
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
+$psi.Arguments = "`"$indexJs`" gateway run --force"
+$psi.WorkingDirectory = "$env:USERPROFILE\.openclaw"
+$psi.UseShellExecute = $true
+$psi.CreateNoWindow = $true
 
-$proc = [System.Diagnostics.Process]::Start($psi)
+[System.Diagnostics.Process]::Start($psi) | Out-Null
 
-while (-not $proc.StandardOutput.EndOfStream) {
-    $line = $proc.StandardOutput.ReadLine()
-    if ($line) { Write-Host $line }
-}
-while (-not $proc.StandardError.EndOfStream) {
-    $line = $proc.StandardError.ReadLine()
-    if ($line) { Write-Host $line }
-}
-
-$exitCode = $proc.ExitCode
-$proc.WaitForExit()
-
-if ($exitCode -ne 0) {
-    Write-Host ''
-    Write-Host "Gateway exited with code $exitCode" -ForegroundColor Red
-    pause
-}
+Write-Host 'Gateway started successfully.' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Press any key to close this launcher window...'
+pause >nul

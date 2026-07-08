@@ -35,11 +35,8 @@ echo  OpenClaw Gateway Launcher
 echo  Node: %NODE_HOME%\node.exe
 echo ========================================
 echo.
-"%NODE_HOME%\node.exe" "%NODE_HOME%\node_modules\openclaw\dist\index.js" gateway run --force
-
-:: === ?? node ???????????????? ===
-if errorlevel 1 (
-    echo.
-    echo Gateway exited with error.
-    pause
-)
+start "" /b "%NODE_HOME%\node.exe" "%NODE_HOME%\node_modules\openclaw\dist\index.js" gateway run --force
+echo.
+echo Gateway started in background.
+echo.
+pause
