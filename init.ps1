@@ -55,21 +55,49 @@ if (-not $src) {
 
 Write-Host "  Found: $src" -ForegroundColor Green
 
-Write-Host "[2/3] Copying to .node-sandbox..." -ForegroundColor Cyan
-try {
-    Get-ChildItem $src -Recurse | Where-Object { $_.Name -ne 'nul' } | Copy-Item -Destination { Join-Path $sandboxDir $_.FullName.Replace($src, '') } -Force -ErrorAction Stop
-    Write-Host "  Done." -ForegroundColor Green
-} catch {
-    Write-Host "  [ERROR] Copy failed: $_" -ForegroundColor Red
+# Copy only core node files (skip node_modules to avoid tslog ESM issues)
+Write-Host "[2/3] Setting up .node-sandbox..." -ForegroundColor Cyan
+mkdir $sandboxDir | Out-Null
+Copy-Item "$src\node.exe" "$sandboxDir\node.exe" -Force
+Copy-Item "$src\npm" "$sandboxDir\npm" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\npm.cmd" "$sandboxDir\npm.cmd" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\npx" "$sandboxDir\npx" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\npx.cmd" "$sandboxDir\npx.cmd" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\corepack" "$sandboxDir\corepack" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\corepack.cmd" "$sandboxDir\corepack.cmd" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\nodevars.bat" "$sandboxDir\nodevars.bat" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\README.md" "$sandboxDir\README.md" -Force -ErrorAction SilentlyContinue
+Copy-Item "$src\LICENSE" "$sandboxDir\LICENSE" -Force -ErrorAction SilentlyContinue
+
+if (-not (Test-Path "$sandboxDir\node.exe")) {
+    Write-Host "  [ERROR] Failed to create .node-sandbox!" -ForegroundColor Red
     pause
     exit 1
 }
 
-Write-Host "[3/3] Verifying..." -ForegroundColor Cyan
-if (-not (Test-Path "$sandboxDir\node.exe")) {
-    Write-Host "  [ERROR] node.exe not found in .node-sandbox!" -ForegroundColor Red
-    pause
-    exit 1
+Write-Host "  Created .node-sandbox with node.exe" -ForegroundColor Green
+
+# Setup config
+Write-Host "[3/3] Setting up configuration..." -ForegroundColor Cyan
+$configDir = Join-Path $env:USERPROFILE ".openclaw"
+$configFile = Join-Path $configDir "openclaw.json"
+if (-not (Test-Path $configDir)) {
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+}
+
+if (-not (Test-Path $configFile)) {
+    $examplePath = Join-Path $scriptDir "config\openclaw.json.example"
+    if (Test-Path $examplePath) {
+        Copy-Item $examplePath $configFile -Force
+        Write-Host "  Created openclaw.json from template." -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  IMPORTANT: Edit $configFile" -ForegroundColor Yellow
+        Write-Host "  Replace <YOUR_AGNES_API_KEY> with your actual API Key." -ForegroundColor Yellow
+        Write-Host "  Get key from: https://agnes-ai.com/zh-Hans/docs/agnes-video-v20" -ForegroundColor Yellow
+        Write-Host ""
+    }
+} else {
+    Write-Host "  Config already exists, skipping." -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -77,6 +105,6 @@ Write-Host "========================================" -ForegroundColor DarkGray
 Write-Host "  Setup complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "Next step: Double-click start-gateway.bat" -ForegroundColor Cyan
+Write-Host "Next: Edit openclaw.json, then double-click start-gateway.bat" -ForegroundColor Cyan
 Write-Host ""
 pause

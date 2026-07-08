@@ -1,108 +1,674 @@
 ﻿{
-  "_comment": "AI-v24.13.0 开源版 - 配置模板",
-  "_comment2": "复制为 openclaw.json 并填入你的 API Key",
-  "meta": {
-    "version": "2026.6.11",
-    "template": true
-  },
-  "env": {
-    "shellEnv": {
-      "enabled": true
-    }
-  },
-  "logging": {
-    "level": "info",
-    "redactSensitive": "tools",
-    "consoleLevel": "info",
-    "consoleStyle": "compact"
-  },
-  "models": {
-    "providers": {
-      "agnes-ai": {
-        "baseUrl": "https://apihub.agnes-ai.com/v1",
-        "apiKey": "<YOUR_AGNES_API_KEY>",
-        "api": "openai-completions",
-        "models": [
-          {
-            "id": "agnes-2.0-flash",
-            "name": "Agnes 2.0 Flash",
-            "contextWindow": 524288,
-            "maxTokens": 65536,
-            "input": ["text", "image"]
-          },
-          {
-            "id": "agnes-1.5-flash",
-            "name": "Agnes 1.5 Flash",
-            "contextWindow": 131072,
-            "maxTokens": 8192,
-            "input": ["text", "image"]
-          }
-        ]
-      },
-      "ollama": {
-        "baseUrl": "http://localhost:11434/v1",
-        "api": "openai-completions",
-        "models": [
-          {
-            "id": "gemma4:latest",
-            "name": "Gemma4 Latest",
-            "contextWindow": 32768,
-            "maxTokens": 4096,
-            "input": ["text"]
-          }
-        ]
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "agnes-ai/agnes-2.0-flash",
-        "fallbacks": [
-          "agnes-ai/agnes-1.5-flash",
-          "ollama/gemma4:latest"
-        ]
-      },
-      "contextPruning": ["cache-ttl", "3m"],
-      "compaction": {
-        "reserveTokensFloor": 16000
-      },
-      "heartbeat": {
-        "every": "30m"
-      },
-      "imageModel": {
-        "primary": "agnes-ai-image/agnes-image-2.0-flash"
-      },
-      "memorySearch": {
-        "provider": "ollama/nomic-embed-text"
-      }
-    }
-  },
-  "plugins": {
-    "allow": [
-      "dual-model-trainer",
-      "memory-core",
-      "health-check",
-      "voice-call",
-      "browser",
-      "ollama",
-      "google"
-    ],
-    "load": {
-      "paths": ["./plugins"]
-    }
-  },
-  "mcp": {
-    "servers": {
-      "computer-use": {
-        "command": "open-computer-use",
-        "args": ["mcp"]
-      }
-    }
-  },
-  "channels": {
-    "enabled": ["wechat", "whatsapp"],
-    "disabled": ["telegram", "discord", "imessage"]
-  }
-}
+    "meta":  {
+                 "lastTouchedVersion":  "2026.6.10",
+                 "lastTouchedAt":  "2026-06-27T03:56:05.299Z"
+             },
+    "env":  {
+                "shellEnv":  {
+                                 "enabled":  true
+                             },
+                "ZHIPU_API_KEY":  "\u003cYOUR_ZHIPU_API_KEY\u003e",
+                "YITONG_API_KEY":  "\u003cYOUR_YITONG_API_KEY\u003e"
+            },
+    "wizard":  {
+                   "lastRunAt":  "2026-06-27T02:29:48.269Z",
+                   "lastRunVersion":  "2026.6.10",
+                   "lastRunCommand":  "doctor",
+                   "lastRunMode":  "local"
+               },
+    "logging":  {
+                    "level":  "fatal",
+                    "redactSensitive":  "off",
+                    "consoleLevel":  "info",
+                    "consoleStyle":  "compact"
+                },
+    "models":  {
+                   "providers":  {
+                                     "ollama":  {
+                                                    "baseUrl":  "http://localhost:11434/v1",
+                                                    "models":  [
+                                                                   {
+                                                                       "id":  "jarvis-learned",
+                                                                       "name":  "Jarvis Learned (???)",
+                                                                       "reasoning":  false,
+                                                                       "input":  [
+                                                                                     "text"
+                                                                                 ],
+                                                                       "contextWindow":  4718592,
+                                                                       "maxTokens":  4096,
+                                                                       "api":  "openai-completions"
+                                                                   },
+                                                                   {
+                                                                       "id":  "jarvis",
+                                                                       "name":  "Jarvis",
+                                                                       "reasoning":  false,
+                                                                       "input":  [
+                                                                                     "text"
+                                                                                 ],
+                                                                       "contextWindow":  32768,
+                                                                       "maxTokens":  4096,
+                                                                       "api":  "openai-completions"
+                                                                   }
+                                                               ]
+                                                },
+                                     "yitong":  {
+                                                    "baseUrl":  "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                                                    "apiKey":  "sk-2f2ec5aa103e40af8b71ec53cb0033b3",
+                                                    "api":  "openai-completions",
+                                                    "models":  [
+                                                                   {
+                                                                       "id":  "qwen3-max",
+                                                                       "name":  "Qwen3-Max",
+                                                                       "contextWindow":  200000,
+                                                                       "maxTokens":  8192
+                                                                   }
+                                                               ]
+                                                },
+                                     "agnes-ai":  {
+                                                      "baseUrl":  "https://apihub.agnes-ai.com/v1",
+                                                      "apiKey":  "\u003cYOUR_AGNES_API_KEY\u003e",
+                                                      "api":  "openai-completions",
+                                                      "models":  [
+                                                                     {
+                                                                         "id":  "agnes-2.0-flash",
+                                                                         "name":  "Agnes 2.0 Flash",
+                                                                         "contextWindow":  128000,
+                                                                         "maxTokens":  8192
+                                                                     },
+                                                                     {
+                                                                         "id":  "agnes-1.5-flash",
+                                                                         "name":  "Agnes 1.5 Flash",
+                                                                         "contextWindow":  128000,
+                                                                         "maxTokens":  8192
+                                                                     }
+                                                                 ]
+                                                  }
+                                 }
+               },
+    "agents":  {
+                   "defaults":  {
+                                    "model":  {
+                                                  "primary":  "agnes-ai/agnes-2.0-flash",
+                                                  "fallbacks":  [
+                                                                    "agnes-ai/agnes-1.5-flash"
+                                                                ]
+                                              },
+                                    "models":  {
+                                                   "ollama/jarvis":  {
 
+                                                                     },
+                                                   "ollama/qwen2.5:7b":  {
+
+                                                                         },
+                                                   "ollama/deepseek-coder:6.7b":  {
+
+                                                                                  },
+                                                   "ollama/qwen2.5:3b":  {
+
+                                                                         },
+                                                   "yitong/qwen3-max":  {
+
+                                                                        },
+                                                   "yitong/qwen-max":  {
+
+                                                                       },
+                                                   "zhipu/glm-4.7":  {
+
+                                                                     },
+                                                   "zhipu/GLM-4.7-Flash":  {
+
+                                                                           },
+                                                   "agnes-ai/agnes-ai":  {
+
+                                                                         },
+                                                   "agnes-ai/agnes-2.0-flash":  {
+
+                                                                                },
+                                                   "agnes-ai/agnes-1.5-flash":  {
+
+                                                                                }
+                                               },
+                                    "contextPruning":  {
+                                                           "mode":  "cache-ttl",
+                                                           "ttl":  "1h"
+                                                       },
+                                    "compaction":  {
+                                                       "mode":  "safeguard",
+                                                       "memoryFlush":  {
+                                                                           "enabled":  true
+                                                                       },
+                                                       "reserveTokensFloor":  64000
+                                                   },
+                                    "heartbeat":  {
+                                                      "every":  "30m"
+                                                  },
+                                    "maxConcurrent":  4,
+                                    "subagents":  {
+                                                      "maxConcurrent":  8
+                                                  },
+                                    "imageGenerationModel":  {
+                                                                 "primary":  "google/gemini-3-pro-image-preview"
+                                                             }
+                                }
+               },
+    "tools":  {
+                  "elevated":  {
+                                   "enabled":  true
+                               },
+                  "exec":  {
+                               "host":  "gateway",
+                               "security":  "full",
+                               "ask":  "off"
+                           }
+              },
+    "messages":  {
+                     "ackReactionScope":  "group-mentions"
+                 },
+    "commands":  {
+                     "native":  "auto",
+                     "nativeSkills":  "auto",
+                     "restart":  true
+                 },
+    "channels":  {
+                     "whatsapp":  {
+                                      "dmPolicy":  "open",
+                                      "groupPolicy":  "open",
+                                      "mediaMaxMb":  50,
+                                      "actions":  {
+                                                      "reactions":  true,
+                                                      "sendMessage":  true,
+                                                      "polls":  true
+                                                  },
+                                      "debounceMs":  0,
+                                      "allowFrom":  [
+                                                        "*"
+                                                    ],
+                                      "groupAllowFrom":  [
+                                                             "*"
+                                                         ]
+                                  },
+                     "discord":  {
+                                     "enabled":  false,
+                                     "token":  "MTQ2Nzg4NzUyOTkzOTE3MzQ3OQ.G6jAV5.xN0qkHLX1cmFZm2xnheaRfhpzsZFOc4KqBeR7g",
+                                     "allowBots":  true,
+                                     "groupPolicy":  "open",
+                                     "actions":  {
+                                                     "reactions":  true,
+                                                     "stickers":  true,
+                                                     "emojiUploads":  true,
+                                                     "stickerUploads":  true,
+                                                     "polls":  true,
+                                                     "permissions":  true,
+                                                     "messages":  true,
+                                                     "threads":  true,
+                                                     "pins":  true,
+                                                     "search":  true,
+                                                     "memberInfo":  true,
+                                                     "roleInfo":  true,
+                                                     "roles":  true,
+                                                     "channelInfo":  true,
+                                                     "voiceStatus":  true,
+                                                     "events":  true,
+                                                     "moderation":  true,
+                                                     "channels":  true
+                                                 },
+                                     "dm":  {
+                                                "enabled":  true,
+                                                "policy":  "allowlist"
+                                            },
+                                     "guilds":  {
+                                                    "1467858448455827551":  {
+                                                                                "requireMention":  true,
+                                                                                "users":  [
+                                                                                              "1467857588564529334"
+                                                                                          ],
+                                                                                "channels":  {
+                                                                                                 "1467858449193766924":  {
+                                                                                                                             "requireMention":  true
+                                                                                                                         }
+                                                                                             }
+                                                                            }
+                                                },
+                                     "accounts":  {
+
+                                                  },
+                                     "dmPolicy":  "open",
+                                     "allowFrom":  [
+                                                       "1467857588564529334",
+                                                       "*"
+                                                   ]
+                                 },
+                     "feishu":  {
+                                    "enabled":  false,
+                                    "appId":  "cli_a90ad75b7fcb9cd0",
+                                    "appSecret":  "5Q0tuDeErvv8UBBTTNrYHfXzDalcflTm",
+                                    "dmPolicy":  "open",
+                                    "allowFrom":  [
+                                                      "*"
+                                                  ],
+                                    "groupPolicy":  "open",
+                                    "groups":  {
+
+                                               },
+                                    "blockStreaming":  true
+                                },
+                     "openclaw-weixin":  {
+                                             "channelConfigUpdatedAt":  "2026-06-26T11:11:35.746Z",
+                                             "dmPolicy":  "open",
+                                             "groupPolicy":  "open",
+                                             "actions":  {
+                                                             "reactions":  true,
+                                                             "sendMessage":  true,
+                                                             "polls":  true,
+                                                             "stickers":  true,
+                                                             "emojiUploads":  true,
+                                                             "stickerUploads":  true,
+                                                             "permissions":  true,
+                                                             "messages":  true,
+                                                             "threads":  true,
+                                                             "pins":  true,
+                                                             "search":  true,
+                                                             "memberInfo":  true,
+                                                             "roleInfo":  true,
+                                                             "roles":  true,
+                                                             "channelInfo":  true,
+                                                             "voiceStatus":  true,
+                                                             "events":  true,
+                                                             "moderation":  true,
+                                                             "channels":  true
+                                                         },
+                                             "allowFrom":  [
+                                                               "*"
+                                                           ],
+                                             "groupAllowFrom":  [
+                                                                    "*"
+                                                                ]
+                                         }
+                 },
+    "gateway":  {
+                    "port":  18789,
+                    "mode":  "local",
+                    "auth":  {
+                                 "token":  "feishu-bridge-local-d897fd501f04c3134f875de331f43ed1"
+                             },
+                    "http":  {
+                                 "endpoints":  {
+                                                   "chatCompletions":  {
+                                                                           "enabled":  true
+                                                                       }
+                                               }
+                             }
+                },
+    "skills":  {
+                   "entries":  {
+                                   "1password":  {
+                                                     "enabled":  true
+                                                 },
+                                   "apple-notes":  {
+
+                                                   },
+                                   "apple-reminders":  {
+
+                                                       },
+                                   "bear-notes":  {
+
+                                                  },
+                                   "bird":  {
+
+                                            },
+                                   "blogwatcher":  {
+                                                       "enabled":  true
+                                                   },
+                                   "blucli":  {
+                                                  "enabled":  true
+                                              },
+                                   "bluebubbles":  {
+
+                                                   },
+                                   "camsnap":  {
+                                                   "enabled":  true
+                                               },
+                                   "canvas":  {
+
+                                              },
+                                   "clawhub":  {
+
+                                               },
+                                   "coding-agent":  {
+                                                        "enabled":  true
+                                                    },
+                                   "discord":  {
+
+                                               },
+                                   "eightctl":  {
+                                                    "enabled":  true
+                                                },
+                                   "food-order":  {
+
+                                                  },
+                                   "gemini":  {
+
+                                              },
+                                   "gifgrep":  {
+                                                   "enabled":  true
+                                               },
+                                   "github":  {
+                                                  "enabled":  true
+                                              },
+                                   "gog":  {
+                                               "enabled":  true
+                                           },
+                                   "goplaces":  {
+                                                    "enabled":  true
+                                                },
+                                   "himalaya":  {
+                                                    "enabled":  true
+                                                },
+                                   "imsg":  {
+
+                                            },
+                                   "local-places":  {
+
+                                                    },
+                                   "mcporter":  {
+                                                    "enabled":  true
+                                                },
+                                   "model-usage":  {
+
+                                                   },
+                                   "nano-pdf":  {
+                                                    "enabled":  true
+                                                },
+                                   "notion":  {
+
+                                              },
+                                   "obsidian":  {
+                                                    "enabled":  true
+                                                },
+                                   "openai-image-gen":  {
+
+                                                        },
+                                   "openai-whisper":  {
+                                                          "enabled":  true
+                                                      },
+                                   "openai-whisper-api":  {
+                                                              "enabled":  true
+                                                          },
+                                   "openhue":  {
+                                                   "enabled":  true
+                                               },
+                                   "oracle":  {
+                                                  "enabled":  true
+                                              },
+                                   "ordercli":  {
+                                                    "enabled":  true
+                                                },
+                                   "peekaboo":  {
+
+                                                },
+                                   "sag":  {
+                                               "enabled":  true
+                                           },
+                                   "session-logs":  {
+                                                        "enabled":  true
+                                                    },
+                                   "sherpa-onnx-tts":  {
+                                                           "enabled":  true
+                                                       },
+                                   "skill-creator":  {
+
+                                                     },
+                                   "slack":  {
+                                                 "enabled":  true
+                                             },
+                                   "songsee":  {
+                                                   "enabled":  true
+                                               },
+                                   "sonoscli":  {
+                                                    "enabled":  true
+                                                },
+                                   "spotify-player":  {
+                                                          "enabled":  true
+                                                      },
+                                   "summarize":  {
+                                                     "enabled":  true
+                                                 },
+                                   "things-mac":  {
+
+                                                  },
+                                   "tmux":  {
+
+                                            },
+                                   "trello":  {
+                                                  "enabled":  true
+                                              },
+                                   "video-frames":  {
+                                                        "enabled":  true
+                                                    },
+                                   "voice-call":  {
+
+                                                  },
+                                   "wacli":  {
+                                                 "enabled":  true
+                                             },
+                                   "weather":  {
+
+                                               },
+                                   "amygdala-memory":  {
+                                                           "enabled":  true
+                                                       },
+                                   "ask-a-human":  {
+                                                       "enabled":  false
+                                                   },
+                                   "gh-issues":  {
+                                                     "enabled":  true
+                                                 },
+                                   "python-debugpy":  {
+                                                          "enabled":  true
+                                                      },
+                                   "xurl":  {
+                                                "enabled":  true
+                                            },
+                                   "clawnected":  {
+                                                      "enabled":  true
+                                                  },
+                                   "de-ai-ify":  {
+                                                     "enabled":  true
+                                                 },
+                                   "elicitation":  {
+                                                       "enabled":  true
+                                                   },
+                                   "emotion-state":  {
+                                                         "enabled":  true
+                                                     },
+                                   "Humanize CLI - AI Text Detection \u0026 Rewriting":  {
+                                                                                             "enabled":  true
+                                                                                         },
+                                   "humanizer":  {
+                                                     "enabled":  true
+                                                 },
+                                   "mens-mental-health":  {
+                                                              "enabled":  true
+                                                          },
+                                   "moodcast":  {
+                                                    "enabled":  true
+                                                },
+                                   "promitheus":  {
+                                                      "enabled":  true
+                                                  },
+                                   "weather-pollen":  {
+                                                          "enabled":  true
+                                                      },
+                                   "emotion-memory-assistant":  {
+                                                                    "enabled":  false
+                                                                },
+                                   "girlfriend-simulator":  {
+                                                                "enabled":  true
+                                                            }
+                               }
+               },
+    "plugins":  {
+                    "load":  {
+                                 "paths":  [
+                                               "C:\\Users\\Yuan\\.openclaw\\plugins"
+                                           ]
+                             },
+                    "entries":  {
+                                    "dual-model-trainer":  {
+                                                               "enabled":  true,
+                                                               "config":  {
+                                                                              "teacherModel":  "yitong/qwen3-max",
+                                                                              "studentModel":  "ollama/jarvis",
+                                                                              "parallelMode":  true,
+                                                                              "saveAllConversations":  true,
+                                                                              "minQualityDiff":  10
+                                                                          }
+                                                           },
+                                    "memory-core":  {
+                                                        "enabled":  true
+                                                    },
+                                    "voice-call":  {
+                                                       "enabled":  true
+                                                   },
+                                    "telegram":  {
+                                                     "enabled":  true
+                                                 },
+                                    "slack":  {
+                                                  "enabled":  true
+                                              },
+                                    "whatsapp":  {
+                                                     "enabled":  true
+                                                 },
+                                    "lobster":  {
+                                                    "enabled":  true
+                                                },
+                                    "llm-task":  {
+                                                     "enabled":  true
+                                                 },
+                                    "signal":  {
+                                                   "enabled":  true
+                                               },
+                                    "matrix":  {
+                                                   "enabled":  true
+                                               },
+                                    "msteams":  {
+                                                    "enabled":  true
+                                                },
+                                    "nostr":  {
+                                                  "enabled":  true
+                                              },
+                                    "twitch":  {
+                                                   "enabled":  true
+                                               },
+                                    "line":  {
+                                                 "enabled":  true
+                                             },
+                                    "mattermost":  {
+                                                       "enabled":  true
+                                                   },
+                                    "nextcloud-talk":  {
+                                                           "enabled":  true
+                                                       },
+                                    "tlon":  {
+                                                 "enabled":  true
+                                             },
+                                    "zalo":  {
+                                                 "enabled":  true
+                                             },
+                                    "zalouser":  {
+                                                     "enabled":  true
+                                                 },
+                                    "imessage":  {
+                                                     "enabled":  true
+                                                 },
+                                    "googlechat":  {
+                                                       "enabled":  true
+                                                   },
+                                    "open-prose":  {
+                                                       "enabled":  true
+                                                   },
+                                    "copilot-proxy":  {
+                                                          "enabled":  true
+                                                      },
+                                    "openclaw-weixin":  {
+                                                            "enabled":  true
+                                                        },
+                                    "ollama":  {
+                                                   "enabled":  true
+                                               },
+                                    "memory-wiki":  {
+                                                        "enabled":  true
+                                                    },
+                                    "tavily":  {
+                                                   "enabled":  true
+                                               },
+                                    "clickclack":  {
+                                                       "enabled":  true
+                                                   },
+                                    "admin-http-rpc":  {
+                                                           "enabled":  true
+                                                       },
+                                    "active-memory":  {
+                                                          "enabled":  true
+                                                      },
+                                    "discord":  {
+                                                    "enabled":  true
+                                                },
+                                    "feishu":  {
+                                                   "enabled":  true
+                                               },
+                                    "duckduckgo":  {
+                                                       "enabled":  true
+                                                   },
+                                    "searxng":  {
+                                                    "enabled":  true
+                                                },
+                                    "sms":  {
+                                                "enabled":  true
+                                            },
+                                    "webhooks":  {
+                                                     "enabled":  true
+                                                 },
+                                    "irc":  {
+                                                "enabled":  true
+                                            },
+                                    "bonjour":  {
+                                                    "enabled":  true
+                                                },
+                                    "oc-path":  {
+                                                    "enabled":  true
+                                                },
+                                    "thread-ownership":  {
+                                                             "enabled":  true
+                                                         },
+                                    "workboard":  {
+                                                      "enabled":  true
+                                                  },
+                                    "waltz-flight-assistant":  {
+                                                                   "enabled":  false
+                                                               },
+                                    "store-report-assistant":  {
+                                                                   "enabled":  false
+                                                               },
+                                    "weixin-reconnect":  {
+                                                             "enabled":  true
+                                                         },
+                                    "auto-summary":  {
+                                                         "enabled":  true
+                                                     },
+                                    "google":  {
+                                                   "enabled":  true
+                                               }
+                                }
+                },
+    "hooks":  {
+                  "internal":  {
+                                   "enabled":  true,
+                                   "entries":  {
+                                                   "emotion-state":  {
+                                                                         "enabled":  true
+                                                                     }
+                                               }
+                               }
+              }
+}
