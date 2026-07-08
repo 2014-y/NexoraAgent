@@ -1,6 +1,15 @@
+# Node sandbox (contains full node installation, ~2GB)
+# Users must run init.bat to set this up
 .node-sandbox/
+
+# OpenClaw workspace
 .openclaw/
 logs/
 *.log
 
+# Dependencies
 node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

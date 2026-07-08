@@ -1,12 +1,6 @@
 @echo off
 setlocal
 
-:: === ???? PATH?????????? ===
-set "PATH="
-
-:: === ??????????? ===
-set "PATH=C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\"
-
 :: === ????????? ===
 set "SCRIPT_DIR=%~dp0"
 set "NODE_HOME=%SCRIPT_DIR%.node-sandbox"
@@ -22,13 +16,13 @@ timeout /t 2 /nobreak >nul
 :: === ?? ===
 cd /d "%USERPROFILE%\.openclaw"
 echo ========================================
-echo  OpenClaw Gateway (Hard Sandbox)
+echo  OpenClaw Gateway Launcher
 echo  Node: %NODE_HOME%\node.exe
 echo ========================================
 echo.
 if not exist "%NODE_HOME%\node.exe" (
-    echo ERROR: Node sandbox not found at %NODE_HOME%
-    echo Please copy your node installation to .node-sandbox
+    echo ERROR: Node sandbox not found!
+    echo Please run init.bat first.
     pause
     exit /b 1
 )
