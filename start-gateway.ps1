@@ -48,5 +48,5 @@ Write-Host ''
 Write-Host 'Starting...' -ForegroundColor Gray
 Write-Host ''
 
-# Direct execution
-& $node $indexJs gateway run --force
+# Direct execution with --allow-unconfigured
+& $node $indexJs gateway run --allow-unconfigured --force
