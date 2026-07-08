@@ -458,8 +458,8 @@
                                                            "enabled":  true
                                                        },
                                    "aYOUR_SK_KEY_HERE-human":  {
-                                                       "enabled":  false
-                                                   },
+                                                                   "enabled":  false
+                                                               },
                                    "gh-issues":  {
                                                      "enabled":  true
                                                  },
@@ -510,8 +510,9 @@
     "plugins":  {
                     "load":  {
                                  "paths":  [
-                                               "C:\\Users\\Yuan\\.openclaw\\plugins"
-                                           ]
+                                               ".openclaw-plugins"
+                                           ],
+                                 "enabled":  true
                              },
                     "entries":  {
                                     "dual-model-trainer":  {
@@ -672,7 +673,3 @@
                                }
               }
 }
-
-
-
-
