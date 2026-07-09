@@ -253,7 +253,6 @@
                                     "blockStreaming":  true
                                 },
                      "openclaw-weixin":  {
-                                             "channelConfigUpdatedAt":  "2026-06-26T11:11:35.746Z",
                                              "dmPolicy":  "open",
                                              "groupPolicy":  "open",
                                              "actions":  {
@@ -289,7 +288,7 @@
                     "port":  18789,
                     "mode":  "local",
                     "auth":  {
-                                 "token":  "YOUR_FEISHU_BRIDGE_TOKEN_HERE"
+
                              },
                     "http":  {
                                  "endpoints":  {
