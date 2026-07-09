@@ -1,2 +1,5 @@
 ' OpenClaw Gateway (v2026.6.11)
-CreateObject("WScript.Shell").Run """C:\Users\Yuan\.openclaw\gateway.cmd""", 0, False
+Dim ws, cmd
+Set ws = CreateObject("WScript.Shell")
+cmd = ws.ExpandEnvironmentStrings("%USERPROFILE%\.openclaw\gateway.cmd")
+ws.Run cmd, 0, False

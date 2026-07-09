@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 记忆旋转插件 v1.0
  * 
  * 防止 MEMORY.md 无限增长，自动将旧内容归档到 memory/ 目录
@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const PLUGIN_NAME = 'memory-rotate';
-const MEMORY_FILE = 'C:\\Users\\Yuan\\.openclaw\\workspace\\MEMORY.md';
-const MEMORY_DIR = 'C:\\Users\\Yuan\\.openclaw\\workspace\\memory';
+const MEMORY_FILE = '$env:USERPROFILE\\.openclaw\\workspace\\MEMORY.md';
+const MEMORY_DIR = '$env:USERPROFILE\\.openclaw\\workspace\\memory';
 const MAX_CHARS = 2000;
 
 export default function createPlugin(runtime) {

@@ -9,31 +9,32 @@ if ($exe -eq 'wmic' -or $exe -eq 'WMIC') {
     $cmdLine = ($Args -join ' ').ToLower()
     
     if ($cmdLine -match 'cpu') {
-        cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd cpu"
+        cmd /c "%USERPROFILE%/.openclaw/system-info.cmd cpu"
         exit $LASTEXITCODE
     }
     if ($cmdLine -match 'videocontroller|graphics|display') {
-        cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd gpu"
+        cmd /c "%USERPROFILE%/.openclaw/system-info.cmd gpu"
         exit $LASTEXITCODE
     }
     if ($cmdLine -match 'memory|ram') {
-        cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd memory"
+        cmd /c "%USERPROFILE%/.openclaw/system-info.cmd memory"
         exit $LASTEXITCODE
     }
     if ($cmdLine -match 'disk|drive') {
-        cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd disk"
+        cmd /c "%USERPROFILE%/.openclaw/system-info.cmd disk"
         exit $LASTEXITCODE
     }
     if ($cmdLine -match 'nic|network') {
-        cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd network"
+        cmd /c "%USERPROFILE%/.openclaw/system-info.cmd network"
         exit $LASTEXITCODE
     }
     
     # Default: try to get what wmic would have returned
-    cmd /c "C:\Users\Yuan\.openclaw\system-info.cmd"
+    cmd /c "%USERPROFILE%/.openclaw/system-info.cmd"
     exit $LASTEXITCODE
 }
 
 # If not wmic, just run the original command
 cmd /c "$exe $rest"
 exit $LASTEXITCODE
+

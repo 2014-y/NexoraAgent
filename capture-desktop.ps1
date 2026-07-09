@@ -1,4 +1,4 @@
-Add-Type -AssemblyName System.Windows.Forms
+﻿Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # Force DPI awareness at the START of this script.
@@ -58,9 +58,10 @@ foreach ($scr in $screens) {
     $g.CopyFromScreen($scr.Bounds.X, $scr.Bounds.Y, $sx, $sy, $sz)
 }
 
-$outPath = "C:/temp/screenshot.png"
+$outPath = "$env:TEMP/openclaw-screenshot.png"
 $b.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose()
 $b.Dispose()
 
 Write-Output $outPath
+

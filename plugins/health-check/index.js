@@ -1,4 +1,4 @@
-/**
+﻿/**
  * health-check 插件 — OpenClaw 启动自检
  *
  * 功能：
@@ -19,7 +19,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 // ─── 常量 ───
-const PROFILE = process.env.USERPROFILE || 'C:/Users/Yuan';
+const PROFILE = process.env.USERPROFILE || require('os').homedir();
 const SCRIPT_PATH = path.join(PROFILE, '.openclaw', 'desktop-control.ps1');
 const CACHE_DIR = path.join(PROFILE, '.openclaw', 'workspace', '.desktop-cache');
 const CAPABILITIES_PATH = path.join(CACHE_DIR, 'capabilities.json');

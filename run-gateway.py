@@ -9,10 +9,10 @@ import threading
 import json
 from datetime import datetime
 
-NODE_HOME = r"C:\Users\Yuan\AppData\Roaming\nvm\v24.13.0"
+NODE_HOME = os.environ.get("NODE_HOME", os.path.join(os.environ.get("USERPROFILE", ""), "AppData", "Roaming", "nvm", "v24.13.0"))
 NODE = os.path.join(NODE_HOME, "node.exe")
 CLI = os.path.join(NODE_HOME, "node_modules", "openclaw", "dist", "index.js")
-LOG_FILE = r"C:\Users\Yuan\AppData\Local\Temp\openclaw\openclaw-2026-06-29.log"
+LOG_FILE = os.path.join(os.environ.get("TEMP", ""), "openclaw", "openclaw-latest.log")
 
 def colorize(text, level):
     colors = {

@@ -1,9 +1,9 @@
-var fs = require('fs');
+﻿var fs = require('fs');
 var path = require('path');
 
-var LEARNING_DATA_PATH = 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\learning_log.jsonl';
-var LEARNING_SUMMARY_PATH = 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\learning_summary.jsonl';
-var SUMMARY_CACHE_PATH = 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\last_summary_index.txt';
+var LEARNING_DATA_PATH = '$env:USERPROFILE\\glm4_finetune\\learning_data\\learning_log.jsonl';
+var LEARNING_SUMMARY_PATH = '$env:USERPROFILE\\glm4_finetune\\learning_data\\learning_summary.jsonl';
+var SUMMARY_CACHE_PATH = '$env:USERPROFILE\\glm4_finetune\\learning_data\\last_summary_index.txt';
 
 function generateLearningSummary() {
   try {

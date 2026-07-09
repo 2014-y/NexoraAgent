@@ -1,4 +1,4 @@
-/**
+﻿/**
  * context-router 插件 — 上下文按需分发
  *
  * 问题：
@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // ─── 常量 ───
-const PROFILE = process.env.USERPROFILE || 'C:/Users/Yuan';
+const PROFILE = process.env.USERPROFILE || require('os').homedir();
 const CACHE_DIR = path.join(PROFILE, '.openclaw', 'workspace', '.desktop-cache');
 const CONTEXT_LOG_PATH = path.join(PROFILE, '.openclaw', 'logs', 'context-router.jsonl');
 

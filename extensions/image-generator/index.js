@@ -4,7 +4,7 @@
  */
 
 const API_BASE = "https://apihub.agnes-ai.com/v1/images/generations";
-const SAVE_DIR = "C:/Users/Yuan/.openclaw/image-output";
+const SAVE_DIR = process.env.USERPROFILE + '/.openclaw/image-output';
 
 // 7 API keys 轮询
 const API_KEYS = [

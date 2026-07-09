@@ -1,11 +1,11 @@
 @echo off
 setlocal
 
-:: === ????????? ===
+:: === 项目目录 ===
 set "SCRIPT_DIR=%~dp0"
 set "NODE_HOME=%SCRIPT_DIR%.node-sandbox"
 
-:: === ?? node.exe ???? ===
+:: === 检测 node.exe ===
 if not exist "%NODE_HOME%\node.exe" (
     echo.
     echo ========================================
@@ -18,12 +18,12 @@ if not exist "%NODE_HOME%\node.exe" (
     exit /b 1
 )
 
-:: === ?? .openclaw ???? ===
+:: === 确保 .openclaw 目录存在 ===
 if not exist "%USERPROFILE%\.openclaw" (
     mkdir "%USERPROFILE%\.openclaw"
 )
 
-:: === ??????? openclaw.json ===
+:: === 自动修复旧配置（含硬编码路径） ===
 set "CONFIG_FILE=%USERPROFILE%\.openclaw\openclaw.json"
 if exist "%CONFIG_FILE%" (
     powershell -NoProfile -Command "if (Select-String -Path '%CONFIG_FILE%' -Pattern 'C:\\\\Users\\\\Yuan' -Quiet) { exit 1 } else { exit 0 }"
@@ -40,7 +40,7 @@ if exist "%CONFIG_FILE%" (
     )
 )
 
-:: === ???? gateway ===
+:: === 杀掉旧 gateway 进程 ===
 for /f "tokens=*" %%a in ('netstat -ano 2^>nul ^| findstr ":18789.*LISTENING"') do (
     for /f "tokens=5" %%p in ("%%a") do (
         taskkill /F /PID %%p >nul 2>&1
@@ -48,14 +48,16 @@ for /f "tokens=*" %%a in ('netstat -ano 2^>nul ^| findstr ":18789.*LISTENING"') 
 )
 timeout /t 2 /nobreak >nul
 
-:: === ?? nvm ? node_modules ===
-set "NVM_MODS=%USERPROFILE%\AppData\Roaming\nvm\v24.13.0\node_modules"
-if not exist "%NVM_MODS%\openclaw\dist\index.js" (
-    set "NVM_MODS=%APPDATA%\nvm\v24.13.0\node_modules"
-)
-if not exist "%NVM_MODS%\openclaw\dist\index.js" (
-    set "NVM_MODS=C:\Program Files\nodejs\node_modules"
-)
+:: === 动态查找 NVM 目录 ===
+set "NVM_DIR=%USERPROFILE%\AppData\Roaming\nvm\latest"
+if not exist "%NVM_DIR%" set "NVM_DIR=%APPDATA%\nvm\latest"
+if not exist "%NVM_DIR%" set "NVM_DIR=C:\Program Files\nodejs"
+
+:: === 查找 openclaw 模块 ===
+set "NVM_MODS=%NVM_DIR%\node_modules"
+if not exist "%NVM_MODS%\openclaw\dist\index.js" set "NVM_MODS=%APPDATA%\nvm\latest\node_modules"
+if not exist "%NVM_MODS%\openclaw\dist\index.js" set "NVM_MODS=C:\Program Files\nodejs\node_modules"
+if not exist "%NVM_MODS%\openclaw\dist\index.js" set "NVM_MODS=%USERPROFILE%\AppData\Roaming\nvm\latest\node_modules"
 if not exist "%NVM_MODS%\openclaw\dist\index.js" (
     echo ERROR: openclaw not found!
     echo Please install openclaw: npm install -g openclaw
@@ -63,7 +65,7 @@ if not exist "%NVM_MODS%\openclaw\dist\index.js" (
     exit /b 1
 )
 
-:: === ?? ===
+:: === 启动 ===
 cd /d "%USERPROFILE%\.openclaw"
 echo ========================================
 echo  OpenClaw Gateway Launcher

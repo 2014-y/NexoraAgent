@@ -1,7 +1,7 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 
 const PLUGIN_NAME = 'compaction-memory-guard';
-const MEMORY_FILE = 'C:\\Users\\Yuan\\.openclaw\\workspace\\MEMORY.md';
+const MEMORY_FILE = '$env:USERPROFILE\\.openclaw\\workspace\\MEMORY.md';
 
 export default function createPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 记忆保护插件已加载`);

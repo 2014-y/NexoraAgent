@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Disk Compact Plugin v1.0
  * 
  * 核心机制：在上下文爆炸之前，主动把对话摘要写入磁盘文件，
@@ -15,10 +15,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const PLUGIN_NAME = 'disk-compact';
-const COMPACT_DIR = 'C:\\Users\\Yuan\\.openclaw\\workspace\\compact-history';
+const COMPACT_DIR = '$env:USERPROFILE\\.openclaw\\workspace\\compact-history';
 const TOKEN_THRESHOLD = 20000;       // 达到此 token 数就开始压缩
 const SAFE_THRESHOLD = 15000;        // 目标 token 数
-const IDENTITY_SNAPSHOT = 'C:\\Users\\Yuan\\.openclaw\\workspace\\compact-history\\identity.json';
+const IDENTITY_SNAPSHOT = '$env:USERPROFILE\\.openclaw\\workspace\\compact-history\\identity.json';
 
 // 确保目录存在
 function ensureDir() {

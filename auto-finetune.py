@@ -12,8 +12,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-PYTHON = r"C:\Users\Yuan\AppData\Local\Programs\Python\Python314\python.exe"
-OPENCLAW_DIR = Path(r"C:\Users\Yuan\.openclaw")
+# PYTHON = auto-detected
+OPENCLAW_DIR = Path(os.environ.get('USERPROFILE', '')) / '.openclaw'
 TRAINING_DATA_DIR = OPENCLAW_DIR / "learning_data"
 STATE_FILE = OPENCLAW_DIR / "auto-finetune-state.json"
 OLLAMA_MODELS_DIR = Path(os.environ.get("OLLAMA_MODELS", r"D:\Ollama\Models"))

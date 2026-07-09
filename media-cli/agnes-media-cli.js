@@ -7,7 +7,7 @@
  */
 
 const API_BASE = "https://apihub.agnes-ai.com/v1";
-const SAVE_DIR = "C:/Users/Yuan/.openclaw/media-output";
+const SAVE_DIR = process.env.USERPROFILE + '/.openclaw/media-output';
 
 const API_KEYS = [
   "sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY",

@@ -44,7 +44,7 @@ if (-not $src) {
     Write-Host "Please install Node.js v24.x first:" -ForegroundColor Yellow
     Write-Host "  Option 1: nvm-windows (recommended)" -ForegroundColor White
     Write-Host "    https://github.com/coreybutler/nvm-windows" -ForegroundColor White
-    Write-Host "    Then run: nvm install 24" -ForegroundColor White
+    Write-Host "    Then run: nvm install 24 (or latest v24.x)" -ForegroundColor White
     Write-Host ""
     Write-Host "  Option 2: Official installer" -ForegroundColor White
     Write-Host "    https://nodejs.org" -ForegroundColor White
@@ -108,3 +108,4 @@ Write-Host ""
 Write-Host "Next: Edit openclaw.json, then double-click start-gateway.bat" -ForegroundColor Cyan
 Write-Host ""
 pause
+

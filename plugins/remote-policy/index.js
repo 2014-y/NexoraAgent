@@ -1,4 +1,4 @@
-/**
+﻿/**
  * remote-policy 插件 — 远程策略分发
  *
  * 功能：
@@ -34,7 +34,7 @@ import https from 'node:https';
 import http from 'node:http';
 
 // ─── 常量 ───
-const PROFILE = process.env.USERPROFILE || 'C:/Users/Yuan';
+const PROFILE = process.env.USERPROFILE || require('os').homedir();
 const CACHE_DIR = path.join(PROFILE, '.openclaw', 'workspace', '.desktop-cache');
 const POLICY_PATH = path.join(CACHE_DIR, 'remote-policy.json');
 const HEALTH_CHECK_SCRIPT = path.join(PROFILE, '.openclaw', 'plugins', 'health-check', 'index.js');

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 每日自动总结插件 v2
  * 
  * 利用 onAfterResponse 钩子，每次对话结束后自动触发总结。
@@ -9,9 +9,9 @@ import fs from 'node:fs';
 
 const PLUGIN_NAME = 'auto-summary';
 const SUMMARY_MODEL = 'yitong/qwen3-max';
-const MEMORY_FILE = 'C:\\Users\\Yuan\\.openclaw\\workspace\\MEMORY.md';
-const LEARNING_DATA = 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\learning_log.jsonl';
-const MEMORY_DIR = 'C:\\Users\\Yuan\\.openclaw\\workspace\\memory';
+const MEMORY_FILE = '$env:USERPROFILE\\.openclaw\\workspace\\MEMORY.md';
+const LEARNING_DATA = '$env:USERPROFILE\\glm4_finetune\\learning_data\\learning_log.jsonl';
+const MEMORY_DIR = '$env:USERPROFILE\\.openclaw\\workspace\\memory';
 const SUMMARIZE_EVERY = 10; // 每10轮对话触发一次总结
 let conversationCount = 0;
 

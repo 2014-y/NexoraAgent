@@ -4,7 +4,7 @@
  */
 
 const API_BASE = "https://apihub.agnes-ai.com/v1/videos";
-const SAVE_DIR = "C:/Users/Yuan/.openclaw/video-output";
+const SAVE_DIR = process.env.USERPROFILE + '/.openclaw/video-output';
 
 // 7 API keys 轮询
 const API_KEYS = [

@@ -61,7 +61,7 @@ export default function createPlugin(runtime) {
       ? pluginConfig.mode : 'teach-learn',
     enableTeachLearn: Boolean(pluginConfig.enableTeachLearn !== false),
     enableFallback: Boolean(pluginConfig.enableFallback !== false),
-    trainingDataPath: String(pluginConfig.trainingDataPath || 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\learning_log.jsonl'),
+    trainingDataPath: String(pluginConfig.trainingDataPath || process.env.USERPROFILE + '/glm4_finetune/learning_data/learning_log.jsonl'),
     minAnswerLength: Number(pluginConfig.minAnswerLength) || 10,
     maxRetries: Number(pluginConfig.maxRetries) || 2,
     retryDelay: Number(pluginConfig.retryDelay) || 3000,
@@ -90,7 +90,7 @@ export default function createPlugin(runtime) {
   } catch (e) {
     console.error(`[${pluginName}] ❌ 无法创建数据目录: ${e.message}`);
     // 降级到默认目录
-    config.trainingDataPath = 'C:\\Users\\Yuan\\glm4_finetune\\learning_data\\learning_log.jsonl';
+    config.trainingDataPath = process.env.USERPROFILE + '/glm4_finetune/learning_data/learning_log.jsonl';
     dataDir = path.dirname(config.trainingDataPath);
   }
 
