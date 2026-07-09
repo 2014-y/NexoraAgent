@@ -23,9 +23,9 @@ AI-v24.13.0 是一个**本地 AI 助手网关**，让你的电脑变成一个 AI
 |------|------|----------|
 | 1 | [安装 Node.js](#1-安装-nodejs) | 3 分钟 |
 | 2 | [下载并解压项目](#2-下载并解压项目) | 1 分钟 |
-| 3 | [运行 init.bat 初始化](#3-运行-initbat-初始化) | 1 分钟 |
-| 4 | [配置 API Key](#4-配置-api-key) | 2 分钟 |
-| 5 | [安装 openclaw](#5-安装-openclaw) | 2 分钟 |
+| 3 | [安装 openclaw](#3-安装-openclaw) | 2 分钟 |
+| 4 | [运行 init.bat 初始化](#4-运行-initbat-初始化) | 1 分钟 |
+| 5 | [配置 API Key](#5-配置-api-key) | 2 分钟 |
 | 6 | [双击 start-gateway.bat 启动](#6-启动-gateway) | 1 分钟 |
 
 > 全部完成后，参考 [接入微信](#接入微信可选) 或 [配置本地 Ollama 模型](#配置本地-ollama-模型可选)。
@@ -36,7 +36,7 @@ AI-v24.13.0 是一个**本地 AI 助手网关**，让你的电脑变成一个 AI
 
 **新手推荐阅读顺序：**
 
-1. **[INSTALL.md](INSTALL.md)** — 从零开始的完整安装指南（含 Node.js、openclaw 安装等）
+1. **[INSTALL.md](INSTALL.md)** — 从零开始的完整安装指南
 2. **[docs/getting-started.md](docs/getting-started.md)** — 从下载到使用的完整流程
 3. **[docs/wechat-guide.md](docs/wechat-guide.md)** — 微信接入详细教程
 
@@ -86,7 +86,29 @@ cd AI-v24.13.0
 
 ---
 
-## 3. 运行 init.bat 初始化
+## 3. 安装 openclaw
+
+openclaw 是网关的核心工具，依赖 Node.js 的 npm。
+
+在 CMD 中运行：
+
+`cmd
+npm install -g openclaw@2026.6.11
+`
+
+验证安装：
+
+`cmd
+openclaw --version
+`
+
+应显示 2026.6.11。
+
+> 💡 如果提示 "npm 不是内部命令"，说明 Node.js 没装好或没添加到环境变量，请回到第 1 步重新安装。
+
+---
+
+## 4. 运行 init.bat 初始化
 
 1. 打开项目文件夹
 2. **双击 init.bat**
@@ -101,7 +123,7 @@ init.bat 会自动完成：
 
 ---
 
-## 4. 配置 API Key
+## 5. 配置 API Key
 
 1. 打开文件管理器，进入 C:\Users\<你的用户名>\.openclaw\
 2. 用记事本打开 openclaw.json
@@ -121,34 +143,6 @@ init.bat 会自动完成：
 - **智谱 AI**：https://open.bigmodel.cn/
 
 > 💡 至少配置一个 API Key 才能正常使用。推荐优先配置 Agnes AI。
-
----
-
-## 5. 安装 openclaw
-
-start-gateway.bat 依赖 **openclaw** 这个工具来启动网关。如果你的电脑还没安装，按下面步骤操作。
-
-**打开 CMD（命令提示符），进入项目目录：**
-
-`cmd
-cd D:\ai\AI-v24.13.0
-`
-
-**运行安装命令：**
-
-`cmd
-npm install -g openclaw@2026.6.11
-`
-
-等待安装完成（可能需要几分钟），然后验证：
-
-`cmd
-openclaw --version
-`
-
-应显示 2026.6.11。
-
-> 💡 如果提示 "npm 不是内部命令"，说明 Node.js 没装好或没添加到环境变量，请重新安装 Node.js。
 
 ---
 
@@ -221,7 +215,7 @@ openclaw --version
 
 | 问题 | 解决方法 |
 |------|---------|
-| 双击 start-gateway.bat 闪退 | 先运行 init.bat，再安装 openclaw |
+| 双击 start-gateway.bat 闪退 | 先运行 init.bat，确保 openclaw 已安装 |
 | 提示 "Invalid config" 或路径错误 | 重新运行 init.bat，检查配置文件 |
 | 提示 "openclaw not found" | 运行 
 pm install -g openclaw@2026.6.11 安装 |
