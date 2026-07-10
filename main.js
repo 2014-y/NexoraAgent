@@ -9,6 +9,7 @@ let tray = null;
 let gatewayProcess = null;
 let isQuitting = false;
 let isMaximizedState = false;
+let normalBounds = null;
 global.latestAcpDashboardUrl = '';
 
 const CONFIG_DIR = path.join(process.env.USERPROFILE || process.env.HOME, '.openclaw');
@@ -129,9 +130,16 @@ ipcMain.on('window-action', (event, action) => {
     } else if (action === 'maximize') {
         if (isMaximizedState) {
             mainWindow.unmaximize();
+            if (normalBounds) {
+                mainWindow.setBounds(normalBounds, true);
+            } else {
+                mainWindow.setSize(1120, 760, true);
+                mainWindow.center();
+            }
             isMaximizedState = false;
             mainWindow.webContents.send('window-maximized-status', false);
         } else {
+            normalBounds = mainWindow.getBounds();
             mainWindow.maximize();
             isMaximizedState = true;
             mainWindow.webContents.send('window-maximized-status', true);
