@@ -59,15 +59,7 @@ init.bat 鍋氫簡浠€涔堬細
 | YOUR_YITONG_API_KEY_HERE | https://dashscope.console.aliyun.com/ |
 | YOUR_ZHIPU_API_KEY_HERE | https://open.bigmodel.cn/ |
 
-> 鑷冲皯闇€瑕侀厤缃竴涓?API Key 鎵嶈兘姝ｅ父浣跨敤銆侫gnes AI 鏄帹鑽愮殑榛樿妯″瀷銆?
-
----
-
-## 绗?3 姝ワ細鍚姩 Gateway
-
-1. 鍙屽嚮 **start-gateway.bat**
-2. 鐪嬪埌 "Starting..." 鍜屾棩蹇楄緭鍑猴紝璇存槑姝ｅ湪鍚姩
-3. 鐪嬪埌绔彛 **18789** 鐩戝惉锛屽氨璇存槑鎴愬姛浜?
+> 鑷冲皯闇€瑕侀厤缃竴涓?API%USERPROFILE%\\.openclaw*18789** 鐩戝惉锛屽氨璇存槑鎴愬姛浜?
 
 姝ゆ椂浣犲彲浠ワ細
 - 閫氳繃娴忚鍣ㄨ闂?http://localhost:18789 娴嬭瘯
@@ -173,3 +165,4 @@ ollama run jarvis "浣犲ソ锛屼綘鏄皝锛?
 | 绔彛琚崰鐢?| 鍏抽棴鍏朵粬 Gateway 瀹炰緥锛屽啀鍚姩 |
 | Ollama 妯″瀷鎷夊彇澶辫触 | 妫€鏌ョ綉缁滆繛鎺ワ紝鎴栨洿鎹㈤暅鍍忔簮 |
 | 鏈湴妯″瀷鍥炵瓟鎱?| 鍑忓皯骞跺彂璇锋眰锛屾垨鎹㈢敤灏忔ā鍨?|
+%USERPROFILE%\\.openclaw
