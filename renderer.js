@@ -588,59 +588,97 @@ function setupThemeSwitching() {
     document.body.className = savedTheme;
 }
 
-// 9. 用量可视化 SVG 图表渲染
+// 9. 用量可视化与商业级使用统计数据系统
 function renderUsageCharts() {
-    // A. 折线图 (7天 Token 走势)
-    const lineBox = document.getElementById('line-chart-svg-box');
-    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-    const values = [184000, 246000, 192000, 312000, 289000, 421000, 368000]; // 模拟用量数据
+    const waveBox = document.getElementById('stats-wave-chart-box');
+    if (!waveBox) return;
 
-    const width = 500;
-    const height = 180;
-    const padding = 30;
+    // A. 模拟趋势图表数据（5条曲线：成本、缓存创建、缓存命中、输入、输出）
+    // 采用 horizontal tangent bezier 贝塞尔平滑算法
+    const hours = ['00:00', '02:00', '04:00', '06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
+    
+    // 5条线的用量走势（0~100归一化后渲染，以防数据跨度过大导致折叠）
+    const lineData = {
+        cost: [10, 8, 2, 4, 30, 24, 28, 32, 29, 38, 20, 5],           // 红色
+        cacheCreate: [5, 4, 1, 2, 12, 10, 15, 18, 14, 22, 11, 2],    // 橙色
+        cacheHit: [2, 1, 0, 1, 8, 25, 12, 35, 20, 48, 15, 1],        // 蓝色
+        input: [80, 70, 10, 25, 95, 60, 72, 78, 65, 85, 48, 12],      // 绿色
+        output: [40, 35, 5, 12, 50, 38, 42, 45, 39, 52, 28, 6]        // 紫色
+    };
 
-    // 映射到坐标
-    const xStep = (width - padding * 2) / (days.length - 1);
-    const maxVal = Math.max(...values) * 1.1;
-    const yScale = (height - padding * 2) / maxVal;
+    const width = 600;
+    const height = 200;
+    const paddingLeft = 40;
+    const paddingRight = 20;
+    const paddingTop = 20;
+    const paddingBottom = 30;
 
-    let points = '';
-    let gridLines = '';
-    let labels = '';
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
 
-    for (let i = 0; i < days.length; i++) {
-        const x = padding + i * xStep;
-        const y = height - padding - values[i] * yScale;
-        points += `${x},${y} `;
-
-        // 横坐标刻度
-        labels += `<text x="${x}" y="${height - 10}" fill="var(--text-secondary)" font-size="11" text-anchor="middle">${days[i]}</text>`;
-        // 竖向网格线
-        gridLines += `<line x1="${x}" y1="${padding}" x2="${x}" y2="${height - padding}" stroke="rgba(255,255,255,0.04)" stroke-dasharray="3,3" />`;
+    // 绘制横纵网格线
+    let gridHtml = '';
+    const yLines = 4;
+    for (let i = 0; i <= yLines; i++) {
+        const y = paddingTop + (plotHeight / yLines) * i;
+        gridHtml += `<line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="rgba(255,255,255,0.04)" />`;
+        // Y轴刻度文字 (0k 到 20000k)
+        const labelVal = Math.round(20000 * (1 - i / yLines));
+        gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${labelVal}k</text>`;
     }
 
-    // 纵坐标刻度
-    const yTickCount = 4;
-    for (let i = 0; i <= yTickCount; i++) {
-        const yVal = Math.round((maxVal / yTickCount) * i);
-        const y = height - padding - yVal * yScale;
-        labels += `<text x="${padding - 5}" y="${y + 4}" fill="var(--text-secondary)" font-size="11" text-anchor="end">${(yVal / 1000).toFixed(0)}k</text>`;
-        gridLines += `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="rgba(255,255,255,0.06)" />`;
-    }
+    // X轴时间轴文字
+    hours.forEach((h, idx) => {
+        const x = paddingLeft + (plotWidth / (hours.length - 1)) * idx;
+        gridHtml += `<text x="${x}" y="${height - 10}" fill="var(--text-secondary)" font-size="9" text-anchor="middle">${h}</text>`;
+        gridHtml += `<line x1="${x}" y1="${paddingTop}" x2="${x}" y2="${height - paddingBottom}" stroke="rgba(255,255,255,0.02)" stroke-dasharray="2,2" />`;
+    });
 
-    lineBox.innerHTML = `
-        <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}">
+    // 计算平滑曲线路径函数 (Horizontal Tangent Bezier)
+    const getCurvePath = (values) => {
+        let path = '';
+        const len = values.length;
+        const coords = values.map((val, idx) => {
+            const x = paddingLeft + (plotWidth / (len - 1)) * idx;
+            // 归一化高度
+            const y = paddingTop + plotHeight * (1 - val / 100);
+            return { x, y };
+        });
+
+        path += `M ${coords[0].x} ${coords[0].y}`;
+        for (let i = 0; i < len - 1; i++) {
+            const p1 = coords[i];
+            const p2 = coords[i+1];
+            const cpX1 = p1.x + (p2.x - p1.x) / 2;
+            const cpY1 = p1.y;
+            const cpX2 = p2.x - (p2.x - p1.x) / 2;
+            const cpY2 = p2.y;
+            path += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${p2.x} ${p2.y}`;
+        }
+        return { path, coords };
+    };
+
+    // 绘制五条高颜值贝塞尔曲线
+    const curves = [
+        { key: 'cost', color: '#ff5252', width: 2, fillOpacity: 0.05 },
+        { key: 'cacheCreate', color: '#ff9100', width: 2, fillOpacity: 0.03 },
+        { key: 'cacheHit', color: '#2979ff', width: 2.5, fillOpacity: 0.08 },
+        { key: 'input', color: '#00e676', width: 3, fillOpacity: 0.1 },
+        { key: 'output', color: 'var(--accent-color)', width: 2.5, fillOpacity: 0.08 }
+    ];
+
+    let pathsHtml = '';
+    curves.forEach((c) => {
+        const { path, coords } = getCurvePath(lineData[c.key]);
+        const gradId = `grad-${c.key}`;
+        
+        pathsHtml += `
             <defs>
-                <linearGradient id="line-grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="var(--accent-color)" stop-opacity="0.3"/>
-                    <stop offset="100%" stop-color="var(--accent-color)" stop-opacity="0"/>
+                <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="${c.color}" stop-opacity="${c.fillOpacity}"/>
+                    <stop offset="100%" stop-color="${c.color}" stop-opacity="0"/>
                 </linearGradient>
             </defs>
-            ${gridLines}
-            <!-- 渐变阴影区 -->
-            <path d="M ${padding} ${height - padding} L ${points.trim().replace(/ /g, ' L ')} L ${width - padding} ${height - padding} Z" fill="url(#line-grad)"/>
-            <!-- 折线 -->
-            <polyline fill="none" stroke="var(--accent-color)" stroke-width="3" points="${points}"/>
             <!-- 数据点 -->
             ${values.map((v, i) => {
                 const x = padding + i * xStep;

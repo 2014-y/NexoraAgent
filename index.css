@@ -461,17 +461,22 @@ body {
   color: var(--text-secondary);
 }
 
-.form-field input, .form-field select {
-  background: var(--bg-input);
+input[type="text"], input[type="password"], select, textarea {
+  background: var(--bg-input) !important;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   height: 38px;
   padding: 0 12px;
-  color: var(--text-primary);
+  color: var(--text-primary) !important;
   font-family: inherit;
   font-size: 13px;
   outline: none;
-  transition: border-color 0.2s ease;
+  transition: all 0.2s ease;
+}
+
+select option {
+  background-color: #1e1b33 !important; /* 强制暗系夜空背景，拒绝惨白底色 */
+  color: var(--text-primary) !important;
 }
 
 .form-field input:focus, .form-field select:focus {
