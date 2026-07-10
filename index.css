@@ -1037,5 +1037,15 @@ input:checked + .slider-knob:before {
   box-shadow: 0 0 12px rgba(255, 82, 82, 0.4);
 }
 
+/* 全局聚焦状态高光与彩色光标 */
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-color) !important;
+  box-shadow: 0 0 8px rgba(140, 82, 255, 0.45) !important;
+  outline: none !important;
+  caret-color: var(--accent-color) !important; /* 紫色闪烁光标，暗色背景下 100% 显眼 */
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+
 
 

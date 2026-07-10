@@ -160,24 +160,24 @@ ipcMain.on('gateway-action', (event, action) => {
             mainWindow.webContents.send('gateway-status', 'running');
             showNotification('网关已成功启动', 'AI 本地网关已在后台运行，开始监听 18789 端口。');
 
-            // 监听 stdout
-            gatewayProcess.stdout.on('data', (data) => {
+            // 提取日志及匹配登录二维码的公共处理函数
+            const handleLogData = (data) => {
                 const text = data.toString();
                 if (mainWindow) {
                     mainWindow.webContents.send('gateway-log', text);
                     
-                    // 自动匹配微信扫码登录 URL (含 login.weixin.qq.com/l/)
-                    const qrMatch = text.match(/https?:\/\/(?:login\.)?weixin\.qq\.com\/l\/[^\s"']+/);
+                    // 自动匹配微信扫码登录 URL (支持 weixin.qq.com 或者是 wechaty.js.org 专属二维码链接)
+                    const qrMatch = text.match(/https?:\/\/(?:login\.)?weixin\.qq\.com\/l\/[^\s"'\n]+/) || 
+                                    text.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
                     if (qrMatch) {
                         mainWindow.webContents.send('gateway-qrcode', qrMatch[0]);
                     }
                 }
-            });
+            };
 
-            // 监听 stderr
-            gatewayProcess.stderr.on('data', (data) => {
-                if (mainWindow) mainWindow.webContents.send('gateway-log', data.toString());
-            });
+            // 同时监听 stdout 与 stderr，防范 debug/wechaty 日志输出在 stderr 中导致二维码漏接
+            gatewayProcess.stdout.on('data', handleLogData);
+            gatewayProcess.stderr.on('data', handleLogData);
 
             // 监听退出
             gatewayProcess.on('exit', (code) => {
