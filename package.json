@@ -48,10 +48,12 @@
     "appId": "com.2014y.aigateway",
     "productName": "AI助手",
     "asar": false,
+    "icon": "config/icon.ico",
     "directories": {
       "output": "dist"
     },
     "win": {
+      "icon": "config/icon.ico",
       "target": [
         "nsis"
       ]
@@ -71,6 +73,7 @@
       "index.css",
       "config/openclaw.json.example",
       "config/icon.jpg",
+      "config/icon.ico",
       "node_modules/**/*",
       ".node-sandbox/**/*"
     ]
