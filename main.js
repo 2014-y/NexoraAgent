@@ -354,6 +354,18 @@ ipcMain.handle('stats-get', async () => {
     });
 });
 
+// 一键拉起外部浏览器链接 (用于免密 ACP 控制台跳转)
+ipcMain.handle('open-external', async (event, url) => {
+    try {
+        const { shell } = require('electron');
+        await shell.openExternal(url);
+        return true;
+    } catch (e) {
+        console.error('Failed to open external url:', e);
+        return false;
+    }
+});
+
 // 初始化应用
 app.whenReady().then(() => {
     createWindow();

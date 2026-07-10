@@ -545,13 +545,27 @@ function updateMemoryMock() {
 // 7. Tab 页切换控制
 function setupTabSwitching() {
     tabs.forEach((tab) => {
-        tab.addEventListener('click', () => {
+        tab.addEventListener('click', (e) => {
+            // 排除外部链接面板，直接调起系统默认浏览器打开免密 ACP 控制台
+            if (tab.id === 'btn-nav-openclaw-web') {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const port = document.getElementById('gateway-port').value || '18789';
+                const token = document.getElementById('gateway-token').value || '';
+                const url = `http://127.0.0.1:${port}/acp?token=${token}&key=${token}&apiKey=${token}`;
+                window.api.openExternal(url);
+                return;
+            }
+
             tabs.forEach(t => t.classList.remove('active'));
             tabPanes.forEach(p => p.classList.remove('active'));
 
             tab.classList.add('active');
             const targetPane = document.getElementById(tab.getAttribute('data-tab'));
-            targetPane.classList.add('active');
+            if (targetPane) {
+                targetPane.classList.add('active');
+            }
             currentTab = tab.getAttribute('data-tab');
 
             // 切换到用量页重画图表防自适应显示错误

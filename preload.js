@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
     // 开机自启
     getAutoStart: () => ipcRenderer.invoke('autostart-get'),
     setAutoStart: (enabled) => ipcRenderer.invoke('autostart-set', enabled),
+    openExternal: (url) => ipcRenderer.invoke('open-external', url),
     
     // 主进程向渲染进程的数据推送回调
     onLogReceived: (callback) => ipcRenderer.on('gateway-log', (event, data) => callback(data)),
