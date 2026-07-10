@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
     saveConfig: (newConfig) => ipcRenderer.invoke('config-save', newConfig),
     clearWeChatSession: () => ipcRenderer.invoke('wechat-clear'),
     triggerWeChatLogin: () => ipcRenderer.invoke('wechat-login'),
+    cancelWeChatLogin: () => ipcRenderer.invoke('wechat-login-cancel'),
     getStatsData: () => ipcRenderer.invoke('stats-get'),
     
     // 开机自启

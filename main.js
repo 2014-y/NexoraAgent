@@ -113,7 +113,16 @@ function showNotification(title, body) {
 // 停止后台网关子进程
 function stopGatewayProcess() {
     if (gatewayProcess) {
-        gatewayProcess.kill('SIGTERM');
+        if (process.platform === 'win32') {
+            try {
+                const { execSync } = require('child_process');
+                execSync(`taskkill /pid ${gatewayProcess.pid} /T /F`);
+            } catch (err) {
+                try { gatewayProcess.kill('SIGKILL'); } catch (e) {}
+            }
+        } else {
+            gatewayProcess.kill('SIGTERM');
+        }
         gatewayProcess = null;
         if (mainWindow) {
             mainWindow.webContents.send('gateway-status', 'stopped');
@@ -302,12 +311,33 @@ ipcMain.handle('wechat-clear', async () => {
 
 let wechatLoginProcess = null;
 
+// 取消并强制杀死挂起的微信扫码登录进程
+ipcMain.handle('wechat-login-cancel', async () => {
+    if (wechatLoginProcess) {
+        try {
+            if (process.platform === 'win32') {
+                const { execSync } = require('child_process');
+                execSync(`taskkill /pid ${wechatLoginProcess.pid} /T /F`);
+            } else {
+                wechatLoginProcess.kill();
+            }
+        } catch (e) {}
+        wechatLoginProcess = null;
+    }
+    return { success: true };
+});
+
 // 在后台启动独立的微信扫码登录进程
 ipcMain.handle('wechat-login', async () => {
     try {
         if (wechatLoginProcess) {
             try {
-                wechatLoginProcess.kill();
+                if (process.platform === 'win32') {
+                    const { execSync } = require('child_process');
+                    execSync(`taskkill /pid ${wechatLoginProcess.pid} /T /F`);
+                } else {
+                    wechatLoginProcess.kill();
+                }
             } catch (err) {}
             wechatLoginProcess = null;
         }

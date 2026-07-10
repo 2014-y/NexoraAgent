@@ -107,6 +107,7 @@ async function init() {
     // 微信二维码弹窗关闭
     qrcodeCloseBtn.addEventListener('click', () => {
         qrcodeOverlay.style.display = 'none';
+        window.api.cancelWeChatLogin();
     });
 
     // 初始化主题切换
@@ -125,7 +126,8 @@ async function init() {
 // 4. IPC 消息监听与分发
 function setupIpcListeners() {
     // 实时日志接收
-    window.api.onLogReceived((text) => {
+    // 实时日志接收处理函数
+    const handleReceivedLog = (text) => {
         // 仅在网关真正运行中，且越过网关刚启动时的 5 秒历史控制台日志喷吐垃圾冷区，才对全新实时流量记账
         if (gatewayStatus === 'running' && (Date.now() - gatewayRunningTime > 5000)) {
             if (text.includes('[model-fetch] response')) {
@@ -168,7 +170,12 @@ function setupIpcListeners() {
 
         // 自动滚到底部
         logTerminal.scrollTop = logTerminal.scrollHeight;
-    });
+    };
+
+    // 挂载至全局 window，专供 CDP 自动化脚本进行 100% 仿真日志注入质量自检
+    window.__testTriggerLog = handleReceivedLog;
+
+    window.api.onLogReceived(handleReceivedLog);
 
     // 网关状态同步
     window.api.onStatusChanged((status) => {
