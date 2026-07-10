@@ -290,9 +290,11 @@ ipcMain.handle('wechat-login', async () => {
         const handleLoginLog = (data) => {
             const text = data.toString();
             if (mainWindow) {
-                mainWindow.webContents.send('gateway-log', `[WeChat Login] ${text}`);
+                // 直接发送原始文本以保证控制台字符画二维码排版不受破坏
+                mainWindow.webContents.send('gateway-log', text);
                 
-                const qrMatch = text.match(/https?:\/\/(?:login\.)?weixin\.qq\.com\/l\/[^\s"'\n]+/) || 
+                // 自动匹配微信扫码登录 URL (支持 weixin.qq.com 各种子路径二级域(如 liteapp/login) 或者是 wechaty.js.org 专属二维码链接)
+                const qrMatch = text.match(/https?:\/\/[^\s"'\n]*weixin\.qq\.com\/[^\s"'\n]+/) || 
                                 text.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
                 if (qrMatch) {
                     mainWindow.webContents.send('gateway-qrcode', qrMatch[0]);
