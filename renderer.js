@@ -1038,6 +1038,9 @@ async function renderUsageCharts() {
         });
     };
     bindFilterEvents();
+    
+    // 关键修正：初始化时必须主动触发一次全局联动渲染，将 HTML 里写死的初始假数据占位符用最新的 sessionStats (全0) 覆盖掉
+    applyStatsFilters();
 }
 
 // 自动刷新统计看板控制
