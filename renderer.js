@@ -130,7 +130,17 @@ function setupIpcListeners() {
     // 微信扫码二维码捕获并画图
     window.api.onQrCodeReceived((url) => {
         qrcodeOverlay.style.display = 'flex';
+        document.getElementById('qrcode-raw-url').value = url;
         drawQrCode(url);
+    });
+
+    // 绑定一键复制授权链接
+    document.getElementById('qrcode-copy-btn').addEventListener('click', () => {
+        const urlInput = document.getElementById('qrcode-raw-url');
+        urlInput.select();
+        urlInput.setSelectionRange(0, 99999);
+        navigator.clipboard.writeText(urlInput.value);
+        alert('授权登录链接已成功复制到剪贴板！\n\n您可以粘贴发给微信里的任意聊天框（如“文件传输助手”），在手机端直接点击链接即可开始授权登录。');
     });
 
     // 托盘控制触发
@@ -688,27 +698,22 @@ function renderUsageCharts() {
 // 10. 二维码本地渲染 Canvas 算法（无任何联网依赖，支持离线微信扫码）
 function drawQrCode(url) {
     const ctx = qrcodeCanvas.getContext('2d');
-    ctx.clearRect(0, 0, 180, 180);
+    ctx.clearRect(0, 0, 160, 160);
     
-    // 使用最轻量的二维码接口作为高画质主方案
     const img = new Image();
-    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}`;
+    // 使用高速二维码转换接口，160x160尺寸
+    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`;
     
     img.onload = () => {
-        ctx.drawImage(img, 0, 0, 180, 180);
+        ctx.drawImage(img, 0, 0, 160, 160);
     };
 
-    // 备用降级离线绘制逻辑：在 API 联网失败时依然显示一个提示文本，或用微型矩阵表示
     img.onerror = () => {
-        ctx.fillStyle = '#1e1b33';
-        ctx.fillRect(0, 0, 180, 180);
         ctx.fillStyle = '#ffffff';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('离线环境下无法渲染图片', 15, 60);
-        ctx.fillText('请长按复制登录链接:', 15, 85);
-        ctx.fillStyle = '#ffb300';
-        ctx.font = '10px monospace';
-        ctx.fillText(url.substring(0, 24) + '...', 15, 110);
+        ctx.fillRect(0, 0, 160, 160);
+        ctx.fillStyle = '#ff5252';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('加载出错,请点击下方复制', 10, 80);
     };
 }
 
