@@ -1,4 +1,4 @@
-# AI-v24.13.0 Setup Script
+﻿# AI-v24.13.0 Setup Script
 Write-Host "========================================" -ForegroundColor DarkGray
 Write-Host "  AI-v24.13.0 Setup" -ForegroundColor DarkGray
 Write-Host "========================================" -ForegroundColor DarkGray
@@ -116,6 +116,17 @@ console.log('  Config cleaned.');
     Write-Host "  IMPORTANT: Edit $configFile" -ForegroundColor Yellow
     Write-Host "  Replace YOUR_*_API_KEY_HERE with your actual API Keys." -ForegroundColor Yellow
     Write-Host "  Get Agnes key from: https://agnes-ai.com/zh-Hans/docs/agnes-video-v20" -ForegroundColor Yellow
+
+    # Fix OpenClaw media failure warning
+    Write-Host "  Fixing OpenClaw media warning..." -ForegroundColor Gray
+    $fixScript = Join-Path $scriptDir "fix-media-warning.js"
+    if (Test-Path $fixScript) {
+        $nvmExe = Join-Path $sandboxDir "node.exe"
+        if (Test-Path $nvmExe) {
+            & $nvmExe $fixScript 2>&1 | Out-Null
+        }
+    }
+
     # Create workspace files from templates
     $workspaceDir = Join-Path $configDir "workspace"
     if (-not (Test-Path $workspaceDir)) {
@@ -152,4 +163,5 @@ Write-Host ""
 Write-Host "Next: Edit openclaw.json, then double-click start-gateway.bat" -ForegroundColor Cyan
 Write-Host ""
 pause
+
 
