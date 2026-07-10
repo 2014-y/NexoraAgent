@@ -56,6 +56,19 @@
             "maxTokens": 8192
           }
         ]
+      },
+      "zhipu": {
+        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+        "apiKey": "YOUR_ZHIPU_API_KEY_HERE",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "glm-4.5-vision",
+            "name": "GLM-4.5 Vision",
+            "contextWindow": 128000,
+            "maxTokens": 4096
+          }
+        ]
       }
     }
   },
@@ -270,11 +283,19 @@
       "google": {
         "enabled": false
       }
-    }
+    },
+    "allow": [
+      "*"
+    ]
   },
   "hooks": {
     "internal": {
-      "enabled": true
+      "enabled": true,
+      "entries": {
+        "emotion-state": {
+          "enabled": true
+        }
+      }
     }
   },
   "tools": {
@@ -283,7 +304,8 @@
         "models": [
           {
             "prompt": "请用中文详细描述这张图片的内容，包括场景、物体、文字、颜色等。如果有多个物体，逐个描述。不超过300字。",
-            "model": "glm-4.5-vision"
+            "model": "agnes-2.0-flash",
+            "provider": "agnes-ai"
           }
         ],
         "attachments": {

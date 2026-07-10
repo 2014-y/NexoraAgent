@@ -47,7 +47,22 @@ if exist "%CONFIG_FILE%" (
 )
 
 :: === 杀掉旧 gateway 进程 ===
-for /f "tokens=*" %%a in ('netstat -ano 2^>nul ^| findstr ":18789.*LISTENING"') do (
+for /f "tokens=*" %%a in ('
+:: === 自动修复用户配置（添加缺失的字段）===
+set "FIX_NEEDED=0"
+if exist "%CONFIG_FILE%" (
+    findstr /C:"plugins.allow" "%CONFIG_FILE%" >nul 2>&1
+    if errorlevel 1 set "FIX_NEEDED=1"
+)
+if "%FIX_NEEDED%"=="1" (
+    echo INFO: Auto-fixing user config...
+    if exist "%SCRIPT_DIR%config\openclaw.json.example" (
+        copy /Y "%SCRIPT_DIR%config\openclaw.json.example" "%CONFIG_FILE%" >nul
+        echo Config updated from template.
+    )
+    echo.
+)
+netstat -ano 2^>nul ^| findstr ":18789.*LISTENING"') do (
     for /f "tokens=5" %%p in ("%%a") do (
         taskkill /F /PID %%p >nul 2>&1
     )
