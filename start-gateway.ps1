@@ -1,4 +1,4 @@
-﻿# OpenClaw Gateway Launcher
+# OpenClaw Gateway Launcher
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodeHome = Join-Path $scriptDir ".node-sandbox"
 $node = Join-Path $nodeHome "node.exe"

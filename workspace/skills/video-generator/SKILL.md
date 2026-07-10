@@ -1,4 +1,4 @@
-﻿---
+---
 name: video-generator
 description: Generate videos using agnes-ai video API. Supports duration, resolution, fps, aspect ratio. Saves to $env:USERPROFILE/.openclaw/media-output/
 ---

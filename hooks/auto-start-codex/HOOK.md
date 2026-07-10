@@ -1,4 +1,4 @@
-﻿---
+---
 name: auto-start-codex
 description: "Automatically launch Codex when Computer Use tools are called"
 metadata:

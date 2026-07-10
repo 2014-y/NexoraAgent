@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 rem OpenClaw Gateway (v2026.6.11)
 set "BASE_PATH=%USERPROFILE%\.openclaw"
 set "TMPDIR=%TEMP%"

@@ -1,4 +1,4 @@
-﻿param()
+param()
 
 # === WIN32 API IMPORTS ===
 Add-Type -TypeDefinition @"

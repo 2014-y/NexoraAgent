@@ -1,4 +1,4 @@
-﻿# openclaw.json 配置模板
+# openclaw.json 配置模板
 
 复制此文件为 openclaw.json 并填入你的 API Key。
 

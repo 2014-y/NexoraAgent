@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * AI-v24.13.0 Setup Script
  * Run: npm run setup

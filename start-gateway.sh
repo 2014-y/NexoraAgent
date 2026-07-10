@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # AI-v24.13.0 开源版 - Linux/Mac 启动脚本
 # 使用方法: ./start-gateway.sh
 

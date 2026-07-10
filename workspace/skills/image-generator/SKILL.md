@@ -1,4 +1,4 @@
-﻿---
+---
 name: image-generator
 description: Generate images using agnes-ai image API. Supports size, quality, count. Saves to $env:USERPROFILE/.openclaw/media-output/
 ---

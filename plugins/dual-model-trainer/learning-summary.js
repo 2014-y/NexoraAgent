@@ -1,4 +1,4 @@
-﻿var fs = require('fs');
+var fs = require('fs');
 var path = require('path');
 
 var LEARNING_DATA_PATH = '$env:USERPROFILE\\glm4_finetune\\learning_data\\learning_log.jsonl';

@@ -441,7 +441,7 @@
   "plugins": {
     "entries": {
       "dual-model-trainer": {
-        "enabled": true,
+        "enabled": false,
         "config": {
           "teacherModel": "yitong/qwen3-max",
           "studentModel": "ollama/jarvis",
@@ -511,7 +511,7 @@
         "enabled": true
       },
       "open-prose": {
-        "enabled": true
+        "enabled": false
       },
       "copilot-proxy": {
         "enabled": true

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * key-rotator-proxy - API key rotation proxy for OpenClaw
  * 监听本地端口，自动轮换 API key
  * 当收到 429 时自动切换到下一个 key

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * agnes-media-cli.js
  * 命令行工具：通过 agnes-ai API 生成图片和视频
  * 用法:

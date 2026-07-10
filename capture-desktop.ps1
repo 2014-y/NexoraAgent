@@ -1,4 +1,4 @@
-﻿Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # Force DPI awareness at the START of this script.

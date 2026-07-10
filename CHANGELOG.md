@@ -1,4 +1,4 @@
-﻿# CHANGELOG
+# CHANGELOG
 
 # AI-v24.13.0 变更日志
 

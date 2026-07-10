@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """OpenClaw Gateway + 对话日志监控 (单终端，不卡住)"""
 import subprocess
 import sys

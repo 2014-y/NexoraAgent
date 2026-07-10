@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 
 :: === 项目目录 ===

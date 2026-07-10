@@ -1,4 +1,4 @@
-﻿param([string[]]$Args)
+param([string[]]$Args)
 
 # If someone calls wmic, redirect to our system-info.cmd
 $exe = $Args[0]

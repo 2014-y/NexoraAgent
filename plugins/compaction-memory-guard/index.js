@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 
 const PLUGIN_NAME = 'compaction-memory-guard';
 const MEMORY_FILE = '$env:USERPROFILE\\.openclaw\\workspace\\MEMORY.md';

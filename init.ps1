@@ -1,4 +1,4 @@
-﻿# AI-v24.13.0 Setup Script
+# AI-v24.13.0 Setup Script
 Write-Host "========================================" -ForegroundColor DarkGray
 Write-Host "  AI-v24.13.0 Setup" -ForegroundColor DarkGray
 Write-Host "========================================" -ForegroundColor DarkGray

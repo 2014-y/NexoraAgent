@@ -1,4 +1,4 @@
-﻿// start-gateway.js
+// start-gateway.js
 // AI-v24.13.0 开源版 - Node.js 启动入口
 // 用法: node start-gateway.js
 

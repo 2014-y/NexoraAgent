@@ -1,4 +1,4 @@
-﻿/**
+/**
  * health-check 插件 — OpenClaw 启动自检
  *
  * 功能：

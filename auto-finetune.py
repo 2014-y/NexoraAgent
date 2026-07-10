@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 OpenClaw Auto-FineTune Pipeline
 Collects training data from learning_log.jsonl and gemma4:latest,
