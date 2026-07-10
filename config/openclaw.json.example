@@ -1,26 +1,10 @@
 {
-  "meta": {
-    "lastTouchedVersion": "2026.6.11",
-    "lastTouchedAt": "2026-07-09T12:16:34.008Z"
-  },
   "env": {
-    "shellEnv": {
-      "enabled": true
-    },
-    "ZHIPU_API_KEY": "<YOUR_ZHIPU_API_KEY>",
-    "YITONG_API_KEY": "<YOUR_YITONG_API_KEY>"
-  },
-  "wizard": {
-    "lastRunAt": "2026-07-09T12:16:33.677Z",
-    "lastRunVersion": "2026.6.11",
-    "lastRunCommand": "doctor",
-    "lastRunMode": "local"
+    "ZHIPU_API_KEY": "YOUR_ZHIPU_API_KEY_HERE",
+    "YITONG_API_KEY": "YOUR_YITONG_API_KEY_HERE"
   },
   "logging": {
-    "level": "fatal",
-    "redactSensitive": "off",
-    "consoleLevel": "info",
-    "consoleStyle": "compact"
+    "level": "fatal"
   },
   "models": {
     "providers": {
@@ -29,25 +13,15 @@
         "models": [
           {
             "id": "jarvis-learned",
-            "name": "Jarvis Learned (???)",
-            "reasoning": false,
-            "input": [
-              "text"
-            ],
+            "name": "Jarvis Learned",
             "contextWindow": 4718592,
-            "maxTokens": 4096,
-            "api": "openai-completions"
+            "maxTokens": 4096
           },
           {
             "id": "jarvis",
             "name": "Jarvis",
-            "reasoning": false,
-            "input": [
-              "text"
-            ],
             "contextWindow": 32768,
-            "maxTokens": 4096,
-            "api": "openai-completions"
+            "maxTokens": 4096
           }
         ]
       },
@@ -66,24 +40,16 @@
       },
       "agnes-ai": {
         "baseUrl": "https://apihub.agnes-ai.com/v1",
-        "apiKey": "<YOUR_AGNES_API_KEY>",
+        "apiKey": "YOUR_AGNES_API_KEY_HERE",
         "api": "openai-completions",
         "models": [
           {
-            "input": [
-              "text",
-              "image"
-            ],
             "id": "agnes-2.0-flash",
             "name": "Agnes 2.0 Flash",
             "contextWindow": 128000,
             "maxTokens": 8192
           },
           {
-            "input": [
-              "text",
-              "image"
-            ],
             "id": "agnes-1.5-flash",
             "name": "Agnes 1.5 Flash",
             "contextWindow": 128000,
@@ -101,124 +67,32 @@
           "agnes-ai/agnes-1.5-flash"
         ]
       },
-      "models": {},
-      "contextPruning": {
-        "mode": "off"
-      },
-      "compaction": {
-        "reserveTokensFloor": 96000,
-        "mode": "safeguard",
-        "memoryFlush": {
-          "enabled": false
-        }
-      },
-      "heartbeat": {
-        "every": "30m"
-      },
-      "maxConcurrent": 4,
-      "subagents": {
-        "maxConcurrent": 8
-      },
-      "imageGenerationModel": {
-        "primary": "google/gemini-3-pro-image-preview"
-      }
+      "maxConcurrent": 4
     }
   },
   "messages": {
-    "ackReactionScope": "group-mentions",
-    "inbound": {
-      "debounceMs": 2000
-    },
-    "queue": {
-      "mode": "steer",
-      "debounceMs": 1000,
-      "cap": 10,
-      "drop": "summarize"
-    }
+    "ackReactionScope": "group-mentions"
   },
   "commands": {
     "native": "auto",
-    "nativeSkills": "auto",
-    "restart": true
+    "nativeSkills": "auto"
   },
   "channels": {
-    "whatsapp": {
-      "dmPolicy": "open",
-      "groupPolicy": "open",
-      "mediaMaxMb": 50,
-      "actions": {
-        "reactions": true,
-        "sendMessage": true,
-        "polls": true
-      },
-      "debounceMs": 0,
-      "allowFrom": [
-        "*"
-      ],
-      "groupAllowFrom": [
-        "*"
-      ]
-    },
     "discord": {
       "enabled": false,
       "token": "YOUR_DISCORD_BOT_TOKEN_HERE",
       "allowBots": true,
       "groupPolicy": "open",
-      "actions": {
-        "reactions": true,
-        "stickers": true,
-        "emojiUploads": true,
-        "stickerUploads": true,
-        "polls": true,
-        "permissions": true,
-        "messages": true,
-        "threads": true,
-        "pins": true,
-        "search": true,
-        "memberInfo": true,
-        "roleInfo": true,
-        "roles": true,
-        "channelInfo": true,
-        "voiceStatus": true,
-        "events": true,
-        "moderation": true,
-        "channels": true
-      },
       "dm": {
         "enabled": true,
         "policy": "allowlist"
-      },
-      "guilds": {
-        "1467858448455827551": {
-          "requireMention": true,
-          "users": [
-            "1467857588564529334"
-          ],
-          "channels": {
-            "1467858449193766924": {
-              "requireMention": true
-            }
-          }
-        }
-      },
-      "accounts": {},
-      "dmPolicy": "open",
-      "allowFrom": [
-        "1467857588564529334",
-        "*"
-      ]
+      }
     },
     "feishu": {
       "enabled": false,
       "appId": "YOUR_FEISHU_APP_ID_HERE",
       "appSecret": "YOUR_FEISHU_APP_SECRET_HERE",
-      "dmPolicy": "open",
-      "allowFrom": [
-        "*"
-      ],
-      "groupPolicy": "open",
-      "groups": {},
-      "blockStreaming": true
+      "groupPolicy": "open"
     },
     "openclaw-weixin": {
       "dmPolicy": "open",
@@ -255,192 +129,6 @@
       }
     }
   },
-  "gateway": {
-    "port": 18789,
-    "mode": "local",
-    "auth": {
-      "mode": "token",
-      "token": "6c734bd8dba3f28da005781f4acf4d960c3bb5b66be58003"
-    },
-    "http": {
-      "endpoints": {
-        "chatCompletions": {
-          "enabled": true
-        }
-      }
-    }
-  },
-  "skills": {
-    "entries": {
-      "1password": {
-        "enabled": false
-      },
-      "apple-notes": {},
-      "apple-reminders": {},
-      "bear-notes": {},
-      "bird": {},
-      "blogwatcher": {
-        "enabled": false
-      },
-      "blucli": {
-        "enabled": false
-      },
-      "bluebubbles": {},
-      "camsnap": {
-        "enabled": false
-      },
-      "canvas": {},
-      "clawhub": {},
-      "coding-agent": {
-        "enabled": true
-      },
-      "discord": {},
-      "eightctl": {
-        "enabled": false
-      },
-      "food-order": {},
-      "gemini": {
-        "enabled": false
-      },
-      "gifgrep": {
-        "enabled": false
-      },
-      "github": {
-        "enabled": false
-      },
-      "gog": {
-        "enabled": false
-      },
-      "goplaces": {
-        "enabled": false
-      },
-      "himalaya": {
-        "enabled": false
-      },
-      "imsg": {},
-      "local-places": {},
-      "mcporter": {
-        "enabled": false
-      },
-      "model-usage": {},
-      "nano-pdf": {
-        "enabled": false
-      },
-      "notion": {},
-      "obsidian": {
-        "enabled": false
-      },
-      "openai-image-gen": {},
-      "openai-whisper": {
-        "enabled": false
-      },
-      "openai-whisper-api": {
-        "enabled": false
-      },
-      "openhue": {
-        "enabled": false
-      },
-      "oracle": {
-        "enabled": false
-      },
-      "ordercli": {
-        "enabled": false
-      },
-      "peekaboo": {},
-      "sag": {
-        "enabled": false
-      },
-      "session-logs": {
-        "enabled": false
-      },
-      "sherpa-onnx-tts": {
-        "enabled": false
-      },
-      "skill-creator": {},
-      "slack": {
-        "enabled": true
-      },
-      "songsee": {
-        "enabled": false
-      },
-      "sonoscli": {
-        "enabled": false
-      },
-      "spotify-player": {
-        "enabled": false
-      },
-      "summarize": {
-        "enabled": false
-      },
-      "things-mac": {},
-      "tmux": {},
-      "trello": {
-        "enabled": false
-      },
-      "video-frames": {
-        "enabled": false
-      },
-      "voice-call": {},
-      "wacli": {
-        "enabled": true
-      },
-      "weather": {},
-      "amygdala-memory": {
-        "enabled": false
-      },
-      "aYOUR_SK_KEY_HERE-human": {
-        "enabled": false
-      },
-      "gh-issues": {
-        "enabled": false
-      },
-      "python-debugpy": {
-        "enabled": false
-      },
-      "xurl": {
-        "enabled": false
-      },
-      "clawnected": {
-        "enabled": true
-      },
-      "de-ai-ify": {
-        "enabled": true
-      },
-      "elicitation": {
-        "enabled": true
-      },
-      "emotion-state": {
-        "enabled": true
-      },
-      "Humanize CLI - AI Text Detection & Rewriting": {
-        "enabled": true
-      },
-      "humanizer": {
-        "enabled": true
-      },
-      "mens-mental-health": {
-        "enabled": true
-      },
-      "moodcast": {
-        "enabled": true
-      },
-      "promitheus": {
-        "enabled": true
-      },
-      "weather-pollen": {
-        "enabled": true
-      },
-      "emotion-memory-assistant": {
-        "enabled": false
-      },
-      "girlfriend-simulator": {
-        "enabled": true
-      },
-      "ask-a-human": {
-        "enabled": false
-      }
-    }
-  },
   "plugins": {
     "entries": {
       "dual-model-trainer": {
@@ -457,67 +145,67 @@
         "enabled": false
       },
       "voice-call": {
-        "enabled": true
+        "enabled": false
       },
       "telegram": {
-        "enabled": true
+        "enabled": false
       },
       "slack": {
-        "enabled": true
+        "enabled": false
       },
       "whatsapp": {
-        "enabled": true
+        "enabled": false
       },
       "lobster": {
-        "enabled": true
+        "enabled": false
       },
       "llm-task": {
-        "enabled": true
+        "enabled": false
       },
       "signal": {
-        "enabled": true
+        "enabled": false
       },
       "matrix": {
         "enabled": true
       },
       "msteams": {
-        "enabled": true
+        "enabled": false
       },
       "nostr": {
-        "enabled": true
+        "enabled": false
       },
       "twitch": {
-        "enabled": true
+        "enabled": false
       },
       "line": {
-        "enabled": true
+        "enabled": false
       },
       "mattermost": {
-        "enabled": true
+        "enabled": false
       },
       "nextcloud-talk": {
-        "enabled": true
+        "enabled": false
       },
       "tlon": {
-        "enabled": true
+        "enabled": false
       },
       "zalo": {
-        "enabled": true
+        "enabled": false
       },
       "zalouser": {
-        "enabled": true
+        "enabled": false
       },
       "imessage": {
-        "enabled": true
+        "enabled": false
       },
       "googlechat": {
-        "enabled": true
+        "enabled": false
       },
       "open-prose": {
         "enabled": false
       },
       "copilot-proxy": {
-        "enabled": true
+        "enabled": false
       },
       "openclaw-weixin": {
         "enabled": true
@@ -532,19 +220,19 @@
         "enabled": true
       },
       "clickclack": {
-        "enabled": true
+        "enabled": false
       },
       "admin-http-rpc": {
-        "enabled": true
+        "enabled": false
       },
       "active-memory": {
         "enabled": false
       },
       "discord": {
-        "enabled": true
+        "enabled": false
       },
       "feishu": {
-        "enabled": true
+        "enabled": false
       },
       "duckduckgo": {
         "enabled": true
@@ -553,25 +241,25 @@
         "enabled": true
       },
       "sms": {
-        "enabled": true
+        "enabled": false
       },
       "webhooks": {
-        "enabled": true
+        "enabled": false
       },
       "irc": {
-        "enabled": true
+        "enabled": false
       },
       "bonjour": {
-        "enabled": true
+        "enabled": false
       },
       "oc-path": {
-        "enabled": true
+        "enabled": false
       },
       "thread-ownership": {
-        "enabled": true
+        "enabled": false
       },
       "workboard": {
-        "enabled": true
+        "enabled": false
       },
       "waltz-flight-assistant": {
         "enabled": false
@@ -580,43 +268,27 @@
         "enabled": false
       },
       "google": {
-        "enabled": true
+        "enabled": false
       }
     }
   },
   "hooks": {
     "internal": {
-      "enabled": true,
-      "entries": {
-        "emotion-state": {
-          "enabled": true
-        }
-      }
+      "enabled": true
     }
   },
   "tools": {
-    "elevated": {
-      "enabled": true
-    },
-    "exec": {
-      "host": "gateway",
-      "security": "full",
-      "ask": "off"
-    },
     "media": {
       "image": {
         "models": [
           {
-            "provider": "zhipu",
             "prompt": "请用中文详细描述这张图片的内容，包括场景、物体、文字、颜色等。如果有多个物体，逐个描述。不超过300字。",
             "model": "glm-4.5-vision"
           }
         ],
-        "maxBytes": 10485760,
         "attachments": {
           "mode": "all"
         },
-        "maxChars": 500,
         "enabled": true
       }
     }

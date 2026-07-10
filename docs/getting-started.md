@@ -1,30 +1,30 @@
-# AI-v24.13.0 完整使用流程
+﻿# AI-v24.13.0 瀹屾暣浣跨敤娴佺▼
 
-> 从下载项目到微信聊天，跟着做就行。
-
----
-
-## 整体流程一览
-
-`
-下载项目 --> 运行 init.bat --> 编辑 openclaw.json --> 运行 start-gateway.bat --> 用微信聊天
-`
-
-共 **4 步**，每步不超过 2 分钟。
+> 浠庝笅杞介」鐩埌寰俊鑱婂ぉ锛岃窡鐫€鍋氬氨琛屻€?
 
 ---
 
-## 第 0 步：安装 Node.js（如果还没有）
+## 鏁翠綋娴佺▼涓€瑙?
 
-打开 CMD，运行：
+`
+涓嬭浇椤圭洰 --> 杩愯 init.bat --> 缂栬緫 openclaw.json --> 杩愯 start-gateway.bat --> 鐢ㄥ井淇¤亰澶?
+`
+
+鍏?**4 姝?*锛屾瘡姝ヤ笉瓒呰繃 2 鍒嗛挓銆?
+
+---
+
+## 绗?0 姝ワ細瀹夎 Node.js锛堝鏋滆繕娌℃湁锛?
+
+鎵撳紑 CMD锛岃繍琛岋細
 
 `ash
 node -v
 `
 
-如果显示版本号（如 v24.13.0），跳过这一步。
+濡傛灉鏄剧ず鐗堟湰鍙凤紙濡?v24.13.0锛夛紝璺宠繃杩欎竴姝ャ€?
 
-如果没有，去 https://github.com/coreybutler/nvm-windows/releases 下载 nvm-windows，安装后运行：
+濡傛灉娌℃湁锛屽幓 https://github.com/coreybutler/nvm-windows/releases 涓嬭浇 nvm-windows锛屽畨瑁呭悗杩愯锛?
 
 `ash
 nvm install 24
@@ -33,143 +33,143 @@ nvm use 24
 
 ---
 
-## 第 1 步：初始化项目
+## 绗?1 姝ワ細鍒濆鍖栭」鐩?
 
-1. 从 GitHub 下载项目（或 clone）
-2. 解压后，双击 **init.bat**
-3. 看到 "Setup complete!" 就说明成功了
+1. 浠?GitHub 涓嬭浇椤圭洰锛堟垨 clone锛?
+2. 瑙ｅ帇鍚庯紝鍙屽嚮 **init.bat**
+3. 鐪嬪埌 "Setup complete!" 灏辫鏄庢垚鍔熶簡
 
-init.bat 做了什么：
-- 在你的电脑上找到 Node.js
-- 把 node.exe 复制到项目的 .node-sandbox/ 目录（不影响全局 node）
-- 生成配置文件 C:\Users\<你的用户名>\.openclaw\openclaw.json
+init.bat 鍋氫簡浠€涔堬細
+- 鍦ㄤ綘鐨勭數鑴戜笂鎵惧埌 Node.js
+- 鎶?node.exe 澶嶅埗鍒伴」鐩殑 .node-sandbox/ 鐩綍锛堜笉褰卞搷鍏ㄥ眬 node锛?
+- 鐢熸垚閰嶇疆鏂囦欢 C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\openclaw.json
 
 ---
 
-## 第 2 步：配置 API Key
+## 绗?2 姝ワ細閰嶇疆 API Key
 
-1. 打开文件管理器，进入 C:\Users\<你的用户名>\.openclaw\
-2. 用记事本打开 openclaw.json
-3. 搜索 YOUR_*_API_KEY_HERE
-4. 把占位符替换成你自己的真实 API Key
+1. 鎵撳紑鏂囦欢绠＄悊鍣紝杩涘叆 C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\
+2. 鐢ㄨ浜嬫湰鎵撳紑 openclaw.json
+3. 鎼滅储 YOUR_*_API_KEY_HERE
+4. 鎶婂崰浣嶇鏇挎崲鎴愪綘鑷繁鐨勭湡瀹?API Key
 
-| 需要替换的 | 去哪里获取 |
+| 闇€瑕佹浛鎹㈢殑 | 鍘诲摢閲岃幏鍙?|
 |-----------|-----------|
 | YOUR_AGNES_API_KEY_HERE | https://agnes-ai.com/zh-Hans/docs/agnes-video-v20 |
 | YOUR_YITONG_API_KEY_HERE | https://dashscope.console.aliyun.com/ |
 | YOUR_ZHIPU_API_KEY_HERE | https://open.bigmodel.cn/ |
 
-> 至少需要配置一个 API Key 才能正常使用。Agnes AI 是推荐的默认模型。
+> 鑷冲皯闇€瑕侀厤缃竴涓?API Key 鎵嶈兘姝ｅ父浣跨敤銆侫gnes AI 鏄帹鑽愮殑榛樿妯″瀷銆?
 
 ---
 
-## 第 3 步：启动 Gateway
+## 绗?3 姝ワ細鍚姩 Gateway
 
-1. 双击 **start-gateway.bat**
-2. 看到 "Starting..." 和日志输出，说明正在启动
-3. 看到端口 **18789** 监听，就说明成功了
+1. 鍙屽嚮 **start-gateway.bat**
+2. 鐪嬪埌 "Starting..." 鍜屾棩蹇楄緭鍑猴紝璇存槑姝ｅ湪鍚姩
+3. 鐪嬪埌绔彛 **18789** 鐩戝惉锛屽氨璇存槑鎴愬姛浜?
 
-此时你可以：
-- 通过浏览器访问 http://localhost:18789 测试
-- 继续配置微信接入
+姝ゆ椂浣犲彲浠ワ細
+- 閫氳繃娴忚鍣ㄨ闂?http://localhost:18789 娴嬭瘯
+- 缁х画閰嶇疆寰俊鎺ュ叆
 
 ---
 
-## 第 4 步：接入微信（可选）
+## 绗?4 姝ワ細鎺ュ叆寰俊锛堝彲閫夛級
 
-详细教程见 [微信接入教程](./wechat-guide.md)。
+璇︾粏鏁欑▼瑙?[寰俊鎺ュ叆鏁欑▼](./wechat-guide.md)銆?
 
-快速步骤：
-1. 运行 
+蹇€熸楠わ細
+1. 杩愯 
 px -y @tencent-weixin/openclaw-weixin-cli install
-2. 运行 openclaw channels login --channel openclaw-weixin
-3. 用微信扫描二维码
-4. 登录成功！
+2. 杩愯 openclaw channels login --channel openclaw-weixin
+3. 鐢ㄥ井淇℃壂鎻忎簩缁寸爜
+4. 鐧诲綍鎴愬姛锛?
 
 ---
 
-## 第 5 步：配置本地模型（可选）
+## 绗?5 姝ワ細閰嶇疆鏈湴妯″瀷锛堝彲閫夛級
 
-如果你想用 Ollama 运行本地离线模型：
+濡傛灉浣犳兂鐢?Ollama 杩愯鏈湴绂荤嚎妯″瀷锛?
 
-### 5.1 安装 Ollama
+### 5.1 瀹夎 Ollama
 
-1. 访问 https://ollama.com 下载 Windows 安装包
-2. 安装完成后，Ollama 会自动启动并在后台运行
-3. 验证：打开 CMD，运行 ollama --version，应显示版本号
+1. 璁块棶 https://ollama.com 涓嬭浇 Windows 瀹夎鍖?
+2. 瀹夎瀹屾垚鍚庯紝Ollama 浼氳嚜鍔ㄥ惎鍔ㄥ苟鍦ㄥ悗鍙拌繍琛?
+3. 楠岃瘉锛氭墦寮€ CMD锛岃繍琛?ollama --version锛屽簲鏄剧ず鐗堟湰鍙?
 
-### 5.2 拉取基础模型
+### 5.2 鎷夊彇鍩虹妯″瀷
 
-在 CMD 中运行：
+鍦?CMD 涓繍琛岋細
 
 `ash
 ollama pull gemma3:27b
 `
 
-这会在本地下载一个约 16GB 的模型文件（首次使用需要耐心等待下载）。
+杩欎細鍦ㄦ湰鍦颁笅杞戒竴涓害 16GB 鐨勬ā鍨嬫枃浠讹紙棣栨浣跨敤闇€瑕佽€愬績绛夊緟涓嬭浇锛夈€?
 
-### 5.3 构建 Jarvis 自定义模型
+### 5.3 鏋勫缓 Jarvis 鑷畾涔夋ā鍨?
 
-项目自带一个 jarvis-modelfile.txt，它定义了 Jarvis 助手的系统提示词。在 CMD 中运行：
+椤圭洰鑷甫涓€涓?jarvis-modelfile.txt锛屽畠瀹氫箟浜?Jarvis 鍔╂墜鐨勭郴缁熸彁绀鸿瘝銆傚湪 CMD 涓繍琛岋細
 
 `ash
-cd <项目目录>
+cd <椤圭洰鐩綍>
 ollama create jarvis -f jarvis-modelfile.txt
 `
 
-这会根据 gemma3:27b 创建一个名为 jarvis 的自定义模型。
+杩欎細鏍规嵁 gemma3:27b 鍒涘缓涓€涓悕涓?jarvis 鐨勮嚜瀹氫箟妯″瀷銆?
 
-### 5.4 验证模型
+### 5.4 楠岃瘉妯″瀷
 
-运行以下命令确认模型已安装：
+杩愯浠ヤ笅鍛戒护纭妯″瀷宸插畨瑁咃細
 
 `ash
 ollama list
 `
 
-你应该看到 jarvis 和 gemma3:27b 都在列表中。
+浣犲簲璇ョ湅鍒?jarvis 鍜?gemma3:27b 閮藉湪鍒楄〃涓€?
 
-### 5.5 测试本地模型
+### 5.5 娴嬭瘯鏈湴妯″瀷
 
 `ash
-ollama run jarvis "你好，你是谁？"
+ollama run jarvis "浣犲ソ锛屼綘鏄皝锛?
 `
 
-如果回答正常，说明本地模型配置成功。
+濡傛灉鍥炵瓟姝ｅ父锛岃鏄庢湰鍦版ā鍨嬮厤缃垚鍔熴€?
 
-> **注意**：本地模型不需要联网，所有推理都在你的电脑上完成，隐私性最好。但需要较好的硬件配置（建议 32GB 以上内存，独立显卡更佳）。
-
----
-
-## 日常使用
-
-### 启动
-
-每次开机后，双击 start-gateway.bat 即可。
-
-### 停止
-
-关闭 Gateway 窗口即可。
-
-### 重启
-
-先杀掉旧进程（start-gateway.bat 会自动做），再双击 start-gateway.bat。
-
-### 查看日志
-
-日志保存在 C:\Users\<你的用户名>\.openclaw\logs\ 目录下。
+> **娉ㄦ剰**锛氭湰鍦版ā鍨嬩笉闇€瑕佽仈缃戯紝鎵€鏈夋帹鐞嗛兘鍦ㄤ綘鐨勭數鑴戜笂瀹屾垚锛岄殣绉佹€ф渶濂姐€備絾闇€瑕佽緝濂界殑纭欢閰嶇疆锛堝缓璁?32GB 浠ヤ笂鍐呭瓨锛岀嫭绔嬫樉鍗℃洿浣筹級銆?
 
 ---
 
-## 故障排查
+## 鏃ュ父浣跨敤
 
-| 问题 | 解决方法 |
+### 鍚姩
+
+姣忔寮€鏈哄悗锛屽弻鍑?start-gateway.bat 鍗冲彲銆?
+
+### 鍋滄
+
+鍏抽棴 Gateway 绐楀彛鍗冲彲銆?
+
+### 閲嶅惎
+
+鍏堟潃鎺夋棫杩涚▼锛坰tart-gateway.bat 浼氳嚜鍔ㄥ仛锛夛紝鍐嶅弻鍑?start-gateway.bat銆?
+
+### 鏌ョ湅鏃ュ織
+
+鏃ュ織淇濆瓨鍦?C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\logs\ 鐩綍涓嬨€?
+
+---
+
+## 鏁呴殰鎺掓煡
+
+| 闂 | 瑙ｅ喅鏂规硶 |
 |------|---------|
-| 双击后窗口闪退 | 先运行 init.bat |
-| 提示 "Node not found" | 安装 Node.js v24+ |
-| 提示 "Missing config" | 运行 init.bat 重新生成配置 |
-| 微信连不上 | 检查 Gateway 是否在运行 |
-| API Key 错误 | 编辑 openclaw.json 检查 Key 是否正确 |
-| 端口被占用 | 关闭其他 Gateway 实例，再启动 |
-| Ollama 模型拉取失败 | 检查网络连接，或更换镜像源 |
-| 本地模型回答慢 | 减少并发请求，或换用小模型 |
+| 鍙屽嚮鍚庣獥鍙ｉ棯閫€ | 鍏堣繍琛?init.bat |
+| 鎻愮ず "Node not found" | 瀹夎 Node.js v24+ |
+| 鎻愮ず "Missing config" | 杩愯 init.bat 閲嶆柊鐢熸垚閰嶇疆 |
+| 寰俊杩炰笉涓?| 妫€鏌?Gateway 鏄惁鍦ㄨ繍琛?|
+| API Key 閿欒 | 缂栬緫 openclaw.json 妫€鏌?Key 鏄惁姝ｇ‘ |
+| 绔彛琚崰鐢?| 鍏抽棴鍏朵粬 Gateway 瀹炰緥锛屽啀鍚姩 |
+| Ollama 妯″瀷鎷夊彇澶辫触 | 妫€鏌ョ綉缁滆繛鎺ワ紝鎴栨洿鎹㈤暅鍍忔簮 |
+| 鏈湴妯″瀷鍥炵瓟鎱?| 鍑忓皯骞跺彂璇锋眰锛屾垨鎹㈢敤灏忔ā鍨?|

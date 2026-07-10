@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * AI-v24.13.0 Setup Script
  * Run: npm run setup
@@ -35,9 +35,7 @@ function cleanConfig(cfgPath) {
   try {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
     const knownKeys = new Set([
-      "model","models","contextPruning","compaction","heartbeat",
-      "maxConcurrent","subagents","imageGenerationModel","systemPrompt",
-      "tools","permissions","skills","maxMessages","maxTurns","idleTimeout"
+      "model","models","contextPruning","compaction","maxConcurrent","systemPrompt","tools","permissions","skills"
     ]);
     if (cfg.agents && cfg.agents.defaults) {
       for (const key of Object.keys(cfg.agents.defaults)) {

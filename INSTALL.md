@@ -1,89 +1,83 @@
-# INSTALL.md
+﻿# INSTALL.md
 
-# AI-v24.13.0 开源版 - 安装指南
+# AI-v24.13.0 寮€婧愮増 - 瀹夎鎸囧崡
 
-## 系统要求
+## 绯荤粺瑕佹眰
 
-- **操作系统**: Windows 10/11 (64-bit)
-- **Node.js**: v24.x (推荐 v24.13.0)
-- **磁盘空间**: ≥ 500MB
-- **内存**: ≥ 2GB RAM
+- **鎿嶄綔绯荤粺**: Windows 10/11 (64-bit)
+- **Node.js**: v24.x (鎺ㄨ崘 v24.13.0)
+- **纾佺洏绌洪棿**: 鈮?500MB
+- **鍐呭瓨**: 鈮?2GB RAM
 
-## 快速安装
+## 蹇€熷畨瑁?
+### 绗竴姝ワ細瀹夎 NVM for Windows
 
-### 第一步：安装 NVM for Windows
+1. 涓嬭浇: https://github.com/coreybutler/nvm-windows/releases
+2. 瀹夎 nvm-setup.exe
+3. 楠岃瘉: `nvm version`
 
-1. 下载: https://github.com/coreybutler/nvm-windows/releases
-2. 安装 nvm-setup.exe
-3. 验证: `nvm version`
-
-### 第二步：安装 Node.js v24.13.0
+### 绗簩姝ワ細瀹夎 Node.js v24.13.0
 
 ```powershell
 nvm install 24.13.0
 nvm use 24.13.0
-node --version  # 应显示 v24.13.0
+node --version  # 搴旀樉绀?v24.13.0
 ```
 
-### 第三步：安装全局依赖
+### 绗笁姝ワ細瀹夎鍏ㄥ眬渚濊禆
 
 ```powershell
 npm install -g openclaw@2026.6.11
 npm install -g open-computer-use@0.1.54
 ```
 
-### 第四步：安装 Ollama（可选，用于本地模型）
+### 绗洓姝ワ細瀹夎 Ollama锛堝彲閫夛紝鐢ㄤ簬鏈湴妯″瀷锛?
+1. 涓嬭浇: https://ollama.com/download/windows
+2. 瀹夎鍚庤繍琛? `ollama pull gemma4:latest`
 
-1. 下载: https://ollama.com/download/windows
-2. 安装后运行: `ollama pull gemma4:latest`
-
-### 第五步：配置 API Key
+### 绗簲姝ワ細閰嶇疆 API Key
 
 ```powershell
-cd AI-v24.13.0-开源版
+cd AI-v24.13.0-寮€婧愮増
 copy config\openclaw.json.example openclaw.json
 notepad openclaw.json
-# 将 YOUR_AGNES_API_KEY_HERE 替换为你的实际 Key
+# 灏?YOUR_AGNES_API_KEY_HERE 鏇挎崲涓轰綘鐨勫疄闄?Key
 ```
 
-获取 API Key: https://agnes-ai.com/zh-Hans/docs/agnes-video-v20
+鑾峰彇 API Key: https://agnes-ai.com/zh-Hans/docs/agnes-video-v20
 
-### 第六步：启动
+### 绗叚姝ワ細鍚姩
 
 ```powershell
-# 方式1: 双击 start-gateway.bat
-# 方式2: 命令行
-.\start-gateway.bat
-# 方式3: Node.js 启动
+# 鏂瑰紡1: 鍙屽嚮 start-gateway.bat
+# 鏂瑰紡2: 鍛戒护琛?.\start-gateway.bat
+# 鏂瑰紡3: Node.js 鍚姩
 node start-gateway.js
 ```
 
-启动成功后，网关监听 `http://127.0.0.1:18789`
+鍚姩鎴愬姛鍚庯紝缃戝叧鐩戝惉 `http://127.0.0.1:18789`
 
-## 验证安装
+## 楠岃瘉瀹夎
 
 ```powershell
-# 检查 MCP 服务器
-openclaw mcp doctor
+# 妫€鏌?MCP 鏈嶅姟鍣?openclaw mcp doctor
 openclaw mcp probe
 
-# 检查插件
-openclaw plugins list
+# 妫€鏌ユ彃浠?openclaw plugins list
 
-# 检查 Gateway
+# 妫€鏌?Gateway
 curl http://127.0.0.1:18789/v1/models
 ```
 
-## 常见问题
+## 甯歌闂
 
-### Q: npm install 报错
-A: 确保 Node.js 版本 ≥ 20，尝试 `npm cache clean --force`
+### Q: npm install 鎶ラ敊
+A: 纭繚 Node.js 鐗堟湰 鈮?20锛屽皾璇?`npm cache clean --force`
 
-### Q: Gateway 启动失败
-A: 检查端口 18789 是否被占用: `netstat -ano | findstr 18789`
+### Q: Gateway 鍚姩澶辫触
+A: 妫€鏌ョ鍙?18789 鏄惁琚崰鐢? `netstat -ano | findstr 18789`
 
-### Q: 微信渠道无法连接
-A: 需要配置微信账号凭证，详见 `openclaw-weixin/` 目录
+### Q: 寰俊娓犻亾鏃犳硶杩炴帴
+A: 闇€瑕侀厤缃井淇¤处鍙峰嚟璇侊紝璇﹁ `openclaw-weixin/` 鐩綍
 
-### Q: 视频生成仍然只有 5 秒
-A: 确认使用的是更新后的 `media-cli/agnes-media-cli.js`
+### Q: 瑙嗛鐢熸垚浠嶇劧鍙湁 5 绉?A: 纭浣跨敤鐨勬槸鏇存柊鍚庣殑 `media-cli/agnes-media-cli.js`

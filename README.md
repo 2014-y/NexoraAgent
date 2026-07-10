@@ -1,147 +1,131 @@
-# AI-v24.13.0 开源版
+﻿# AI-v24.13.0 寮€婧愮増
 
-> 基于 OpenClaw 的本地 AI 助手网关，一键部署，多渠道接入，开箱即用。
-
+> 鍩轰簬 OpenClaw 鐨勬湰鍦?AI 鍔╂墜缃戝叧锛屼竴閿儴缃诧紝澶氭笭閬撴帴鍏ワ紝寮€绠卞嵆鐢ㄣ€?
 ---
 
-## 这是什么项目？
+## 杩欐槸浠€涔堥」鐩紵
 
-想象一下：**你在微信里跟 AI 聊天，AI 能帮你写代码、回答问题、看图识物、生成文案，而且所有数据都跑在你自己的电脑上，不经过任何云服务器。**
+鎯宠薄涓€涓嬶細**浣犲湪寰俊閲岃窡 AI 鑱婂ぉ锛孉I 鑳藉府浣犲啓浠ｇ爜銆佸洖绛旈棶棰樸€佺湅鍥捐瘑鐗┿€佺敓鎴愭枃妗堬紝鑰屼笖鎵€鏈夋暟鎹兘璺戝湪浣犺嚜宸辩殑鐢佃剳涓婏紝涓嶇粡杩囦换浣曚簯鏈嶅姟鍣ㄣ€?*
 
-AI-v24.13.0 就是一个**本地 AI 助手网关**。它把你的电脑变成一个 24 小时在线的 AI 服务平台，然后通过微信、WhatsApp、Discord、飞书、Telegram 这些你每天都在用的聊天工具，直接跟 AI 对话。
-
+AI-v24.13.0 灏辨槸涓€涓?*鏈湴 AI 鍔╂墜缃戝叧**銆傚畠鎶婁綘鐨勭數鑴戝彉鎴愪竴涓?24 灏忔椂鍦ㄧ嚎鐨?AI 鏈嶅姟骞冲彴锛岀劧鍚庨€氳繃寰俊銆乄hatsApp銆丏iscord銆侀涔︺€乀elegram 杩欎簺浣犳瘡澶╅兘鍦ㄧ敤鐨勮亰澶╁伐鍏凤紝鐩存帴璺?AI 瀵硅瘽銆?
 ---
 
-## 它能做什么？
+## 瀹冭兘鍋氫粈涔堬紵
 
-### 核心能力
+### 鏍稿績鑳藉姏
 
-| 能力 | 说明 |
+| 鑳藉姏 | 璇存槑 |
 |------|------|
-| **微信聊 AI** | 在微信私聊或群里直接跟 AI 对话，发文字、图片、语音都能处理 |
-| **多模型切换** | 想用 Agnes AI 就 Agnes，想用阿里云就阿里云，想离线就用本地 Ollama |
-| **多渠道统一** | 一个网关同时接微信、WhatsApp、Discord、飞书、Telegram，消息统一管理 |
-| **图片理解** | 发张图片给 AI，它能看懂图里的内容并回答你的问题 |
-| **插件扩展** | 支持记忆、语音通话、网页搜索、自动摘要等 40+ 插件 |
-| **隐私安全** | 所有数据存在本地，API Key 不上传，完全掌控 |
+| **寰俊鑱?AI** | 鍦ㄥ井淇＄鑱婃垨缇ら噷鐩存帴璺?AI 瀵硅瘽锛屽彂鏂囧瓧銆佸浘鐗囥€佽闊抽兘鑳藉鐞?|
+| **澶氭ā鍨嬪垏鎹?* | 鎯崇敤 Agnes AI 灏?Agnes锛屾兂鐢ㄩ樋閲屼簯灏遍樋閲屼簯锛屾兂绂荤嚎灏辩敤鏈湴 Ollama |
+| **澶氭笭閬撶粺涓€** | 涓€涓綉鍏冲悓鏃舵帴寰俊銆乄hatsApp銆丏iscord銆侀涔︺€乀elegram锛屾秷鎭粺涓€绠＄悊 |
+| **鍥剧墖鐞嗚В** | 鍙戝紶鍥剧墖缁?AI锛屽畠鑳界湅鎳傚浘閲岀殑鍐呭骞跺洖绛斾綘鐨勯棶棰?|
+| **鎻掍欢鎵╁睍** | 鏀寔璁板繂銆佽闊抽€氳瘽銆佺綉椤垫悳绱€佽嚜鍔ㄦ憳瑕佺瓑 40+ 鎻掍欢 |
+| **闅愮瀹夊叏** | 鎵€鏈夋暟鎹瓨鍦ㄦ湰鍦帮紝API Key 涓嶄笂浼狅紝瀹屽叏鎺屾帶 |
 
-### 典型使用场景
+### 鍏稿瀷浣跨敤鍦烘櫙
 
-| 场景 | 怎么用 |
+| 鍦烘櫙 | 鎬庝箞鐢?|
 |------|--------|
-| **个人助手** | 微信里随时问 AI 问题、写文案、翻译、总结文章 |
-| **团队客服** | 接在微信群或飞书群里，AI 自动回答客户常见问题 |
-| **代码辅助** | 在聊天窗口让 AI 帮你写代码、查 bug、解释技术方案 |
-| **图片分析** | 拍张照发给 AI，让它识别内容、提取文字、回答问题 |
-| **离线推理** | 用 Ollama 跑本地模型，断网也能用，适合隐私敏感场景 |
-| **多平台管理** | 一套配置同时管微信、WhatsApp、Discord，不用装多个客户端 |
+| **涓汉鍔╂墜** | 寰俊閲岄殢鏃堕棶 AI 闂銆佸啓鏂囨銆佺炕璇戙€佹€荤粨鏂囩珷 |
+| **鍥㈤槦瀹㈡湇** | 鎺ュ湪寰俊缇ゆ垨椋炰功缇ら噷锛孉I 鑷姩鍥炵瓟瀹㈡埛甯歌闂 |
+| **浠ｇ爜杈呭姪** | 鍦ㄨ亰澶╃獥鍙ｈ AI 甯綘鍐欎唬鐮併€佹煡 bug銆佽В閲婃妧鏈柟妗?|
+| **鍥剧墖鍒嗘瀽** | 鎷嶅紶鐓у彂缁?AI锛岃瀹冭瘑鍒唴瀹广€佹彁鍙栨枃瀛椼€佸洖绛旈棶棰?|
+| **绂荤嚎鎺ㄧ悊** | 鐢?Ollama 璺戞湰鍦版ā鍨嬶紝鏂綉涔熻兘鐢紝閫傚悎闅愮鏁忔劅鍦烘櫙 |
+| **澶氬钩鍙扮鐞?* | 涓€濂楅厤缃悓鏃剁寰俊銆乄hatsApp銆丏iscord锛屼笉鐢ㄨ澶氫釜瀹㈡埛绔?|
 
-### 支持的 AI 模型
+### 鏀寔鐨?AI 妯″瀷
 
-| 模型 | 提供商 | 特点 | 适合场景 |
+| 妯″瀷 | 鎻愪緵鍟?| 鐗圭偣 | 閫傚悎鍦烘櫙 |
 |------|--------|------|----------|
-| **agnes-2.0-flash** | Agnes AI | 推荐主模型，支持文本+图像，响应快 | 日常对话、图片理解 |
-| **agnes-1.5-flash** | Agnes AI | 轻量快速模型，节省 Token | 简单问答、快速回复 |
-| **qwen3-max** | 阿里云百炼 | 中文能力强，上下文 200K tokens | 长文写作、代码生成 |
-| **jarvis (Ollama)** | 本地离线 | 无需联网，完全隐私 | 隐私敏感场景、离线使用 |
+| **agnes-2.0-flash** | Agnes AI | 鎺ㄨ崘涓绘ā鍨嬶紝鏀寔鏂囨湰+鍥惧儚锛屽搷搴斿揩 | 鏃ュ父瀵硅瘽銆佸浘鐗囩悊瑙?|
+| **agnes-1.5-flash** | Agnes AI | 杞婚噺蹇€熸ā鍨嬶紝鑺傜渷 Token | 绠€鍗曢棶绛斻€佸揩閫熷洖澶?|
+| **qwen3-max** | 闃块噷浜戠櫨鐐?| 涓枃鑳藉姏寮猴紝涓婁笅鏂?200K tokens | 闀挎枃鍐欎綔銆佷唬鐮佺敓鎴?|
+| **jarvis (Ollama)** | 鏈湴绂荤嚎 | 鏃犻渶鑱旂綉锛屽畬鍏ㄩ殣绉?| 闅愮鏁忔劅鍦烘櫙銆佺绾夸娇鐢?|
 
-### 支持的聊天渠道
-
-| 渠道 | 功能 | 配置难度 |
+### 鏀寔鐨勮亰澶╂笭閬?
+| 娓犻亾 | 鍔熻兘 | 閰嶇疆闅惧害 |
 |------|------|----------|
-| **微信 (WeChat)** | 私聊、群聊、图片、语音 | 低（扫码即可） |
-| **WhatsApp** | 私聊、群聊、媒体 | 低 |
-| **Discord** | 服务器、频道、机器人 | 中 |
-| **飞书 (Feishu)** | 单聊、群组、应用 | 中 |
-| **Telegram** | 私聊、群组、频道 | 低 |
+| **寰俊 (WeChat)** | 绉佽亰銆佺兢鑱娿€佸浘鐗囥€佽闊?| 浣庯紙鎵爜鍗冲彲锛?|
+| **WhatsApp** | 绉佽亰銆佺兢鑱娿€佸獟浣?| 浣?|
+| **Discord** | 鏈嶅姟鍣ㄣ€侀閬撱€佹満鍣ㄤ汉 | 涓?|
+| **椋炰功 (Feishu)** | 鍗曡亰銆佺兢缁勩€佸簲鐢?| 涓?|
+| **Telegram** | 绉佽亰銆佺兢缁勩€侀閬?| 浣?|
 
-### 支持的插件功能
+### 鏀寔鐨勬彃浠跺姛鑳?
+椤圭洰鍐呯疆鎻掍欢绯荤粺锛屾敮鎸?40+ 鎻掍欢锛屽父鐢ㄥ姛鑳藉寘鎷細
 
-项目内置插件系统，支持 40+ 插件，常用功能包括：
-
-| 插件类别 | 功能 | 说明 |
+| 鎻掍欢绫诲埆 | 鍔熻兘 | 璇存槑 |
 |----------|------|------|
-| **记忆** | 长期记忆 | AI 能记住之前的对话内容，跨会话持续学习 |
-| **语音通话** | 实时语音 | 通过微信语音跟 AI 打电话 |
-| **网页搜索** | 实时搜索 | AI 能上网查最新信息，不只靠训练数据 |
-| **自动摘要** | 长文总结 | 发一篇长文章，AI 帮你提炼要点 |
-| **图片处理** | 识图/生成 | 发图让 AI 分析，或用 AI 生成图片 |
-| **文件处理** | 文档解析 | 发送 PDF、Word、Excel，AI 帮你读取和分析 |
-| **访问控制** | 白名单管理 | 指定谁能用你的 AI 助手，防止滥用 |
-| **健康监控** | 自动重启 | Gateway 异常时自动检测并重启 |
+| **璁板繂** | 闀挎湡璁板繂 | AI 鑳借浣忎箣鍓嶇殑瀵硅瘽鍐呭锛岃法浼氳瘽鎸佺画瀛︿範 |
+| **璇煶閫氳瘽** | 瀹炴椂璇煶 | 閫氳繃寰俊璇煶璺?AI 鎵撶數璇?|
+| **缃戦〉鎼滅储** | 瀹炴椂鎼滅储 | AI 鑳戒笂缃戞煡鏈€鏂颁俊鎭紝涓嶅彧闈犺缁冩暟鎹?|
+| **鑷姩鎽樿** | 闀挎枃鎬荤粨 | 鍙戜竴绡囬暱鏂囩珷锛孉I 甯綘鎻愮偧瑕佺偣 |
+| **鍥剧墖澶勭悊** | 璇嗗浘/鐢熸垚 | 鍙戝浘璁?AI 鍒嗘瀽锛屾垨鐢?AI 鐢熸垚鍥剧墖 |
+| **鏂囦欢澶勭悊** | 鏂囨。瑙ｆ瀽 | 鍙戦€?PDF銆乄ord銆丒xcel锛孉I 甯綘璇诲彇鍜屽垎鏋?|
+| **璁块棶鎺у埗** | 鐧藉悕鍗曠鐞?| 鎸囧畾璋佽兘鐢ㄤ綘鐨?AI 鍔╂墜锛岄槻姝㈡互鐢?|
+| **鍋ュ悍鐩戞帶** | 鑷姩閲嶅惎 | Gateway 寮傚父鏃惰嚜鍔ㄦ娴嬪苟閲嶅惎 |
 
 ---
 
-## 适合谁用？
-
-- **个人用户** — 想在自己的电脑上跑一个 AI 助手，随时用微信聊天
-- **小团队** — 需要一个内部 AI 客服/助手，接在微信群或飞书群里
-- **开发者** — 想基于 OpenClaw 二次开发，搭建自己的 AI 服务平台
-- **隐私敏感用户** — 不想把数据传给任何第三方云服务
-
+## 閫傚悎璋佺敤锛?
+- **涓汉鐢ㄦ埛** 鈥?鎯冲湪鑷繁鐨勭數鑴戜笂璺戜竴涓?AI 鍔╂墜锛岄殢鏃剁敤寰俊鑱婂ぉ
+- **灏忓洟闃?* 鈥?闇€瑕佷竴涓唴閮?AI 瀹㈡湇/鍔╂墜锛屾帴鍦ㄥ井淇＄兢鎴栭涔︾兢閲?- **寮€鍙戣€?* 鈥?鎯冲熀浜?OpenClaw 浜屾寮€鍙戯紝鎼缓鑷繁鐨?AI 鏈嶅姟骞冲彴
+- **闅愮鏁忔劅鐢ㄦ埛** 鈥?涓嶆兂鎶婃暟鎹紶缁欎换浣曠涓夋柟浜戞湇鍔?
 ---
 
-## 快速开始（6 步搞定）
+## 蹇€熷紑濮嬶紙6 姝ユ悶瀹氾級
 
-| 步骤 | 操作 | 预计时间 |
+| 姝ラ | 鎿嶄綔 | 棰勮鏃堕棿 |
 |------|------|----------|
-| 1 | [安装 Node.js](#1-安装-nodejs) | 3 分钟 |
-| 2 | [下载并解压项目](#2-下载并解压项目) | 1 分钟 |
-| 3 | [安装 openclaw](#3-安装-openclaw) | 2 分钟 |
-| 4 | [运行 init.bat 初始化](#4-运行-initbat-初始化) | 1 分钟 |
-| 5 | [配置 API Key](#5-配置-api-key) | 2 分钟 |
-| 6 | [双击 start-gateway.bat 启动](#6-启动-gateway) | 1 分钟 |
+| 1 | [瀹夎 Node.js](#1-瀹夎-nodejs) | 3 鍒嗛挓 |
+| 2 | [涓嬭浇骞惰В鍘嬮」鐩甝(#2-涓嬭浇骞惰В鍘嬮」鐩? | 1 鍒嗛挓 |
+| 3 | [瀹夎 openclaw](#3-瀹夎-openclaw) | 2 鍒嗛挓 |
+| 4 | [杩愯 init.bat 鍒濆鍖朷(#4-杩愯-initbat-鍒濆鍖? | 1 鍒嗛挓 |
+| 5 | [閰嶇疆 API Key](#5-閰嶇疆-api-key) | 2 鍒嗛挓 |
+| 6 | [鍙屽嚮 start-gateway.bat 鍚姩](#6-鍚姩-gateway) | 1 鍒嗛挓 |
 
-> 全部完成后，参考 [接入微信](#接入微信可选) 或 [配置本地 Ollama 模型](#配置本地-ollama-模型可选)。
+> 鍏ㄩ儴瀹屾垚鍚庯紝鍙傝€?[鎺ュ叆寰俊](#鎺ュ叆寰俊鍙€? 鎴?[閰嶇疆鏈湴 Ollama 妯″瀷](#閰嶇疆鏈湴-ollama-妯″瀷鍙€?銆?
+---
+
+## 璇︾粏鏁欑▼
+
+**鏂版墜鎺ㄨ崘闃呰椤哄簭锛?*
+
+1. **[INSTALL.md](INSTALL.md)** 鈥?浠庨浂寮€濮嬬殑瀹屾暣瀹夎鎸囧崡
+2. **[docs/getting-started.md](docs/getting-started.md)** 鈥?浠庝笅杞藉埌浣跨敤鐨勫畬鏁存祦绋?3. **[docs/wechat-guide.md](docs/wechat-guide.md)** 鈥?寰俊鎺ュ叆璇︾粏鏁欑▼
 
 ---
 
-## 详细教程
+## 1. 瀹夎 Node.js
 
-**新手推荐阅读顺序：**
+椤圭洰闇€瑕?**Node.js v24.x**銆?
+### 鎺ㄨ崘鏂瑰紡锛歯vm-windows
 
-1. **[INSTALL.md](INSTALL.md)** — 从零开始的完整安装指南
-2. **[docs/getting-started.md](docs/getting-started.md)** — 从下载到使用的完整流程
-3. **[docs/wechat-guide.md](docs/wechat-guide.md)** — 微信接入详细教程
-
----
-
-## 1. 安装 Node.js
-
-项目需要 **Node.js v24.x**。
-
-### 推荐方式：nvm-windows
-
-nvm 可以管理多个 Node.js 版本，互不干扰。
-
-1. 下载：https://github.com/coreybutler/nvm-windows/releases
-2. 安装 
+nvm 鍙互绠＄悊澶氫釜 Node.js 鐗堟湰锛屼簰涓嶅共鎵般€?
+1. 涓嬭浇锛歨ttps://github.com/coreybutler/nvm-windows/releases
+2. 瀹夎 
 vm-setup.exe
-3. 打开 CMD，运行：
+3. 鎵撳紑 CMD锛岃繍琛岋細
 
 `cmd
 nvm install 24
 nvm use 24
 `
 
-4. 验证：
-ode -v 应显示 v24.x.x
+4. 楠岃瘉锛?ode -v 搴旀樉绀?v24.x.x
 
-### 备选方式：官方安装包
-
-直接下载安装：https://nodejs.org （选 LTS 版本）
-
+### 澶囬€夋柟寮忥細瀹樻柟瀹夎鍖?
+鐩存帴涓嬭浇瀹夎锛歨ttps://nodejs.org 锛堥€?LTS 鐗堟湰锛?
 ---
 
-## 2. 下载并解压项目
+## 2. 涓嬭浇骞惰В鍘嬮」鐩?
+**鏂瑰紡涓€锛氫笅杞?ZIP**
 
-**方式一：下载 ZIP**
-
-1. 访问 https://github.com/2014-y/AI-v24.13.0
-2. 点击绿色 **Code** 按钮 → **Download ZIP**
-3. 解压到你喜欢的目录（比如 D:\ai\AI-v24.13.0）
-
-**方式二：Git Clone**
+1. 璁块棶 https://github.com/2014-y/AI-v24.13.0
+2. 鐐瑰嚮缁胯壊 **Code** 鎸夐挳 鈫?**Download ZIP**
+3. 瑙ｅ帇鍒颁綘鍠滄鐨勭洰褰曪紙姣斿 <项目目录>锛?
+**鏂瑰紡浜岋細Git Clone**
 
 `cmd
 git clone https://github.com/2014-y/AI-v24.13.0.git
@@ -150,165 +134,142 @@ cd AI-v24.13.0
 
 ---
 
-## 3. 安装 openclaw
+## 3. 瀹夎 openclaw
 
-openclaw 是网关的核心工具，依赖 Node.js 的 npm。
-
-在 CMD 中运行：
+openclaw 鏄綉鍏崇殑鏍稿績宸ュ叿锛屼緷璧?Node.js 鐨?npm銆?
+鍦?CMD 涓繍琛岋細
 
 `cmd
 npm install -g openclaw@2026.6.11
 `
 
-验证安装：
-
+楠岃瘉瀹夎锛?
 `cmd
 openclaw --version
 `
 
-应显示 2026.6.11。
-
-> 💡 如果提示 "npm 不是内部命令"，说明 Node.js 没装好或没添加到环境变量，请回到第 1 步重新安装。
-
+搴旀樉绀?2026.6.11銆?
+> 馃挕 濡傛灉鎻愮ず "npm 涓嶆槸鍐呴儴鍛戒护"锛岃鏄?Node.js 娌¤濂芥垨娌℃坊鍔犲埌鐜鍙橀噺锛岃鍥炲埌绗?1 姝ラ噸鏂板畨瑁呫€?
 ---
 
-## 4. 运行 init.bat 初始化
+## 4. 杩愯 init.bat 鍒濆鍖?
+1. 鎵撳紑椤圭洰鏂囦欢澶?2. **鍙屽嚮 init.bat**
+3. 鐪嬪埌 **"Setup complete!"** 鍗虫垚鍔?
+init.bat 浼氳嚜鍔ㄥ畬鎴愶細
+- 妫€娴嬫湰鏈?Node.js
+- 鍒涘缓 .node-sandbox/ 鐩綍锛堢嫭绔?Node 鐜锛屼笉褰卞搷鍏ㄥ眬锛?- 鐢熸垚閰嶇疆鏂囦欢 C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\openclaw.json
 
-1. 打开项目文件夹
-2. **双击 init.bat**
-3. 看到 **"Setup complete!"** 即成功
-
-init.bat 会自动完成：
-- 检测本机 Node.js
-- 创建 .node-sandbox/ 目录（独立 Node 环境，不影响全局）
-- 生成配置文件 C:\Users\<你的用户名>\.openclaw\openclaw.json
-
-> ⚠️ 如果双击没反应，右键 → 以管理员身份运行。
-
+> 鈿狅笍 濡傛灉鍙屽嚮娌″弽搴旓紝鍙抽敭 鈫?浠ョ鐞嗗憳韬唤杩愯銆?
 ---
 
-## 5. 配置 API Key
+## 5. 閰嶇疆 API Key
 
-1. 打开文件管理器，进入 C:\Users\<你的用户名>\.openclaw\
-2. 用记事本打开 openclaw.json
-3. 按 Ctrl+H 搜索并替换以下占位符：
-
-| 搜索 | 替换为 | 说明 |
+1. 鎵撳紑鏂囦欢绠＄悊鍣紝杩涘叆 C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\
+2. 鐢ㄨ浜嬫湰鎵撳紑 openclaw.json
+3. 鎸?Ctrl+H 鎼滅储骞舵浛鎹互涓嬪崰浣嶇锛?
+| 鎼滅储 | 鏇挎崲涓?| 璇存槑 |
 |------|--------|------|
-| YOUR_AGNES_API_KEY_HERE | 你的 Agnes AI Key | **必填** |
-| YOUR_YITONG_API_KEY_HERE | 你的阿里云 Key | 选填 |
-| YOUR_ZHIPU_API_KEY_HERE | 你的智谱 Key | 选填 |
+| YOUR_AGNES_API_KEY_HERE | 浣犵殑 Agnes AI Key | **蹇呭～** |
+| YOUR_YITONG_API_KEY_HERE | 浣犵殑闃块噷浜?Key | 閫夊～ |
+| YOUR_ZHIPU_API_KEY_HERE | 浣犵殑鏅鸿氨 Key | 閫夊～ |
 
-4. 按 Ctrl+S 保存
+4. 鎸?Ctrl+S 淇濆瓨
 
-**获取 API Key：**
-- **Agnes AI**：https://agnes-ai.com/zh-Hans/docs/agnes-video-v20
-- **阿里云百炼**：https://dashscope.console.aliyun.com/
-- **智谱 AI**：https://open.bigmodel.cn/
+**鑾峰彇 API Key锛?*
+- **Agnes AI**锛歨ttps://agnes-ai.com/zh-Hans/docs/agnes-video-v20
+- **闃块噷浜戠櫨鐐?*锛歨ttps://dashscope.console.aliyun.com/
+- **鏅鸿氨 AI**锛歨ttps://open.bigmodel.cn/
 
-> 💡 至少配置一个 API Key 才能正常使用。推荐优先配置 Agnes AI。
-
+> 馃挕 鑷冲皯閰嶇疆涓€涓?API Key 鎵嶈兘姝ｅ父浣跨敤銆傛帹鑽愪紭鍏堥厤缃?Agnes AI銆?
 ---
 
-## 6. 启动 Gateway
+## 6. 鍚姩 Gateway
 
-1. 打开项目文件夹
-2. **双击 start-gateway.bat**
-3. 看到 **"http server listening on port 18789"** 即启动成功
-
-此时 AI 网关已在运行，可以通过以下方式接入：
-
+1. 鎵撳紑椤圭洰鏂囦欢澶?2. **鍙屽嚮 start-gateway.bat**
+3. 鐪嬪埌 **"http server listening on port 18789"** 鍗冲惎鍔ㄦ垚鍔?
+姝ゆ椂 AI 缃戝叧宸插湪杩愯锛屽彲浠ラ€氳繃浠ヤ笅鏂瑰紡鎺ュ叆锛?
 ---
 
-## 接入微信（可选）
+## 鎺ュ叆寰俊锛堝彲閫夛級
 
-1. 安装微信插件：
-   `cmd
+1. 瀹夎寰俊鎻掍欢锛?   `cmd
    npx -y @tencent-weixin/openclaw-weixin-cli install
    `
 
-2. 扫码登录：
-   `cmd
+2. 鎵爜鐧诲綍锛?   `cmd
    openclaw channels login --channel openclaw-weixin
    `
-   用微信扫描屏幕上出现的二维码，手机端确认登录。
-
-3. 登录成功后即可在微信中和 AI 对话！
-
-> 📖 详细教程：[docs/wechat-guide.md](docs/wechat-guide.md)
+   鐢ㄥ井淇℃壂鎻忓睆骞曚笂鍑虹幇鐨勪簩缁寸爜锛屾墜鏈虹纭鐧诲綍銆?
+3. 鐧诲綍鎴愬姛鍚庡嵆鍙湪寰俊涓拰 AI 瀵硅瘽锛?
+> 馃摉 璇︾粏鏁欑▼锛歔docs/wechat-guide.md](docs/wechat-guide.md)
 
 ---
 
-## 配置本地 Ollama 模型（可选）
+## 閰嶇疆鏈湴 Ollama 妯″瀷锛堝彲閫夛級
 
-如果想用**离线本地模型**（无需联网，完全隐私）：
+濡傛灉鎯崇敤**绂荤嚎鏈湴妯″瀷**锛堟棤闇€鑱旂綉锛屽畬鍏ㄩ殣绉侊級锛?
+1. 瀹夎 Ollama锛歨ttps://ollama.com
+2. 鎷夊彇妯″瀷锛歰llama pull gemma3:27b
+3. 鏋勫缓鑷畾涔夋ā鍨嬶細ollama create jarvis -f jarvis-modelfile.txt
+4. 楠岃瘉锛歰llama list
 
-1. 安装 Ollama：https://ollama.com
-2. 拉取模型：ollama pull gemma3:27b
-3. 构建自定义模型：ollama create jarvis -f jarvis-modelfile.txt
-4. 验证：ollama list
-
-> 详见 [docs/getting-started.md#第-5-步配置本地模型可选](docs/getting-started.md)
+> 璇﹁ [docs/getting-started.md#绗?5-姝ラ厤缃湰鍦版ā鍨嬪彲閫塢(docs/getting-started.md)
 
 ---
 
-## 常见问题
+## 甯歌闂
 
-| 问题 | 解决方法 |
+| 闂 | 瑙ｅ喅鏂规硶 |
 |------|---------|
-| 双击 start-gateway.bat 闪退 | 先运行 init.bat，确保 openclaw 已安装 |
-| 提示 "Invalid config" 或路径错误 | 重新运行 init.bat，检查配置文件 |
-| 提示 "openclaw not found" | 运行 
-pm install -g openclaw@2026.6.11 安装 |
-| 提示 "npm 命令找不到" | Node.js 未正确安装，重新安装 |
-| 端口 18789 被占用 | 关闭其他 Gateway 实例 |
-| 全局 Node.js 版本被改了？ | 不会！项目使用 .node-sandbox/ 内的独立 node，与全局完全隔离 |
-| 如何停止 Gateway？ | 直接关闭窗口即可 |
+| 鍙屽嚮 start-gateway.bat 闂€€ | 鍏堣繍琛?init.bat锛岀‘淇?openclaw 宸插畨瑁?|
+| 鎻愮ず "Invalid config" 鎴栬矾寰勯敊璇?| 閲嶆柊杩愯 init.bat锛屾鏌ラ厤缃枃浠?|
+| 鎻愮ず "openclaw not found" | 杩愯 
+pm install -g openclaw@2026.6.11 瀹夎 |
+| 鎻愮ず "npm 鍛戒护鎵句笉鍒? | Node.js 鏈纭畨瑁咃紝閲嶆柊瀹夎 |
+| 绔彛 18789 琚崰鐢?| 鍏抽棴鍏朵粬 Gateway 瀹炰緥 |
+| 鍏ㄥ眬 Node.js 鐗堟湰琚敼浜嗭紵 | 涓嶄細锛侀」鐩娇鐢?.node-sandbox/ 鍐呯殑鐙珛 node锛屼笌鍏ㄥ眬瀹屽叏闅旂 |
+| 濡備綍鍋滄 Gateway锛?| 鐩存帴鍏抽棴绐楀彛鍗冲彲 |
 
 ---
 
-## 架构概览
+## 鏋舵瀯姒傝
 
 `
-用户端（微信/WhatsApp/Discord...）
-        ↓ 发消息
-   OpenClaw Gateway (端口 18789)
-        ↓ 转发请求
-   Agnes AI / 阿里云 / Ollama 本地
-        ↓ 返回回答
-   用户端收到回复
-`
+鐢ㄦ埛绔紙寰俊/WhatsApp/Discord...锛?        鈫?鍙戞秷鎭?   OpenClaw Gateway (绔彛 18789)
+        鈫?杞彂璇锋眰
+   Agnes AI / 闃块噷浜?/ Ollama 鏈湴
+        鈫?杩斿洖鍥炵瓟
+   鐢ㄦ埛绔敹鍒板洖澶?`
 
 ---
 
-## 文档索引
+## 鏂囨。绱㈠紩
 
-| 文档 | 用途 |
+| 鏂囨。 | 鐢ㄩ€?|
 |------|------|
-| [INSTALL.md](INSTALL.md) | 从零开始的完整安装指南 |
-| [docs/getting-started.md](docs/getting-started.md) | 从下载到使用的完整流程 |
-| [docs/wechat-guide.md](docs/wechat-guide.md) | 微信接入详细教程 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
+| [INSTALL.md](INSTALL.md) | 浠庨浂寮€濮嬬殑瀹屾暣瀹夎鎸囧崡 |
+| [docs/getting-started.md](docs/getting-started.md) | 浠庝笅杞藉埌浣跨敤鐨勫畬鏁存祦绋?|
+| [docs/wechat-guide.md](docs/wechat-guide.md) | 寰俊鎺ュ叆璇︾粏鏁欑▼ |
+| [CHANGELOG.md](CHANGELOG.md) | 鐗堟湰鏇存柊鏃ュ織 |
 
 ---
 
-## 技术栈
+## 鎶€鏈爤
 
-| 组件 | 版本 |
+| 缁勪欢 | 鐗堟湰 |
 |------|------|
 | OpenClaw | 2026.6.11 |
-| Node.js | v24.13.0（项目沙箱内） |
-| 操作系统 | Windows 10/11 |
+| Node.js | v24.13.0锛堥」鐩矙绠卞唴锛?|
+| 鎿嶄綔绯荤粺 | Windows 10/11 |
 
 ---
 
-## 许可证
-
+## 璁稿彲璇?
 MIT License
 
 ---
 
-## 联系方式
+## 鑱旂郴鏂瑰紡
 
 - GitHub: [2014-y/AI-v24.13.0](https://github.com/2014-y/AI-v24.13.0)
-- 文档: [agnes-ai.com](https://agnes-ai.com/zh-Hans/docs/agnes-video-v20)
+- 鏂囨。: [agnes-ai.com](https://agnes-ai.com/zh-Hans/docs/agnes-video-v20)

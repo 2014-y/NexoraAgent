@@ -1,39 +1,39 @@
-# 微信接入完整教程（傻瓜式）
+﻿# 寰俊鎺ュ叆瀹屾暣鏁欑▼锛堝偦鐡滃紡锛?
 
-> 本文档教你一步步把 AI 助手接入微信，全程只需 5 分钟。
-
----
-
-## 目录
-
-- [前置条件](#前置条件)
-- [第一步：安装微信插件](#第一步安装微信插件)
-- [第二步：扫码登录](#第二步扫码登录)
-- [第三步：配置白名单（可选）](#第三步配置白名单可选)
-- [常见问题](#常见问题)
+> 鏈枃妗ｆ暀浣犱竴姝ユ鎶?AI 鍔╂墜鎺ュ叆寰俊锛屽叏绋嬪彧闇€ 5 鍒嗛挓銆?
 
 ---
 
-## 前置条件
+## 鐩綍
 
-- 已完成初始化，Gateway 已启动（端口 18789 监听中）
-- 手机上已安装微信
-- 已安装 @tencent-weixin/openclaw-weixin 插件
+- [鍓嶇疆鏉′欢](#鍓嶇疆鏉′欢)
+- [绗竴姝ワ細瀹夎寰俊鎻掍欢](#绗竴姝ュ畨瑁呭井淇℃彃浠?
+- [绗簩姝ワ細鎵爜鐧诲綍](#绗簩姝ユ壂鐮佺櫥褰?
+- [绗笁姝ワ細閰嶇疆鐧藉悕鍗曪紙鍙€夛級](#绗笁姝ラ厤缃櫧鍚嶅崟鍙€?
+- [甯歌闂](#甯歌闂)
 
 ---
 
-## 第一步：安装微信插件
+## 鍓嶇疆鏉′欢
 
-打开 CMD 或 PowerShell，进入项目目录，执行：
+- 宸插畬鎴愬垵濮嬪寲锛孏ateway 宸插惎鍔紙绔彛 18789 鐩戝惉涓級
+- 鎵嬫満涓婂凡瀹夎寰俊
+- 宸插畨瑁?@tencent-weixin/openclaw-weixin 鎻掍欢
+
+---
+
+## 绗竴姝ワ細瀹夎寰俊鎻掍欢
+
+鎵撳紑 CMD 鎴?PowerShell锛岃繘鍏ラ」鐩洰褰曪紝鎵ц锛?
 
 ```bash
-cd <项目目录>
+cd <椤圭洰鐩綍>
 npx -y @tencent-weixin/openclaw-weixin-cli install
 ```
 
-如果提示找不到 npx，请先安装 Node.js。
+濡傛灉鎻愮ず鎵句笉鍒?npx锛岃鍏堝畨瑁?Node.js銆?
 
-安装完成后，编辑配置文件 C:\Users\<你的用户名>\.openclaw\openclaw.json，确保微信插件已启用：
+瀹夎瀹屾垚鍚庯紝缂栬緫閰嶇疆鏂囦欢 C:\Users\<浣犵殑鐢ㄦ埛鍚?\.openclaw\openclaw.json锛岀‘淇濆井淇℃彃浠跺凡鍚敤锛?
 
 ```json
 "plugins": {
@@ -45,7 +45,7 @@ npx -y @tencent-weixin/openclaw-weixin-cli install
 }
 ```
 
-然后重启 Gateway：
+鐒跺悗閲嶅惎 Gateway锛?
 
 ```bash
 openclaw gateway restart
@@ -53,61 +53,61 @@ openclaw gateway restart
 
 ---
 
-## 第二步：扫码登录
+## 绗簩姝ワ細鎵爜鐧诲綍
 
-在 CMD 中执行：
+鍦?CMD 涓墽琛岋細
 
 ```bash
-cd <项目目录>
+cd <椤圭洰鐩綍>
 openclaw channels login --channel openclaw-weixin
 ```
 
-屏幕上会出现一个 **二维码**，用微信扫一下，在手机端确认登录。
+灞忓箷涓婁細鍑虹幇涓€涓?**浜岀淮鐮?*锛岀敤寰俊鎵竴涓嬶紝鍦ㄦ墜鏈虹纭鐧诲綍銆?
 
-登录成功后，你会看到类似这样的提示：
+鐧诲綍鎴愬姛鍚庯紝浣犱細鐪嬪埌绫讳技杩欐牱鐨勬彁绀猴細
 
 ```
 WeChat account logged in successfully
 Account: wxid_xxxxxxxx
 ```
 
-**重要**：扫码登录的电脑必须保持 Gateway 运行状态，否则微信会掉线。
+**閲嶈**锛氭壂鐮佺櫥褰曠殑鐢佃剳蹇呴』淇濇寔 Gateway 杩愯鐘舵€侊紝鍚﹀垯寰俊浼氭帀绾裤€?
 
 ---
 
-## 第三步：配置白名单（可选）
+## 绗笁姝ワ細閰嶇疆鐧藉悕鍗曪紙鍙€夛級
 
-默认情况下，任何人都可以通过私聊跟你 AI 助手对话。如果你想限制只有特定人能对话：
+榛樿鎯呭喌涓嬶紝浠讳綍浜洪兘鍙互閫氳繃绉佽亰璺熶綘 AI 鍔╂墜瀵硅瘽銆傚鏋滀綘鎯抽檺鍒跺彧鏈夌壒瀹氫汉鑳藉璇濓細
 
 ```bash
-# 列出已授权的联系人
+# 鍒楀嚭宸叉巿鏉冪殑鑱旂郴浜?
 openclaw pairing list openclaw-weixin
 
-# 批准某个联系人
+# 鎵瑰噯鏌愪釜鑱旂郴浜?
 openclaw pairing approve openclaw-weixin <CODE>
 
-# 拒绝某个联系人
+# 鎷掔粷鏌愪釜鑱旂郴浜?
 openclaw pairing deny openclaw-weixin <CODE>
 ```
 
 ---
 
-## 常见问题
+## 甯歌闂
 
-### Q: 扫不出二维码？
-**A:** 确保 Gateway 正在运行，且微信插件已安装。运行 openclaw plugins list 检查。
+### Q: 鎵笉鍑轰簩缁寸爜锛?
+**A:** 纭繚 Gateway 姝ｅ湪杩愯锛屼笖寰俊鎻掍欢宸插畨瑁呫€傝繍琛?openclaw plugins list 妫€鏌ャ€?
 
-### Q: 登录后微信立刻掉线？
-**A:** 检查是否在同一台电脑上运行 Gateway。不要同时用多个客户端登录同一个微信账号。
+### Q: 鐧诲綍鍚庡井淇＄珛鍒绘帀绾匡紵
+**A:** 妫€鏌ユ槸鍚﹀湪鍚屼竴鍙扮數鑴戜笂杩愯 Gateway銆備笉瑕佸悓鏃剁敤澶氫釜瀹㈡埛绔櫥褰曞悓涓€涓井淇¤处鍙枫€?
 
-### Q: 收不到消息？
-**A:** 检查 openclaw.json 中 plugins.entries.openclaw-weixin.enabled 是否为 true。
+### Q: 鏀朵笉鍒版秷鎭紵
+**A:** 妫€鏌?openclaw.json 涓?plugins.entries.openclaw-weixin.enabled 鏄惁涓?true銆?
 
-### Q: 想接多个微信号？
-**A:** 每个微信号单独执行一次 openclaw channels login --channel openclaw-weixin 即可。
+### Q: 鎯虫帴澶氫釜寰俊鍙凤紵
+**A:** 姣忎釜寰俊鍙峰崟鐙墽琛屼竴娆?openclaw channels login --channel openclaw-weixin 鍗冲彲銆?
 
-### Q: 插件版本不兼容？
-**A:** 运行以下命令更新：
+### Q: 鎻掍欢鐗堟湰涓嶅吋瀹癸紵
+**A:** 杩愯浠ヤ笅鍛戒护鏇存柊锛?
 ```bash
 npm view @tencent-weixin/openclaw-weixin version
 openclaw plugins install "@tencent-weixin/openclaw-weixin" --force

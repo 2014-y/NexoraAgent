@@ -97,7 +97,7 @@ if (Test-Path $examplePath) {
 const fs = require('fs');
 const cfgPath = process.argv[1];
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-const knownKeys = new Set(["model","models","contextPruning","compaction","heartbeat","maxConcurrent","subagents","imageGenerationModel","systemPrompt","tools","permissions","skills","modelFallbacks"]);
+const knownKeys = new Set(["model","models","contextPruning","compaction","maxConcurrent","systemPrompt","tools","permissions","skills"]);
 if (cfg.agents && cfg.agents.defaults) {
     for (const key of Object.keys(cfg.agents.defaults)) {
         if (!knownKeys.has(key)) {
