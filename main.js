@@ -8,6 +8,7 @@ let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
 let isQuitting = false;
+let isMaximizedState = false;
 global.latestAcpDashboardUrl = '';
 
 const CONFIG_DIR = path.join(process.env.USERPROFILE || process.env.HOME, '.openclaw');
@@ -43,6 +44,16 @@ function createWindow() {
     });
 
     mainWindow.loadFile('index.html');
+
+    mainWindow.on('maximize', () => {
+        isMaximizedState = true;
+        mainWindow.webContents.send('window-maximized-status', true);
+    });
+
+    mainWindow.on('unmaximize', () => {
+        isMaximizedState = false;
+        mainWindow.webContents.send('window-maximized-status', false);
+    });
 
     mainWindow.on('close', (event) => {
         if (!isQuitting) {
@@ -124,7 +135,7 @@ ipcMain.on('window-action', (event, action) => {
     if (action === 'minimize') {
         mainWindow.minimize();
     } else if (action === 'maximize') {
-        if (mainWindow.isMaximized()) {
+        if (isMaximizedState) {
             mainWindow.unmaximize();
         } else {
             mainWindow.maximize();

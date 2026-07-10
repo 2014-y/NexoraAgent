@@ -180,6 +180,15 @@ function setupIpcListeners() {
         }
     });
 
+    // 监听窗口最大化/还原状态切换，动态移除/加上窗口圆角以防四角漏光
+    window.api.onMaximizedStatus((isMaximized) => {
+        if (isMaximized) {
+            document.body.classList.add('maximized');
+        } else {
+            document.body.classList.remove('maximized');
+        }
+    });
+
     // 监听开机自启切换
     autostartToggle.addEventListener('change', async (e) => {
         await window.api.setAutoStart(e.target.checked);
