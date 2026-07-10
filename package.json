@@ -1,5 +1,5 @@
 {
-  "name": "ai-v24.13.0",
+  "name": "ai-assistant",
   "version": "1.0.8",
   "description": "AI-v24.13.0 开源版 - 本地 AI 助手网关（基于 OpenClaw）",
   "keywords": [
@@ -19,6 +19,7 @@
     "type": "git",
     "url": "https://github.com/2014-y/AI-v24.13.0"
   },
+  "main": "main.js",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -29,10 +30,41 @@
     "init:config": "if not exist openclaw.json copy config\\openclaw.json.example openclaw.json",
     "doctor": "openclaw mcp doctor",
     "probe": "openclaw mcp probe",
-    "logs": "type logs\\openclaw-%date%.log"
+    "logs": "type logs\\openclaw-%date%.log",
+    "app:start": "electron .",
+    "app:dist": "electron-builder --windows",
+    "app:pack": "electron-packager . \"AI小助理\" --platform=win32 --arch=x64 --out=dist --overwrite --ignore=\"dist\""
   },
   "dependencies": {
-    "openclaw": "^2026.6.11",
-    "open-computer-use": "^0.1.54"
+    "open-computer-use": "^0.1.54",
+    "openclaw": "^2026.6.11"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.2014y.aigateway",
+    "productName": "AI小助理",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "index.css",
+      "config/openclaw.json.example",
+      "config/icon.jpg",
+      "node_modules/**/*",
+      ".node-sandbox/**/*"
+    ]
   }
 }

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AI小助理 本地AI助手</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body class="theme-dark"> <!-- 默认暗黑流光主题 -->
+  <div class="app-container">
+    
+    <!-- 1. 顶部无边框标题栏 -->
+    <header class="title-bar">
+      <div class="title-logo-zone">
+        <img src="config/icon.jpg" width="20" height="20" style="border-radius: 4px; object-fit: cover;">
+        <span>AI小助理 v24.13.0</span>
+      </div>
+      <div class="window-controls">
+        <button class="window-btn minimize" id="win-btn-minimize" title="最小化"></button>
+        <button class="window-btn close" id="win-btn-close" title="退出并缩入托盘"></button>
+      </div>
+    </header>
+
+    <div class="main-wrapper">
+      
+      <!-- 2. 左侧边栏导航 -->
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <!-- 运行状态监控 -->
+          <div class="status-badge-container" id="tour-status">
+            <div class="status-dot" id="status-light"></div>
+            <div class="status-text-zone">
+              <h4>网关核心状态</h4>
+              <p id="status-label">已停止</p>
+            </div>
+          </div>
+          
+          <!-- Tab 导航 -->
+          <nav class="sidebar-nav">
+            <div class="nav-item active" data-tab="console-view" id="tour-nav-console">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+              控制台
+            </div>
+            <div class="nav-item" data-tab="config-view" id="tour-nav-config">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              参数配置
+            </div>
+            <div class="nav-item" data-tab="plugins-view" id="tour-nav-plugins">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+              插件开关
+            </div>
+            <div class="nav-item" data-tab="dashboard-view" id="tour-nav-stats">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              用量监控
+            </div>
+          </nav>
+        </div>
+
+        <div class="sidebar-bottom">
+          <!-- 主题选择器 -->
+          <div class="theme-picker-panel" id="tour-themes">
+            <span>界面主题</span>
+            <div class="theme-dots">
+              <div class="theme-dot dark" id="theme-btn-dark" title="暗黑流光"></div>
+              <div class="theme-dot aurora" id="theme-btn-aurora" title="极光霓虹"></div>
+              <div class="theme-dot light" id="theme-btn-light" title="白昼明亮"></div>
+            </div>
+          </div>
+          
+          <!-- 系统设置 -->
+          <div class="settings-bar">
+            <span>开机自启</span>
+            <input type="checkbox" id="autostart-toggle">
+          </div>
+        </div>
+      </aside>
+
+      <!-- 3. 右侧内容区域 -->
+      <main class="content-viewport">
+        
+        <!-- Tab 1: 控制台 -->
+        <section class="tab-pane active" id="console-view">
+          <div class="view-header">
+            <h2>网关控制台</h2>
+            <p>实时监控本地 AI 助手的消息处理流与日志输出</p>
+          </div>
+          
+          <div class="console-grid">
+            <!-- 终端日志区域 -->
+            <div class="console-left" id="tour-log-terminal">
+              <div class="log-terminal" id="log-terminal-output">Ready. Click START to launch Gateway...</div>
+            </div>
+            
+            <!-- 快捷控制与统计卡片 -->
+            <div class="console-right">
+              <button class="gateway-big-btn stopped" id="gateway-toggle-btn">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-start">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-stop" style="display: none;">
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+                </svg>
+                <span id="btn-label-text">启动网关</span>
+              </button>
+              
+              <div class="stat-card-mini">
+                <span>网关监听端口</span>
+                <div class="stat-card-name-val" id="stat-port">18789</div>
+              </div>
+              <div class="stat-card-mini">
+                <span>运行内存占用</span>
+                <div class="stat-card-name-val" id="stat-mem">-- MB</div>
+              </div>
+              <div class="stat-card-mini">
+                <span>活跃通信通道</span>
+                <div class="stat-card-name-val" id="stat-channels">WeChat / WA</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 2: 参数配置 -->
+        <section class="tab-pane" id="config-view">
+          <div class="view-header">
+            <h2>网关参数配置</h2>
+            <p>可视化配置多提供商 API Key 与核心模型选型</p>
+          </div>
+          
+          <div class="config-scrollable" id="tour-config-form">
+            <form id="openclaw-config-form">
+              
+              <!-- 密钥管理 -->
+              <div class="form-group-section">
+                <h3>🔑 API 密钥与授权</h3>
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="key-agnes">Agnes AI Key</label>
+                    <input type="password" id="key-agnes" placeholder="YOUR_AGNES_API_KEY_HERE">
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="key-yitong">阿里云百炼 Key</label>
+                    <input type="password" id="key-yitong" placeholder="YOUR_YITONG_API_KEY_HERE">
+                  </div>
+                  <div class="form-field">
+                    <label for="key-zhipu">智谱 AI Key</label>
+                    <input type="password" id="key-zhipu" placeholder="YOUR_ZHIPU_API_KEY_HERE">
+                  </div>
+                </div>
+              </div>
+
+              <!-- 模型选择与权重 -->
+              <div class="form-group-section">
+                <h3>🤖 模型选型</h3>
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="model-primary">主用模型 (Primary Model)</label>
+                    <select id="model-primary">
+                      <option value="agnes-ai/agnes-2.0-flash">Agnes 2.0 Flash</option>
+                      <option value="agnes-ai/agnes-1.5-flash">Agnes 1.5 Flash</option>
+                      <option value="yitong/qwen3-max">Qwen3-Max (阿里百炼)</option>
+                      <option value="ollama/jarvis">Jarvis (本地离线)</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="model-fallback">备用模型 (Fallback Model)</label>
+                    <select id="model-fallback">
+                      <option value="agnes-ai/agnes-1.5-flash">Agnes 1.5 Flash</option>
+                      <option value="agnes-ai/agnes-2.0-flash">Agnes 2.0 Flash</option>
+                      <option value="yitong/qwen3-max">Qwen3-Max (阿里百炼)</option>
+                      <option value="ollama/jarvis">Jarvis (本地离线)</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field half">
+                    <label for="max-concurrent">最大并发请求数 (Max Concurrent)</label>
+                    <input type="number" id="max-concurrent" min="1" max="10" value="4">
+                  </div>
+                </div>
+              </div>
+
+              <!-- 服务器网关设置 -->
+              <div class="form-group-section">
+                <h3>🌐 网络网关设置</h3>
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="gateway-port">网关运行端口</label>
+                    <input type="number" id="gateway-port" min="1024" max="65535" value="18789">
+                  </div>
+                  <div class="form-field">
+                    <label for="gateway-token">客户端连接 Token (凭证)</label>
+                    <input type="text" id="gateway-token" readonly>
+                  </div>
+                </div>
+              </div>
+
+              <div class="action-bar-footer">
+                <button type="button" class="btn-primary" id="config-save-btn">保存配置</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- Tab 3: 插件开关 -->
+        <section class="tab-pane" id="plugins-view">
+          <div class="view-header">
+            <h2>功能插件开关</h2>
+            <p>一键开启或停用外部适配渠道与功能插件（修改将自动重启网关）</p>
+          </div>
+          
+          <div class="plugins-masonry" id="tour-plugins-grid">
+            <!-- 插件列表由 js 动态生成 -->
+          </div>
+        </section>
+
+        <!-- Tab 4: 用量统计 -->
+        <section class="tab-pane" id="dashboard-view">
+          <div class="view-header">
+            <h2>Token 消耗统计</h2>
+            <p>实时监控本地 AI 助手的模型调用频次与流量占比</p>
+          </div>
+          
+          <div class="dashboard-grid">
+            <!-- 大折线图 -->
+            <div class="chart-panel-large" id="tour-chart-line">
+              <div class="chart-header">最近 7 天 Token 消耗走势</div>
+              <div class="svg-chart-container" id="line-chart-svg-box">
+                <!-- SVG 折线图动态渲染 -->
+              </div>
+            </div>
+            
+            <!-- 小饼图 -->
+            <div class="chart-panel-small" id="tour-chart-pie">
+              <div class="chart-header">各提供商用量占比</div>
+              <div class="svg-chart-container" id="pie-chart-svg-box">
+                <!-- SVG 饼图动态渲染 -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- 4. 新手引导遮罩层 -->
+    <div class="guide-overlay-mask" id="guide-overlay">
+      <div class="guide-step-card">
+        <div class="guide-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span id="guide-step-title">欢迎使用 AI 助手网关</span>
+        </div>
+        <div class="guide-body" id="guide-step-content">
+          这是专为您打造的高颜值本地 AI 助手控制台。我们将用 3 步带您快速上手，体验一键无缝拉起的魅力！
+        </div>
+        <div class="guide-footer">
+          <div class="guide-steps-indicator" id="guide-step-index">步骤 1 / 4</div>
+          <div class="guide-btn-group">
+            <button class="guide-btn" id="guide-btn-skip">跳过引导</button>
+            <button class="guide-btn next" id="guide-btn-next">下一步</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 微信扫码登录遮罩层 -->
+    <div class="qrcode-overlay-mask" id="qrcode-overlay">
+      <div class="qrcode-box-card">
+        <h3>微信扫码登录</h3>
+        <p style="font-size: 13px; color: var(--text-secondary);">检测到微信通道正在等待登录，请使用手机微信扫描下方二维码。</p>
+        <div class="qrcode-image-container">
+          <canvas id="qrcode-canvas" width="180" height="180"></canvas>
+        </div>
+        <button class="qrcode-close-btn" id="qrcode-close-btn">关闭弹窗</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
