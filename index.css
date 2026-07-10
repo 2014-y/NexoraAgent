@@ -461,7 +461,7 @@ body {
   color: var(--text-secondary);
 }
 
-input[type="text"], input[type="password"], select, textarea {
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   background: var(--bg-input) !important;
   border: 1px solid var(--border-color);
   border-radius: 8px;
