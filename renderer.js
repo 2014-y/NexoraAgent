@@ -550,6 +550,13 @@ function setupTabSwitching() {
             if (tab.id === 'btn-nav-openclaw-web') {
                 e.preventDefault();
                 e.stopPropagation();
+                
+                const isRunning = statusLight.classList.contains('running');
+                if (!isRunning) {
+                    showToast('请先在左上角启动网关服务，再访问控制面板哦！');
+                    return;
+                }
+                
                 window.api.openExternal('openclaw-dashboard');
                 return;
             }
@@ -1138,9 +1145,56 @@ document.getElementById('wechat-bind-btn').addEventListener('click', async () =>
         if (result.success) {
             logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
         } else {
-            alert('拉起绑定失败：' + result.error);
+            showToast('拉起绑定失败：' + result.error);
         }
     } catch (err) {
-        alert('拉起异常：' + err.message);
+        showToast('拉起异常：' + err.message);
     }
 });
+
+// 优雅的全局暗色 Toast 提示气泡
+function showToast(message) {
+    let toast = document.getElementById('custom-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'custom-toast';
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(20, 16, 32, 0.95);
+            border: 1px solid rgba(140, 82, 255, 0.3);
+            box-shadow: 0 8px 32px rgba(140, 82, 255, 0.15), 0 0 15px rgba(140, 82, 255, 0.1);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        `;
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8c52ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>${message}</span>
+    `;
+    
+    // 显示
+    setTimeout(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    }, 50);
+    
+    // 3秒后自动消失
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+    }, 3000);
+}
