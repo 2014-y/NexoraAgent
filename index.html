@@ -114,9 +114,14 @@
                 <span>活跃通信通道</span>
                 <div class="stat-card-name-val" id="stat-channels">WeChat / WA</div>
               </div>
-              <button class="btn-wechat-unbind" id="wechat-unbind-btn" title="点击清空微信登录缓存，以绑定新微信号">
-                💬 微信解绑与切换
-              </button>
+              <div class="wechat-control-group" style="display: flex; gap: 8px; margin-top: 10px; width: 100%;">
+                <button class="btn-wechat-unbind" id="wechat-unbind-btn" title="点击清空微信登录缓存，以解绑微信号" style="margin-top: 0; flex: 1;">
+                  💬 微信解绑
+                </button>
+                <button class="btn-wechat-bind" id="wechat-bind-btn" title="点击手动生成登录二维码，以绑定微信" style="flex: 1;">
+                  🔑 绑定微信
+                </button>
+              </div>
             </div>
           </div>
         </section>

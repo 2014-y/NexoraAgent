@@ -262,6 +262,59 @@ ipcMain.handle('wechat-clear', async () => {
     }
 });
 
+let wechatLoginProcess = null;
+
+// 在后台启动独立的微信扫码登录进程
+ipcMain.handle('wechat-login', async () => {
+    try {
+        if (wechatLoginProcess) {
+            try {
+                wechatLoginProcess.kill();
+            } catch (err) {}
+            wechatLoginProcess = null;
+        }
+
+        const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
+        const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+        const forkOptions = {
+            cwd: CONFIG_DIR,
+            stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+        };
+        if (fs.existsSync(nodeExePath)) {
+            forkOptions.execPath = nodeExePath;
+        }
+
+        // 启动 login 指令进程以触发扫码
+        wechatLoginProcess = fork(openclawEntry, ['channels', 'login', '--channel', 'openclaw-weixin'], forkOptions);
+
+        const handleLoginLog = (data) => {
+            const text = data.toString();
+            if (mainWindow) {
+                mainWindow.webContents.send('gateway-log', `[WeChat Login] ${text}`);
+                
+                const qrMatch = text.match(/https?:\/\/(?:login\.)?weixin\.qq\.com\/l\/[^\s"'\n]+/) || 
+                                text.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
+                if (qrMatch) {
+                    mainWindow.webContents.send('gateway-qrcode', qrMatch[0]);
+                }
+            }
+        };
+
+        wechatLoginProcess.stdout.on('data', handleLoginLog);
+        wechatLoginProcess.stderr.on('data', handleLoginLog);
+
+        wechatLoginProcess.on('exit', (code) => {
+            console.log(`WeChat Login process exited with code ${code}`);
+            wechatLoginProcess = null;
+        });
+
+        return { success: true };
+    } catch (e) {
+        console.error('Failed to start WeChat login process:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 // 开机自启的设置与获取
 ipcMain.handle('autostart-get', async () => {
     const settings = app.getLoginItemSettings();

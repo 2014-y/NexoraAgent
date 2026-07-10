@@ -822,7 +822,7 @@ document.getElementById('wechat-unbind-btn').addEventListener('click', async () 
     try {
         const result = await window.api.clearWeChatSession();
         if (result.success) {
-            alert('微信解绑成功！微信登录缓存已彻底清除。\n\n您现在可以重新点击“启动网关”以扫描绑定新的微信账号。');
+            alert('微信解绑成功！微信登录缓存已彻底清除。\n\n您现在可以直接点击右下角“绑定微信”按钮生成全新的登录二维码。');
             if (gatewayStatus === 'running') {
                 gatewayStatus = 'stopped';
                 updateGatewayStatusUI('stopped');
@@ -832,5 +832,20 @@ document.getElementById('wechat-unbind-btn').addEventListener('click', async () 
         }
     } catch (err) {
         alert('解绑操作异常：' + err.message);
+    }
+});
+
+// 14. 微信绑定 (手动登录)
+document.getElementById('wechat-bind-btn').addEventListener('click', async () => {
+    try {
+        logTerminal.innerText += '\n[WeChat Login] 正在唤醒微信手动绑定模块，请稍候...\n';
+        const result = await window.api.triggerWeChatLogin();
+        if (result.success) {
+            logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
+        } else {
+            alert('拉起绑定失败：' + result.error);
+        }
+    } catch (err) {
+        alert('拉起异常：' + err.message);
     }
 });
