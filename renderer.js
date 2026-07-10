@@ -31,6 +31,21 @@ let globalRenderModelsTable = null;
 const appStartupTime = Date.now();
 let gatewayRunningTime = Date.now();
 
+// 真实当前启动后会话用量统计（本次启动清空，不存盘）
+let sessionStats = {
+    total_tokens: 0,
+    total_requests: 0,
+    total_cost: 0.0,
+    sub_input_tokens: 0,
+    sub_output_tokens: 0,
+    sub_hit_tokens: 0,
+    hit_rate: 0.0,
+    hourly_trend: {},
+    logs: [],
+    providers: {},
+    models: {}
+};
+
 // 2. DOM 元素获取
 const tabs = document.querySelectorAll('.nav-item');
 const tabPanes = document.querySelectorAll('.tab-pane');
