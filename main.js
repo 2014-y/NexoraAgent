@@ -760,18 +760,27 @@ ipcMain.handle('open-external', async (event, url) => {
                 try {
                     openclawEntry = require.resolve('openclaw/dist/index.js');
                 } catch(e) {
-                    openclawEntry = "C:\\Users\\Yuan\\AppData\\Roaming\\nvm\\v24.13.0\\node_modules\\openclaw\\dist\\index.js";
+                    // 降级使用全局 openclaw 命令定位，不使用硬编码路径
+                    openclawEntry = 'openclaw';
                 }
             }
 
             return new Promise((resolve) => {
-                const child = fork(openclawEntry, ['dashboard', '--no-open'], {
+                const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+                const forkOptions = {
                     stdio: 'pipe',
                     env: {
-                        ...process.env,
-                        PATH: "C:\\Users\\Yuan\\AppData\\Roaming\\nvm\\v24.13.0;" + process.env.PATH
+                        ...process.env
                     }
-                });
+                };
+                if (fs.existsSync(nodeExePath)) {
+                    forkOptions.execPath = nodeExePath;
+                    const sandboxDir = path.dirname(nodeExePath);
+                    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+                    const originalPath = process.env[pathKey] || '';
+                    forkOptions.env[pathKey] = `${sandboxDir}${path.delimiter}${originalPath}`;
+                }
+                const child = fork(openclawEntry, ['dashboard', '--no-open'], forkOptions);
 
                 let resolved = false;
                 const handleData = (data) => {

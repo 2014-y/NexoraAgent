@@ -3,8 +3,9 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-// 统一日志写入数据库路径
-const logDir = path.join('C:', 'Users', 'Yuan', '.openclaw', 'persistent_logs');
+// 统一日志写入数据库路径 (自适应获取用户主目录，解决硬编码用户名 Yuan 导致别人的白机用量失效的重大 Bug)
+const homeDir = process.env.USERPROFILE || process.env.HOME || (process.env.HOMEDRIVE + process.env.HOMEPATH) || 'C:\\';
+const logDir = path.join(homeDir, '.openclaw', 'persistent_logs');
 const tokenDbPath = path.join(logDir, 'real_tokens.json');
 
 // 辅助写入本地 real_tokens.json 数据库
