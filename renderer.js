@@ -369,7 +369,8 @@ async function init() {
     }
 
     if (settingLanguageSelect) {
-        const initialLang = localStorage.getItem('setting_language') || 'zh-CN';
+        localStorage.setItem('setting_language', 'zh-CN');
+        const initialLang = 'zh-CN';
         settingLanguageSelect.value = initialLang;
         applyLanguage(initialLang);
 
@@ -1060,31 +1061,40 @@ function renderProvidersList() {
     const listZone = document.getElementById('providers-list-zone');
     listZone.innerHTML = '';
 
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const isEn = currentLang === 'en-US';
+    const isTw = currentLang === 'zh-TW';
+    const t = (zhCn, en, zhTw) => {
+        if (isEn) return en;
+        if (isTw) return zhTw;
+        return zhCn;
+    };
+
     for (const key of Object.keys(localProviders)) {
         const provider = localProviders[key];
         const card = document.createElement('div');
         card.className = 'provider-card';
         card.innerHTML = `
             <div class="provider-card-header">
-                <h3>🔌 ${key} <span id="agnes-built-in-tip" style="font-size: 11px; font-weight: normal; color: #b388ff; margin-left: 8px; display: none;">(已启用内置免配置服务通道)</span></h3>
-                <button type="button" class="btn-delete-provider" data-provider="${key}">❌ 删除此厂家</button>
+                <h3>🔌 ${key} <span id="agnes-built-in-tip" style="font-size: 11px; font-weight: normal; color: #b388ff; margin-left: 8px; display: none;">${t('(已启用内置免配置服务通道)', '(Built-in bypass configured)', '(已啟用內置免配置服務通道)')}</span></h3>
+                <button type="button" class="btn-delete-provider" data-provider="${key}">❌ ${t('删除此厂家', 'Delete Provider', '刪除此廠商')}</button>
             </div>
             <div class="form-row">
                 <div class="form-field">
-                    <label>Base URL (API 端点)</label>
-                    <input type="text" class="provider-url-input" data-provider="${key}" value="${provider.baseUrl || ''}" placeholder="例如: https://api.openai.com/v1">
+                    <label>${t('Base URL (API 端点)', 'Base URL (API Endpoint)', 'Base URL (API 端點)')}</label>
+                    <input type="text" class="provider-url-input" data-provider="${key}" value="${provider.baseUrl || ''}" placeholder="${t('例如: https://api.openai.com/v1', 'e.g., https://api.openai.com/v1', '例如: https://api.openai.com/v1')}">
                 </div>
                 <div class="form-field">
-                    <label>API Key (授权密钥)</label>
+                    <label>${t('API Key (授权密钥)', 'API Key', 'API Key (授權金鑰)')}</label>
                     <div class="password-input-wrapper" style="position: relative; display: flex; align-items: center;">
-                        <input type="password" class="provider-key-input" data-provider="${key}" value="${provider.apiKey || ''}" placeholder="API 密钥" style="padding-right: 36px; width: 100%;">
+                        <input type="password" class="provider-key-input" data-provider="${key}" value="${provider.apiKey || ''}" placeholder="${t('API 密钥', 'API Key', 'API 金鑰')}" style="padding-right: 36px; width: 100%;">
                         <span class="btn-toggle-visibility" data-provider="${key}" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-size: 16px; user-select: none;">👁️</span>
                     </div>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-field half">
-                    <label>API 协议类型</label>
+                    <label>${t('API 协议类型', 'API Protocol', 'API 協定類型')}</label>
                     <select class="provider-api-select" data-provider="${key}">
                         <option value="openai-completions" ${provider.api === 'openai-completions' ? 'selected' : ''}>OpenAI Completions</option>
                         <option value="openai-chat" ${provider.api === 'openai-chat' ? 'selected' : ''}>OpenAI Chat</option>
@@ -1093,29 +1103,29 @@ function renderProvidersList() {
                 </div>
             </div>
             <div style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 12px; margin-top: 12px; margin-bottom: 16px;">
-                <button type="button" class="btn-primary btn-test-connection" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap;">⚡ 测试连通性</button>
-                <button type="button" class="btn-secondary btn-test-key" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap; background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); border: none; color: white;">🔑 测试密钥</button>
+                <button type="button" class="btn-primary btn-test-connection" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap;">⚡ ${t('测试连通性', 'Test Connectivity', '測試連通性')}</button>
+                <button type="button" class="btn-secondary btn-test-key" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap; background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); border: none; color: white;">🔑 ${t('测试密钥', 'Test Key', '測試金鑰')}</button>
                 <span id="test-result-${key}" style="font-size: 12px; font-weight: bold; display: none; white-space: nowrap;"></span>
             </div>
             
             <div class="provider-models-zone" style="margin-top: 16px;">
                 <h4 style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <span>🤖 模型白名单管理</span>
-                    <span style="font-size: 11px; color: var(--text-secondary); font-weight: normal;">已配置该厂家的可用模型列表</span>
+                    <span>🤖 ${t('模型白名单管理', 'Model Whitelist', '模型白名單管理')}</span>
+                    <span style="font-size: 11px; color: var(--text-secondary); font-weight: normal;">${t('已配置该厂家的可用模型列表', 'Available models configured for this provider', '已配置該廠商的可用模型列表')}</span>
                 </h4>
                 
                 <div class="model-list-header" style="display: grid; grid-template-columns: 1fr 120px 40px; gap: 12px; padding: 4px 8px; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 8px;">
-                    <div>模型名称 (Model ID)</div>
-                    <div>上下文窗口</div>
-                    <div style="text-align: center;">操作</div>
+                    <div>${t('模型名称 (Model ID)', 'Model ID', '模型名稱 (Model ID)')}</div>
+                    <div>${t('上下文窗口', 'Context Window', '上下文窗口')}</div>
+                    <div style="text-align: center;">${t('操作', 'Actions', '操作')}</div>
                 </div>
 
                 <div class="model-list-container" id="model-list-container-${key}" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px; margin-bottom: 12px;">
                 </div>
 
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <button type="button" class="btn-primary btn-add-new-model-row" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white;">+ 添加模型</button>
-                    <button type="button" class="btn-primary btn-fetch-upstream-models" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(140, 82, 255, 0.15); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff;">📥 从上游获取</button>
+                    <button type="button" class="btn-primary btn-add-new-model-row" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white;">${t('+ 添加模型', '+ Add Model', '+ 新增模型')}</button>
+                    <button type="button" class="btn-primary btn-fetch-upstream-models" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(140, 82, 255, 0.15); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff;">${t('📥 从上游获取', '📥 Fetch Upstream', '📥 從上游獲取')}</button>
                     <span id="fetch-status-${key}" style="font-size: 11px; font-weight: bold; margin-left: 4px; display: none;"></span>
                 </div>
             </div>
@@ -1132,10 +1142,10 @@ function renderProvidersList() {
             row.style.cssText = 'display: grid; grid-template-columns: 1fr 120px 40px; gap: 12px; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.01); border-radius: 6px;';
             row.innerHTML = `
                 <div>
-                    <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="模型名称, 如: gpt-4o" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="${t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
                 <div>
-                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow)}" placeholder="例如: 128k 或 1M" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow)}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
                 <div style="text-align: center;">
                     <button type="button" class="btn-delete-model-row" data-provider="${key}" data-index="${index}" style="background: none; border: none; color: #ff5252; cursor: pointer; font-size: 14px; padding: 4px; line-height: 1;">🗑️</button>
@@ -1175,6 +1185,15 @@ function toggleProviderInputsEditable() {
 
 // 绑定动态卡片事件
 function bindProviderEvents() {
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const isEn = currentLang === 'en-US';
+    const isTw = currentLang === 'zh-TW';
+    const t = (zhCn, en, zhTw) => {
+        if (isEn) return en;
+        if (isTw) return zhTw;
+        return zhCn;
+    };
+
     document.querySelectorAll('.provider-url-input').forEach(input => {
         input.addEventListener('change', (e) => {
             const provider = e.target.getAttribute('data-provider');
@@ -1203,7 +1222,7 @@ function bindProviderEvents() {
     document.querySelectorAll('.btn-delete-provider').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const provider = e.target.getAttribute('data-provider');
-            if (await confirm(`确定要彻底删除厂家 "${provider}" 及其下的所有模型配置吗？`)) {
+            if (await confirm(t(`确定要彻底删除厂家 "${provider}" 及其下的所有模型配置吗？`, `Are you sure you want to completely delete provider "${provider}" and all its model configurations?`, `確定要徹底刪除廠商 "${provider}" 及其下的所有模型配置嗎？`))) {
                 delete localProviders[provider];
                 renderProvidersList();
                 updateModelsDatalist();
@@ -1291,12 +1310,12 @@ function bindProviderEvents() {
             }
 
             if (!baseUrl) {
-                alert('请先输入 Base URL (API 端点)！');
+                alert(t('请先输入 Base URL (API 端点)！', 'Please enter Base URL (API Endpoint) first!', '請先輸入 Base URL (API 端點)！'));
                 return;
             }
 
             if (statusSpan) {
-                statusSpan.innerText = '🔄 正在获取模型...';
+                statusSpan.innerText = t('🔄 正在获取模型...', '🔄 Fetching models...', '🔄 正在獲取模型...');
                 statusSpan.style.color = '#ffd54f';
                 statusSpan.style.display = 'inline-block';
             }
@@ -1347,7 +1366,7 @@ function bindProviderEvents() {
 
                     if (fetchedModels.length === 0) {
                         if (statusSpan) {
-                            statusSpan.innerText = '⚠️ 未找到可用模型';
+                            statusSpan.innerText = t('⚠️ 未找到可用模型', '⚠️ No available models found', '⚠️ 未找到可用模型');
                             statusSpan.style.color = '#ff9800';
                         }
                     } else {
@@ -1369,7 +1388,7 @@ function bindProviderEvents() {
                         });
 
                         if (statusSpan) {
-                            statusSpan.innerText = `✅ 成功新增 ${addCount} 个模型！`;
+                            statusSpan.innerText = t(`✅ 成功新增 ${addCount} 个模型！`, `✅ Successfully added ${addCount} models!`, `✅ 成功新增 ${addCount} 個模型！`);
                             statusSpan.style.color = '#00e676';
                         }
                         
@@ -1381,17 +1400,17 @@ function bindProviderEvents() {
                     }
                 } else {
                     if (statusSpan) {
-                        statusSpan.innerText = `❌ 获取失败 (HTTP ${response.status})`;
+                        statusSpan.innerText = t(`❌ 获取失败 (HTTP ${response.status})`, `❌ Fetch failed (HTTP ${response.status})`, `❌ 獲取失敗 (HTTP ${response.status})`);
                         statusSpan.style.color = '#ff5252';
                     }
                 }
             } catch (error) {
                 if (statusSpan) {
-                    let errMsg = error.message || '网络错误';
+                    let errMsg = error.message || t('网络错误', 'Network Error', '網路錯誤');
                     if (error.name === 'AbortError') {
-                        errMsg = '超时 (10s)';
+                        errMsg = t('超时 (10s)', 'Timeout (10s)', '超時 (10s)');
                     }
-                    statusSpan.innerText = `❌ 获取失败 (${errMsg})`;
+                    statusSpan.innerText = t(`❌ 获取失败 (${errMsg})`, `❌ Fetch failed (${errMsg})`, `❌ 獲取失敗 (${errMsg})`);
                     statusSpan.style.color = '#ff5252';
                 }
             } finally {
@@ -1435,12 +1454,12 @@ function bindProviderEvents() {
             }
 
             if (!baseUrl) {
-                alert('请输入 Base URL (API 端点) 后再进行测试！');
+                alert(t('请输入 Base URL (API 端点) 后再进行测试！', 'Please enter Base URL (API Endpoint) first before testing!', '請輸入 Base URL (API 端點) 後再進行測試！'));
                 return;
             }
 
             if (resultSpan) {
-                resultSpan.innerText = '⚡ 正在测试连接...';
+                resultSpan.innerText = t('⚡ 正在测试连接...', '⚡ Testing connection...', '⚡ 正在測試連接...');
                 resultSpan.style.color = '#ffd54f';
                 resultSpan.style.display = 'inline-block';
             }
@@ -1475,37 +1494,37 @@ function bindProviderEvents() {
                 clearTimeout(timeoutId);
 
                 if (response.ok) {
-                    showToast(`✅ ${provider} 连通性测试连接成功！`);
+                    showToast(t(`✅ ${provider} 连通性测试连接成功！`, `✅ ${provider} connectivity test succeeded!`, `✅ ${provider} 連通性測試連接成功！`));
                     if (resultSpan) {
                         resultSpan.innerHTML = `
-                            <span>✅ 连接成功！</span>
-                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${response.statusText || 'OK'}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                            <span>✅ ${t('连接成功！', 'Connection succeeded!', '連接成功！')}</span>
+                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${response.statusText || 'OK'}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                         `;
                         resultSpan.style.color = '#00e676';
                         bindDetailsClick(resultSpan);
                     }
                 } else {
                     const statusText = response.statusText || `Status: ${response.status}`;
-                    showToast(`❌ ${provider} 连通性测试连接失败 (${response.status})`);
+                    showToast(t(`❌ ${provider} 连通性测试连接失败 (${response.status})`, `❌ ${provider} connectivity test failed (${response.status})`, `❌ ${provider} 連通性測試連接失敗 (${response.status})`));
                     if (resultSpan) {
                         resultSpan.innerHTML = `
-                            <span>❌ 连接失败 (${statusText})</span>
-                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${statusText}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                            <span>❌ ${t('连接失败', 'Connection failed', '連接失敗')} (${statusText})</span>
+                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${statusText}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                         `;
                         resultSpan.style.color = '#ff5252';
                         bindDetailsClick(resultSpan);
                     }
                 }
             } catch (error) {
-                let errMsg = error.message || '网络错误';
+                let errMsg = error.message || t('网络错误', 'Network Error', '網路錯誤');
                 if (error.name === 'AbortError') {
-                    errMsg = '请求超时 (8s)';
+                    errMsg = t('请求超时 (8s)', 'Request Timeout (8s)', '請求超時 (8s)');
                 }
-                showToast(`❌ ${provider} 连通性测试超时或失败`);
+                showToast(t(`❌ ${provider} 连通性测试超时或失败`, `❌ ${provider} connectivity test timed out or failed`, `❌ ${provider} 連通性測試超時或失敗`));
                 if (resultSpan) {
                     resultSpan.innerHTML = `
-                        <span>❌ 连接超时或失败 (${errMsg})</span>
-                        <span class="btn-view-request-details" data-url="${testUrl || '无'}" data-status="无" data-status-text="网络异常或超时" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                        <span>❌ ${t('连接超时或失败', 'Connection timed out or failed', '連接超時或失敗')} (${errMsg})</span>
+                        <span class="btn-view-request-details" data-url="${testUrl || '无'}" data-status="无" data-status-text="${t('网络异常或超时', 'Network anomaly or timeout', '網路異常或超時')}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                     `;
                     resultSpan.style.color = '#ff5252';
                     bindDetailsClick(resultSpan);
@@ -1537,13 +1556,13 @@ function bindProviderEvents() {
             }
 
             if (!baseUrl) {
-                alert('请输入 Base URL (API 端点) 后再进行测试！');
+                alert(t('请输入 Base URL (API 端点) 后再进行测试！', 'Please enter Base URL (API Endpoint) first before testing!', '請輸入 Base URL (API 端點) 後再進行測試！'));
                 return;
             }
 
             if (apiType === 'ollama') {
                 if (resultSpan) {
-                    resultSpan.innerText = '✅ 本地 Ollama 无需密钥验证';
+                    resultSpan.innerText = t('✅ 本地 Ollama 无需密钥验证', '✅ Local Ollama requires no key validation', '✅ 本地 Ollama 無需金鑰驗證');
                     resultSpan.style.color = '#00e676';
                     resultSpan.style.display = 'inline-block';
                 }
@@ -1551,7 +1570,7 @@ function bindProviderEvents() {
             }
 
             if (resultSpan) {
-                resultSpan.innerText = '🔑 正在验证密钥有效性...';
+                resultSpan.innerText = t('🔑 正在验证密钥有效性...', '🔑 Validating key...', '🔑 正在驗證金鑰有效性...');
                 resultSpan.style.color = '#ffd54f';
                 resultSpan.style.display = 'inline-block';
             }
@@ -1598,45 +1617,45 @@ function bindProviderEvents() {
                 clearTimeout(timeoutId);
 
                 if (response.ok) {
-                    showToast(`✅ ${provider} API Key 密钥验证有效！`);
+                    showToast(t(`✅ ${provider} API Key 密钥验证有效！`, `✅ ${provider} API Key validation succeeded!`, `✅ ${provider} API Key 金鑰驗證有效！`));
                     if (resultSpan) {
                         resultSpan.innerHTML = `
-                            <span>✅ 密钥验证有效！</span>
-                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${response.statusText || 'OK'}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                            <span>✅ ${t('密钥验证有效！', 'Key validation succeeded!', '金鑰驗證有效！')}</span>
+                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${response.statusText || 'OK'}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                         `;
                         resultSpan.style.color = '#00e676';
                         bindDetailsClick(resultSpan);
                     }
                 } else {
                     const statusText = response.statusText || `Status: ${response.status}`;
-                    let errTip = `验证失败 (${statusText})`;
+                    let errTip = t(`验证失败 (${statusText})`, `Validation failed (${statusText})`, `驗證失敗 (${statusText})`);
                     if (response.status === 401 || response.status === 403) {
-                        errTip = '❌ 密钥无效 (401/403)';
+                        errTip = t('❌ 密钥无效 (401/403)', '❌ Invalid Key (401/403)', '❌ 金鑰無效 (401/403)');
                     } else if (response.status === 429) {
-                        errTip = '⚠️ 额度不足或触发限频 (429)';
+                        errTip = t('⚠️ 额度不足或触发限频 (429)', '⚠️ Insufficient balance or rate limited (429)', '⚠️ 額度不足或觸發限頻 (429)');
                     } else if (response.status === 404) {
-                        errTip = '⚠️ 接口或模型名无效 (404)';
+                        errTip = t('⚠️ 接口或模型名无效 (404)', '⚠️ Invalid endpoint or model (404)', '⚠️ 介面或模型名無效 (404)');
                     }
-                    showToast(response.status === 401 || response.status === 403 ? `❌ ${provider} 密钥验证失败：密钥无效` : `❌ ${provider} 密钥验证失败 (${response.status})`);
+                    showToast(response.status === 401 || response.status === 403 ? t(`❌ ${provider} 密钥验证失败：密钥无效`, `❌ ${provider} key validation failed: Invalid Key`, `❌ ${provider} 金鑰驗證失敗：金鑰無效`) : t(`❌ ${provider} 密钥验证失败 (${response.status})`, `❌ ${provider} key validation failed (${response.status})`, `❌ ${provider} 金鑰驗證失敗 (${response.status})`));
                     if (resultSpan) {
                         resultSpan.innerHTML = `
                             <span>${errTip}</span>
-                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${statusText}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                            <span class="btn-view-request-details" data-url="${testUrl}" data-status="${response.status}" data-status-text="${statusText}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                         `;
                         resultSpan.style.color = response.status === 429 ? '#ffd54f' : '#ff5252';
                         bindDetailsClick(resultSpan);
                     }
                 }
             } catch (error) {
-                let errMsg = error.message || '网络错误';
+                let errMsg = error.message || t('网络错误', 'Network Error', '網路錯誤');
                 if (error.name === 'AbortError') {
-                    errMsg = '请求超时 (8s)';
+                    errMsg = t('请求超时 (8s)', 'Request Timeout (8s)', '請求超時 (8s)');
                 }
-                showToast(`❌ ${provider} 密钥验证超时或异常`);
+                showToast(t(`❌ ${provider} 密钥验证超时或异常`, `❌ ${provider} key validation timed out or encountered exception`, `❌ ${provider} 金鑰驗證超時或異常`));
                 if (resultSpan) {
                     resultSpan.innerHTML = `
-                        <span>❌ 验证超时或失败 (${errMsg})</span>
-                        <span class="btn-view-request-details" data-url="${testUrl || '无'}" data-status="无" data-status-text="网络异常或超时" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">[查看请求详情]</span>
+                        <span>❌ ${t('验证超时或失败', 'Validation timed out or failed', '驗證超時或失敗')} (${errMsg})</span>
+                        <span class="btn-view-request-details" data-url="${testUrl || '无'}" data-status="无" data-status-text="${t('网络异常或超时', 'Network anomaly or timeout', '網路異常或超時')}" data-headers="${encodeURIComponent(JSON.stringify(headers))}" style="cursor: pointer; color: #b388ff; text-decoration: underline; font-size: 11px; margin-left: 8px; user-select: none;">${t('[查看请求详情]', '[View Request Details]', '[查看請求詳情]')}</span>
                     `;
                     resultSpan.style.color = '#ff5252';
                     bindDetailsClick(resultSpan);
@@ -1686,20 +1705,29 @@ document.getElementById('modal-close-btn').addEventListener('click', closeAddPro
 document.getElementById('modal-cancel-btn').addEventListener('click', closeAddProviderModal);
 
 document.getElementById('modal-confirm-btn').addEventListener('click', () => {
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const isEn = currentLang === 'en-US';
+    const isTw = currentLang === 'zh-TW';
+    const t = (zhCn, en, zhTw) => {
+        if (isEn) return en;
+        if (isTw) return zhTw;
+        return zhCn;
+    };
+
     const providerName = newProviderIdInput.value.trim();
     if (!providerName) {
-        alert("请输入厂商标识！");
+        alert(t("请输入厂商标识！", "Please enter provider ID!", "請輸入廠商標識！"));
         return;
     }
 
     const key = providerName.toLowerCase();
     if (!/^[a-z0-9_-]+$/.test(key)) {
-        alert("格式错误！厂商标识仅能由小写字母、数字及中划线/下划线组成。");
+        alert(t("格式错误！厂商标识仅能由小写字母、数字及中划线/下划线组成。", "Format error! Provider ID can only contain lowercase letters, numbers, hyphens, and underscores.", "格式錯誤！廠商標識僅能由小寫字母、數字及中劃線/下劃線組成。"));
         return;
     }
 
     if (localProviders[key]) {
-        alert("该厂商标识已存在！");
+        alert(t("该厂商标识已存在！", "This provider ID already exists!", "該廠商標識已存在！"));
         return;
     }
 
@@ -1718,7 +1746,16 @@ document.getElementById('modal-confirm-btn').addEventListener('click', () => {
 
 // 放弃修改并还原配置
 document.getElementById('config-reset-btn').addEventListener('click', async () => {
-    const confirmReset = await confirm('确定要放弃当前所有未保存的修改，并还原到上一次成功保存的配置吗？');
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const isEn = currentLang === 'en-US';
+    const isTw = currentLang === 'zh-TW';
+    const t = (zhCn, en, zhTw) => {
+        if (isEn) return en;
+        if (isTw) return zhTw;
+        return zhCn;
+    };
+
+    const confirmReset = await confirm(t('确定要放弃当前所有未保存的修改，并还原到上一次成功保存的配置吗？', 'Are you sure you want to discard all unsaved changes and revert to the last successfully saved configuration?', '確定要放棄當前所有未保存的修改，並還原到上一次成功保存的配置嗎？'));
     if (confirmReset) {
         await loadAndRenderConfig();
         const saveBtns = [
@@ -1727,7 +1764,7 @@ document.getElementById('config-reset-btn').addEventListener('click', async () =
         ];
         saveBtns.forEach(btn => {
             if (btn) {
-                btn.innerText = '保存配置';
+                btn.innerText = t('保存配置', 'Save Configuration', '保存配置');
                 btn.style.background = '';
                 btn.style.boxShadow = '';
                 btn.removeAttribute('disabled');
@@ -1741,6 +1778,15 @@ document.getElementById('config-reset-btn').addEventListener('click', async () =
 
 // 通用的统一保存配置处理器
 const handleSaveConfigAction = async () => {
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const isEn = currentLang === 'en-US';
+    const isTw = currentLang === 'zh-TW';
+    const t = (zhCn, en, zhTw) => {
+        if (isEn) return en;
+        if (isTw) return zhTw;
+        return zhCn;
+    };
+
     if (!configData) return;
 
     // 1. 同步保存提供商与模型白名单
@@ -1797,7 +1843,7 @@ const handleSaveConfigAction = async () => {
     // 调用 API 保存配置
     const result = await window.api.saveConfig(configData);
     if (result.success) {
-        alert('配置已成功保存！');
+        alert(t('配置已成功保存！', 'Configuration saved successfully!', '配置已成功保存！'));
         await loadAndRenderConfig();
         const saveBtns = [
             document.getElementById('config-save-btn'),
@@ -1805,7 +1851,7 @@ const handleSaveConfigAction = async () => {
         ];
         saveBtns.forEach(btn => {
             if (btn) {
-                btn.innerText = '保存配置';
+                btn.innerText = t('保存配置', 'Save Configuration', '保存配置');
                 btn.style.background = '';
                 btn.style.boxShadow = '';
                 btn.removeAttribute('disabled');
@@ -1813,14 +1859,14 @@ const handleSaveConfigAction = async () => {
         });
         statPort.innerText = configData.gateway.port;
         if (gatewayStatus === 'running') {
-            const restart = await confirm('网关正在运行中，是否立即重启网关以使新配置生效？');
+            const restart = await confirm(t('网关正在运行中，是否立即重启网关以使新配置生效？', 'Gateway is running. Do you want to restart it now to apply the new configuration?', '網關正在運行中，是否立即重啟網關以使新配置生效？'));
             if (restart) {
                 window.api.gatewayAction('stop');
                 setTimeout(() => window.api.gatewayAction('start'), 1000);
             }
         }
     } else {
-        alert('配置保存失败：' + result.error);
+        alert(t('配置保存失败：', 'Failed to save configuration: ', '配置保存失敗：') + result.error);
     }
 };
 
@@ -1840,6 +1886,7 @@ function renderPluginsGrid() {
 
     const entries = configData.plugins.entries;
     for (const key of Object.keys(pluginMetadata)) {
+        if (['openclaw-weixin', 'voice-call', 'telegram', 'whatsapp'].includes(key)) continue;
         const plugin = pluginMetadata[key];
         let isEnabled = false;
         if (key === 'auto-start-codex') {

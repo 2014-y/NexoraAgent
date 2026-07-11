@@ -348,6 +348,24 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- 双模型教学配置 -->
+                <div class="form-group-section" id="section-dual-model-trainer">
+                  <h3>🧠 双模型教学配置 (Teach-Learn Mode)</h3>
+                  <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; margin-top: -8px;">
+                    启用双模型教学时，网关将使用“教学老师模型”生成的回答，训练并让“模仿学生模型”（专属本地模型）进行 1:1 的口吻模仿
+                  </p>
+                  <div class="form-row">
+                    <div class="form-field">
+                      <label for="model-teacher">教学老师模型 (Teacher Model - 推荐云端高智能模型)</label>
+                      <input type="text" id="model-teacher" list="models-datalist" autocomplete="off" placeholder="例如: yitong/qwen3-max 或 deepseek/deepseek-chat">
+                    </div>
+                    <div class="form-field">
+                      <label for="model-student">模仿学生模型 (Student Model - 专属本地模型)</label>
+                      <input type="text" id="model-student" list="models-datalist" autocomplete="off" placeholder="例如: ollama/qwen2.5:7b 或 ollama/llama3">
+                    </div>
+                  </div>
+                </div>
                 
                 <!-- 图片生成设置 -->
                 <div class="form-group-section">
@@ -670,7 +688,7 @@
             </div>
 
             <!-- 语言首选项 -->
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
+            <div id="setting-language-row" style="display: none !important; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
               <div>
                 <div style="font-size: 13px; font-weight: bold; color: white;">🌐 界面语言首选项 (Language)</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">切换客户端和面板展示的系统语言语系。</div>
@@ -678,6 +696,7 @@
               <div>
                 <select id="setting-language-select" style="background: var(--bg-input) !important; color: white; border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 8px; font-size: 12px; outline: none; height: 30px;">
                   <option value="zh-CN">简体中文</option>
+                  <option value="zh-TW">繁體中文</option>
                   <option value="en-US">English</option>
                 </select>
               </div>

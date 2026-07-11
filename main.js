@@ -50,7 +50,7 @@ function createWindow() {
         maximizable: true, // 允许最大化
         show: false, // 默认隐藏，在 ready-to-show 时一次性优雅展出，防止启动黑屏闪烁
         backgroundColor: '#0d0b18', // 曜石黑暗色底底色，平滑窗口拉起首屏加载
-        icon: path.join(__dirname, 'config', 'icon.jpg'), // 窗口图标
+        icon: path.join(__dirname, 'config', 'icon.png'), // 窗口图标
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -128,7 +128,7 @@ function createWindow() {
 
 // 创建系统托盘
 function createTray() {
-    tray = new Tray(path.join(__dirname, 'config', 'icon.jpg')); // 使用机器人高级图标
+    tray = new Tray(path.join(__dirname, 'config', 'icon.png')); // 使用机器人高级图标
     const contextMenu = Menu.buildFromTemplate([
         { 
             label: '显示主界面', 
@@ -372,7 +372,34 @@ ipcMain.handle('config-read', async () => {
         }
         let content = fs.readFileSync(CONFIG_PATH, 'utf8');
         content = content.replace(/^\uFEFF/, '');
-        return JSON.parse(content);
+        const config = JSON.parse(content);
+        // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
+        let needsSave = false;
+        if (!config.ui) { config.ui = {}; needsSave = true; }
+        if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
+        if (!config.ui.assistant.avatar) {
+            config.ui.assistant.avatar = '🤖';
+            config.ui.assistant.name = config.ui.assistant.name || 'AI助手';
+            needsSave = true;
+        }
+        if (!config.gateway) { config.gateway = {}; needsSave = true; }
+        if (!config.gateway.controlUi) { config.gateway.controlUi = {}; needsSave = true; }
+        if (config.gateway.controlUi.basePath !== '/acp') {
+            config.gateway.controlUi.basePath = '/acp';
+            needsSave = true;
+        }
+        // 确保微信插件始终处于启用状态
+        if (!config.plugins) { config.plugins = {}; needsSave = true; }
+        if (!config.plugins.entries) { config.plugins.entries = {}; needsSave = true; }
+        if (!config.plugins.entries['openclaw-weixin'] || config.plugins.entries['openclaw-weixin'].enabled !== true) {
+            config.plugins.entries['openclaw-weixin'] = config.plugins.entries['openclaw-weixin'] || {};
+            config.plugins.entries['openclaw-weixin'].enabled = true;
+            needsSave = true;
+        }
+        if (needsSave) {
+            try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8'); } catch(e) {}
+        }
+        return config;
     } catch (e) {
         console.error('Failed to read config:', e);
         return null;

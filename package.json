@@ -13,7 +13,7 @@
     "whatsapp",
     "agnes-ai"
   ],
-  "author": "2014-y",
+  "author": "AI助手",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -54,6 +54,7 @@
     },
     "win": {
       "icon": "config/icon.ico",
+      "publisherName": "AI助手",
       "target": [
         "nsis"
       ]
@@ -63,7 +64,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI助手"
+      "shortcutName": "AI助手",
+      "include": "config/installer.nsh",
+      "installerIcon": "config/icon.ico",
+      "uninstallerIcon": "config/icon.ico"
     },
     "files": [
       "main.js",
@@ -77,6 +81,9 @@
       "config/icon.png",
       "config/icon.ico",
       "node_modules/**/*",
+      "!node_modules/electron/**/*",
+      "!node_modules/electron-builder/**/*",
+      "!node_modules/electron-packager/**/*",
       ".node-sandbox/**/*"
     ]
   }
