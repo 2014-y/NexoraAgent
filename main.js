@@ -3,6 +3,18 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session } = requi
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
+process.on('uncaughtException', (err) => {
+    try {
+        const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'main_error.log');
+        fs.writeFileSync(logPath, err.stack || err.message, 'utf8');
+    } catch(e) {}
+});
+process.on('unhandledRejection', (reason) => {
+    try {
+        const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'main_error.log');
+        fs.writeFileSync(logPath, String(reason), 'utf8');
+    } catch(e) {}
+});
 
 let mainWindow = null;
 let tray = null;
@@ -52,28 +64,19 @@ function createWindow() {
     session.defaultSession.clearCache().catch(() => {});
 
     const resolvedPath = path.resolve(__dirname, 'index.html');
-    require('fs').writeFileSync(
-        path.join(__dirname, 'load_path_debug.log'),
-        `Loaded index.html path: ${resolvedPath}\nApp path: ${app.getAppPath()}\n__dirname: ${__dirname}\n`,
-        'utf8'
-    );
 
     mainWindow.loadFile('index.html');
 
     mainWindow.webContents.on('did-finish-load', async () => {
         try {
             const html = await mainWindow.webContents.executeJavaScript("document.body.innerHTML");
-            require('fs').writeFileSync(
-                path.join(__dirname, 'actual_rendered_html.log'),
-                html,
-                'utf8'
-            );
+            const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'actual_rendered_html.log');
+            require('fs').writeFileSync(logPath, html, 'utf8');
         } catch (e) {
-            require('fs').writeFileSync(
-                path.join(__dirname, 'actual_rendered_html.log'),
-                `Error executing script: ${e.message}`,
-                'utf8'
-            );
+            try {
+                const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'actual_rendered_html.log');
+                require('fs').writeFileSync(logPath, `Error executing script: ${e.message}`, 'utf8');
+            } catch (err) {}
         }
     });
 

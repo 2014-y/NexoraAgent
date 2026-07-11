@@ -68,6 +68,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "patch_gateway.js",
       "renderer.js",
       "index.html",
       "index.css",
