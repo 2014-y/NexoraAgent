@@ -579,27 +579,112 @@ ipcMain.handle('autostart-set', async (event, enabled) => {
     return true;
 });
 
-// 读取本地真实大模型调用统计
+// 读取本地真实大模型调用统计 (使用纯原生 Node.js 实现，彻底剔除外部 Python 脚本依赖，实现 100% 开箱即用)
 ipcMain.handle('stats-get', async () => {
-    return new Promise((resolve) => {
-        const statsPyPath = path.join(__dirname, 'inspect_stats.py');
-        const { exec } = require('child_process');
-        
-        exec(`python "${statsPyPath}"`, { encoding: 'utf8' }, (error, stdout, stderr) => {
-            if (error) {
-                console.error('Failed to execute inspect_stats.py:', error, stderr);
-                resolve({ success: false, error: error.message });
-                return;
-            }
+    try {
+        const stats = {
+            total_tokens: 0,
+            total_requests: 0,
+            total_cost: 0.0,
+            sub_input_tokens: 0,
+            sub_output_tokens: 0,
+            sub_hit_tokens: 0,
+            hit_rate: 0.0,
+            hourly_trend: {}, // {hour: {cost: 0, hit: 0, input: 0, output: 0}}
+            logs: [],
+            providers: {},
+            models: {}
+        };
+
+        const persistentDir = path.join(CONFIG_DIR, 'persistent_logs');
+        const realTokensPath = path.join(persistentDir, 'real_tokens.json');
+
+        if (fs.existsSync(realTokensPath)) {
             try {
-                const data = JSON.parse(stdout);
-                resolve({ success: true, data });
-            } catch (err) {
-                console.error('Failed to parse stats JSON:', err, stdout);
-                resolve({ success: false, error: 'JSON解析错误' });
+                const content = fs.readFileSync(realTokensPath, 'utf8');
+                const realLogs = JSON.parse(content);
+                if (Array.isArray(realLogs)) {
+                    for (const log of realLogs) {
+                        const p_name = log.provider || 'gateway';
+                        const m_name = log.model || 'unknown-model';
+                        const input_t = parseInt(log.input) || 0;
+                        const output_t = parseInt(log.output) || 0;
+                        const hit_t = parseInt(log.hit) || 0;
+                        const elapsed_str = log.duration || '1.0s';
+                        
+                        let elapsed_ms = 1000;
+                        try {
+                            elapsed_ms = parseInt(parseFloat(elapsed_str.replace('s', '')) * 1000);
+                        } catch(e) {}
+                        
+                        const timestamp = log.timestamp || Date.now();
+                        const est_tokens = input_t + output_t + hit_t;
+                        
+                        stats.total_tokens += est_tokens;
+                        stats.total_requests += 1;
+                        stats.sub_input_tokens += input_t;
+                        stats.sub_output_tokens += output_t;
+                        stats.sub_hit_tokens += hit_t;
+                        
+                        const dt = new Date(timestamp);
+                        const hour_str = `${dt.getHours().toString().padStart(2, '0')}:00`;
+                        
+                        if (!stats.hourly_trend[hour_str]) {
+                            stats.hourly_trend[hour_str] = { cost: 0, hit: 0, input: 0, output: 0 };
+                        }
+                        stats.hourly_trend[hour_str].input += input_t;
+                        stats.hourly_trend[hour_str].output += output_t;
+                        stats.hourly_trend[hour_str].hit += hit_t;
+                        
+                        if (!stats.providers[p_name]) {
+                            stats.providers[p_name] = { requests: 0, tokens: 0, hit: 0 };
+                        }
+                        stats.providers[p_name].requests += 1;
+                        stats.providers[p_name].tokens += est_tokens;
+                        stats.providers[p_name].hit += hit_t;
+                        
+                        if (!stats.models[m_name]) {
+                            stats.models[m_name] = { provider: p_name, calls: 0, tokens: 0, duration: 0.0, hit: 0 };
+                        }
+                        stats.models[m_name].calls += 1;
+                        stats.models[m_name].tokens += est_tokens;
+                        stats.models[m_name].duration += (elapsed_ms / 1000.0);
+                        stats.models[m_name].hit += hit_t;
+                        
+                        const time_str = log.time || `${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
+                        stats.logs.push({
+                            time: time_str,
+                            provider: p_name,
+                            model: m_name,
+                            input: input_t,
+                            output: output_t,
+                            hit: hit_t,
+                            duration: elapsed_str,
+                            status: log.status || '成功',
+                            timestamp: timestamp
+                        });
+                    }
+                }
+            } catch(err) {
+                console.error('Failed to parse real_tokens.json in stats:', err);
             }
-        });
-    });
+        }
+
+        if (stats.total_tokens > 0) {
+            stats.hit_rate = (stats.sub_hit_tokens / stats.total_tokens) * 100.0;
+        }
+        
+        // 计算成本：输入 1.5$/M，输出 6.0$/M
+        stats.total_cost = (stats.sub_input_tokens / 1000000.0) * 1.5 + (stats.sub_output_tokens / 1000000.0) * 6.0;
+        
+        // 按时间戳降序排列，取最近 50 条
+        stats.logs.sort((a, b) => b.timestamp - a.timestamp);
+        stats.logs = stats.logs.slice(0, 50);
+
+        return { success: true, data: stats };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
 });
 
 // 获取本地最新的带 token 的网关面板 URL
