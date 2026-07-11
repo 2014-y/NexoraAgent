@@ -526,10 +526,15 @@ ipcMain.handle('wechat-login', async () => {
         const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
         const forkOptions = {
             cwd: CONFIG_DIR,
-            stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+            stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+            env: { ...process.env }
         };
         if (fs.existsSync(nodeExePath)) {
             forkOptions.execPath = nodeExePath;
+            const sandboxDir = path.dirname(nodeExePath);
+            const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+            const originalPath = process.env[pathKey] || '';
+            forkOptions.env[pathKey] = `${sandboxDir}${path.delimiter}${originalPath}`;
         }
 
         // 启动 login 指令进程以触发扫码
