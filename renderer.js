@@ -1913,6 +1913,11 @@ function updateProgressUI(val, textLabel = '') {
     const progressPercent = document.getElementById('terminal-progress-bar-percent');
     const progressText = document.getElementById('terminal-progress-bar-text');
     const sidebarPercent = document.getElementById('sidebar-status-percentage');
+    const progressContainer = document.getElementById('terminal-progress-bar-container');
+
+    if (progressContainer && val < 100) {
+        progressContainer.style.opacity = '1';
+    }
 
     if (progressFill) progressFill.style.width = `${val.toFixed(0)}%`;
     if (progressPercent) progressPercent.innerText = `${val.toFixed(0)}%`;
@@ -1937,8 +1942,23 @@ function updateProgressUI(val, textLabel = '') {
     // 🌟 启动就绪成功提示弹窗
     if (gatewayStatus === 'starting' && oldProgress < 100 && val === 100) {
         setTimeout(() => {
-            alert('🎉 网关核心服务已成功启用并就绪！\n\n本地 AI 消息路由总线已在后台进入稳定运行状态。');
+            alert('🎉 网关核心服务已成功启用并就绪！\n\n本地 AI 消息路由总线已在后台进入 stable 运行状态。');
         }, 100);
+    }
+
+    // 🌟 就绪 3 秒后优雅渐隐进度条
+    if (val === 100 && progressContainer) {
+        setTimeout(() => {
+            if (gatewayStatus === 'running' && currentProgress === 100) {
+                progressContainer.style.transition = 'opacity 0.8s ease';
+                progressContainer.style.opacity = '0';
+                setTimeout(() => {
+                    if (gatewayStatus === 'running' && currentProgress === 100) {
+                        progressContainer.style.display = 'none';
+                    }
+                }, 800);
+            }
+        }, 3000);
     }
 }
 
