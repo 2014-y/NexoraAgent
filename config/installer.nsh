@@ -1,4 +1,4 @@
 !macro customHeader
   ShowInstDetails show
   ShowUninstDetails show
-!endmacro
+!macroend
