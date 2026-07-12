@@ -285,7 +285,7 @@ ipcMain.on('gateway-action', (event, action) => {
             const forkOptions = {
                 cwd: CONFIG_DIR,
                 stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-                execArgv: ['--require', patchPath, '--no-warnings'],
+                execArgv: ['--require', patchPath, '--no-warnings', '--dns-result-order=ipv4first'],
                 env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' } // 拷贝当前环境变量以便注入沙箱路径
             };
             if (fs.existsSync(nodeExePath)) {
@@ -597,7 +597,7 @@ ipcMain.handle('wechat-login', async () => {
         const forkOptions = {
             cwd: CONFIG_DIR,
             stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-            execArgv: ['--no-warnings'],
+            execArgv: ['--no-warnings', '--dns-result-order=ipv4first'],
             env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' }
         };
         if (fs.existsSync(nodeExePath)) {
@@ -846,7 +846,7 @@ ipcMain.handle('open-external', async (event, url) => {
                 const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
                 const forkOptions = {
                     stdio: 'pipe',
-                    execArgv: ['--no-warnings'],
+                    execArgv: ['--no-warnings', '--dns-result-order=ipv4first'],
                     env: {
                         ...process.env,
                         NODE_TLS_REJECT_UNAUTHORIZED: '0'
