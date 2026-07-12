@@ -1005,8 +1005,8 @@ ipcMain.handle('check-update', async (event, isManual) => {
         } else {
             // API 请求失败，但是重定向成功拿到版本号的情况
             releaseNotes = `由于网络限制（GitHub API 访问受限），未能加载详细的更新日志。\n\n你可以尝试点击【立即升级】进行软件内自动升级，或在浏览器中打开主页手动下载安装包。\n\n错误信息：${errorMsg}`;
-            // 构造默认的下载文件名与地址
-            fileName = `ClawAI Setup ${latestVersion}.exe`;
+            // 构造默认的下载文件名与地址 (使用点号命名以匹配 GitHub 线上附件格式)
+            fileName = `ClawAI.Setup.${latestVersion}.exe`;
             const tag = redirectTag || `v${latestVersion}`;
             downloadUrl = `https://github.com/2014-y/AI-v24.13.0/releases/download/${tag}/${fileName}`;
         }
