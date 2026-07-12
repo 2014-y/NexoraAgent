@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>基于 OpenClaw 的本地 AI 智能网关桌面中心。零环境依赖，一键部署，多渠道接入，开箱即用。</strong>
+  <strong>基于 OpenClaw 的零环境依赖本地 AI 智能网关，支持一键部署与多渠道接入。</strong>
 </p>
 
 <p align="center">
