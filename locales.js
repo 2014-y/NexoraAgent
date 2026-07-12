@@ -37,15 +37,15 @@ window.LOCALES = {
     'console.app_uptime': '应用已运行时间:',
 
     // 模型会话 (Chat Room)
-    'chat.title': '模型对话测试',
-    'chat.desc': '选择一个已配置的模型进行连通性测试与多轮对话',
+    'chat.title': '模型对话',
+    'chat.desc': '选择一个已配置的模型进行多轮对话',
     'chat.placeholder.select_model': '-- 请选择对话模型 --',
     'chat.placeholder.input_prompt': '输入消息，按下 Ctrl + Enter 发送...',
     'chat.btn.send': '发送',
     'chat.btn.clear': '🗑️ 清屏',
     'chat.system_prompt_label': '系统提示词 (System Prompt):',
     'chat.system_prompt_placeholder': '在此设定 AI 的系统预设角色，留空则使用模型默认设置...',
-    'chat.welcome': '🤖 欢迎使用 ClawAI 多轮对话测试终端。请在顶部选择您想测试的模型，并输入提示词开始体验！',
+    'chat.welcome': '🤖 欢迎使用 ClawAI 多轮对话终端。请在顶部选择您想对话的模型，并输入提示词开始体验！',
 
     // 模型配置 (Model Config)
     'config.title': '网关模型提供商与参数配置',
@@ -281,7 +281,7 @@ window.LOCALES = {
     'console.progress.starting': '网关正在启动中...',
     'chat.welcome.greeting': '您好！我是您的智能助手。',
     'chat.welcome.functions': '在这里您可以：',
-    'chat.welcome.chat_mode': '与当前选中的大模型进行实时对话及可用性测试；',
+    'chat.welcome.chat_mode': '与当前选中的大模型进行实时对话；',
     'chat.welcome.image_mode': '点击左下角按钮上传图片，让支持多模态的模型进行**识图对话**；',
     'chat.welcome.generator_mode': '输入指令并点击下方生图/生视频快捷键，快速体验生成式创作。',
     'status.offline_hint': '当前本地的 OpenClaw 网关未启动，请前往【控制台】启动网关。',
@@ -309,7 +309,7 @@ window.LOCALES = {
     'toast.gateway_start_err': '拉起异常：',
     'toast.config_reset_success': '🔄 已成功放弃修改，已还原回上一次保存的配置',
     'status.running': '我已经与您本地的 OpenClaw 网关成功对接！',
-    'status.stopped': '当前已启用模型直连服务，无需启动本地网关即可直接对话测试。',
+    'status.stopped': '当前已启用模型直连服务，无需启动本地网关即可直接对话。',
     'status.starting': '正在连接本地的 OpenClaw 网关，请稍候...'
   },
   
@@ -350,15 +350,15 @@ window.LOCALES = {
     'console.app_uptime': 'App Running Uptime:',
 
     // Chat Room
-    'chat.title': 'Model Chat Test',
-    'chat.desc': 'Select a configured model for connectivity testing and multi-turn conversations',
+    'chat.title': 'Model Chat',
+    'chat.desc': 'Select a configured model for multi-turn conversations',
     'chat.placeholder.select_model': '-- Select a Model --',
     'chat.placeholder.input_prompt': 'Type messages, press Ctrl + Enter to send...',
     'chat.btn.send': 'Send',
     'chat.btn.clear': '🗑️ Clear Screen',
     'chat.system_prompt_label': 'System Prompt:',
     'chat.system_prompt_placeholder': 'Set a system preset role for the AI, leave empty to use model defaults...',
-    'chat.welcome': '🤖 Welcome to the ClawAI conversation test terminal. Select a model at the top and type a message to start!',
+    'chat.welcome': '🤖 Welcome to ClawAI multi-turn chat terminal. Please select the model you want to chat with at the top, and enter the prompt to start!',
 
     // Model Config
     'config.title': 'Gateway Providers & Parameter Configurations',
@@ -449,7 +449,7 @@ window.LOCALES = {
     'settings.lang.en_US': 'English',
     'settings.section.about': 'ℹ️ About',
     'settings.about.title': 'ClawAI',
-    'settings.about.desc': 'Local intelligent model gateway and WeChat channel management center.',
+    'settings.about.desc': 'Local intelligent LLM gateway & WeChat channel management desktop control center.',
 
     // About
     'about.title': 'About ClawAI',
@@ -594,7 +594,7 @@ window.LOCALES = {
     'console.progress.starting': 'Gateway is starting up...',
     'chat.welcome.greeting': 'Hello! I am your AI assistant. ',
     'chat.welcome.functions': 'Here you can:',
-    'chat.welcome.chat_mode': 'Chat in real-time with the currently selected model;',
+    'chat.welcome.chat_mode': 'Conduct real-time chat with the currently selected large model;',
     'chat.welcome.image_mode': 'Click the bottom-left button to upload images for multimodal understanding;',
     'chat.welcome.generator_mode': 'Enter prompts and use shortcuts below for instant image or video creation.',
     'status.offline_hint': 'The local OpenClaw gateway is offline. Please start it in the Console.',
@@ -622,7 +622,7 @@ window.LOCALES = {
     'toast.gateway_start_err': 'Launch error: ',
     'toast.config_reset_success': '🔄 Discarded unsaved changes and reverted to the last saved configuration.',
     'status.running': 'Successfully connected to your local OpenClaw gateway!',
-    'status.stopped': 'Direct model connection is active. You can chat without launching the gateway.',
+    'status.stopped': 'Currently the direct model connection service is enabled, you can chat directly without starting the local gateway.',
     'status.starting': 'Connecting to the local OpenClaw gateway, please wait...'
   },
 
@@ -663,15 +663,15 @@ window.LOCALES = {
     'console.app_uptime': '應用已運行時間:',
 
     // 模型會話 (Chat Room)
-    'chat.title': '模型對話測試',
-    'chat.desc': '選擇一個已配置的模型進行連通性測試與多輪對話',
+    'chat.title': '模型對話',
+    'chat.desc': '選擇一個已配置的模型進行多輪對話',
     'chat.placeholder.select_model': '-- 請選擇對話模型 --',
     'chat.placeholder.input_prompt': '輸入消息，按下 Ctrl + Enter 發送...',
     'chat.btn.send': '發送',
     'chat.btn.clear': '🗑️ 清屏',
     'chat.system_prompt_label': '系統提示詞 (System Prompt):',
     'chat.system_prompt_placeholder': '在此設定 AI 的系統預設角色，留空則使用模型默認設置...',
-    'chat.welcome': '🤖 歡迎使用 ClawAI 多輪對話測試終端。請在頂部選擇您想測試的模型，並輸入提示詞開始體驗！',
+    'chat.welcome': '🤖 歡迎使用 ClawAI 多輪對話終端。請在頂部選擇您想對話的模型，並輸入提示詞開始體驗！',
 
     // 模型配置 (Model Config)
     'config.title': '網關模型提供商與參數配置',
@@ -907,7 +907,7 @@ window.LOCALES = {
     'console.progress.starting': '網關正在啟動中...',
     'chat.welcome.greeting': '您好！我是您的智能助手。',
     'chat.welcome.functions': '在這裡您可以：',
-    'chat.welcome.chat_mode': '與當前選中的大模型進行實時對話及可用性測試；',
+    'chat.welcome.chat_mode': '與當前選中的大模型進行實時對話；',
     'chat.welcome.image_mode': '點擊左下角按鈕上傳圖片，讓支持多模態的模型進行**識圖對話**；',
     'chat.welcome.generator_mode': '輸入指令並點擊下方生圖/生視頻快捷鍵，快速體驗生成式創作。',
     'status.offline_hint': '當前本地的 OpenClaw 網關未啟動，請前往【控制台】啟動網關。',
@@ -935,7 +935,7 @@ window.LOCALES = {
     'toast.gateway_start_err': '拉起異常：',
     'toast.config_reset_success': '🔄 已成功放棄修改，已還原回上一次保存的配置',
     'status.running': '我已經與您本地的 OpenClaw 網關成功對接！',
-    'status.stopped': '當前已啟用模型直連服務，無需啟動本地網關即可直接對話測試。',
+    'status.stopped': '當前已啟用模型直連服務，無需啟動本地網關即可直接對話。',
     'status.starting': '正在連接本地的 OpenClaw 網關，請稍候...'
   }
 };

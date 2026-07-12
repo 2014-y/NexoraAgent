@@ -3542,7 +3542,7 @@ function clearChatHistory() {
                 <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw 网关未启动，请前往【控制台】启动网关。</span>
                 <br><br>
                 <span data-i18n="chat.welcome.functions">在这里您可以：</span>
-                <br>💬 <span data-i18n="chat.welcome.chat_mode">与当前选中的大模型进行实时对话及可用性测试；</span>
+                <br>💬 <span data-i18n="chat.welcome.chat_mode">与当前选中的大模型进行实时对话；</span>
                 <br>🖼️ <span data-i18n="chat.welcome.image_mode">点击左下角按钮上传图片，让支持多模态的模型进行**识图对话**；</span>
                 <br>🎨 <span data-i18n="chat.welcome.generator_mode">输入指令并点击下方生图/生视频快捷键，快速体验生成式创作。</span>
             </div>
