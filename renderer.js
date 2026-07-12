@@ -4454,7 +4454,12 @@ function setupUpdateModal() {
                 }
             } catch (error) {
                 console.error('下载更新失败:', error);
-                showToast(`升级失败: ${error.message || '网络连接超时'}`);
+                showToast(`升级失败: ${error.message || '网络连接超时'}，已为您打开浏览器进行手动下载。`);
+                
+                // 自动打开浏览器到 GitHub Releases 页面
+                if (window.api && window.api.openExternal) {
+                    window.api.openExternal('https://github.com/2014-y/AI-v24.13.0/releases');
+                }
                 
                 // 恢复按钮状态
                 confirmBtn.disabled = false;
