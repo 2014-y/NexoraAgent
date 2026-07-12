@@ -728,38 +728,38 @@
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;" data-i18n="settings.about.app_desc">本地智能大模型网关与微信通道管理桌面控制中心。</div>
               </div>
-              <button type="button" class="btn-primary" id="btn-check-update" style="width: auto; padding: 6px 16px; font-size: 12px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; border-radius: 6px; color: white; font-weight: 600; cursor: pointer;">🔍 检查更新</button>
+              <button type="button" class="btn-primary" id="btn-check-update" style="width: auto; padding: 6px 16px; font-size: 12px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; border-radius: 6px; color: white; font-weight: 600; cursor: pointer;" data-i18n="nav.update">🔍 检查更新</button>
             </div>
 
             <!-- 详细系统信息 -->
             <div style="display: flex; flex-direction: column; gap: 12px;">
               <!-- 1. 技术架构 -->
               <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">⚙️ 系统技术架构</div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;" data-i18n="about.arch.title">⚙️ 系统技术架构</div>
                 <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5; display: flex; flex-direction: column; gap: 6px;">
-                  <div><span style="color: white; font-weight: bold;">💎 Electron 骨架层</span> - 采用无边框流光设计与高度硬件加速，带来极致桌面动效。</div>
-                  <div><span style="color: white; font-weight: bold;">📦 内置 Node.js 沙箱</span> - 100% 独立环境，无需配置环境，双击即可无缝启动。</div>
-                  <div><span style="color: white; font-weight: bold;">🚀 OpenClaw Gateway</span> - 本地 AI 智能体总线，提供统一路由与插件生态。</div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.arch.electron.title">💎 Electron 骨架层</span> - <span data-i18n="about.arch.electron.desc">采用无边框流光设计与高度硬件加速，带来极致桌面动效。</span></div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.arch.node.title">📦 内置 Node.js 沙箱</span> - <span data-i18n="about.arch.node.desc">100% 独立环境，无需配置环境，双击即可无缝启动。</span></div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.arch.openclaw.title">🚀 OpenClaw Gateway</span> - <span data-i18n="about.arch.openclaw.desc">本地 AI 智能体总线，提供统一路由与插件生态。</span></div>
                 </div>
               </div>
 
               <!-- 2. 核心服务能力 -->
               <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">🔥 核心服务能力</div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;" data-i18n="about.service.title">🔥 核心服务能力</div>
                 <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5; display: flex; flex-direction: column; gap: 6px;">
-                  <div><span style="color: white; font-weight: bold;">💬 微信 AI 伴侣</span> - 扫码一键绑定，支持私聊、群聊艾特智能对话。</div>
-                  <div><span style="color: white; font-weight: bold;">🛡️ 本地隐私沙箱</span> - 支持 Ollama 离线大模型，确保数据不出本地盘符。</div>
-                  <div><span style="color: white; font-weight: bold;">🔌 40+ 智能体插件</span> - 包含网页搜索、长期记忆、长文档摘要等工具。</div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.service.wechat.title">💬 微信 AI 伴侣</span> - <span data-i18n="about.service.wechat.desc">扫码一键绑定，支持私聊、群聊艾特智能对话。</span></div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.service.local.title">🛡️ 本地隐私沙箱</span> - <span data-i18n="about.service.local.desc">支持 Ollama 离线大模型，确保数据不出本地盘符。</span></div>
+                  <div><span style="color: white; font-weight: bold;" data-i18n="about.service.plugins.title">🔌 40+ 智能体插件</span> - <span data-i18n="about.service.plugins.desc">包含网页搜索、长期记忆、长文档摘要等工具。</span></div>
                 </div>
               </div>
 
               <!-- 3. 使用指南 -->
               <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">📘 极速上手使用指南</div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;" data-i18n="about.guide.title">📘 极速上手使用指南</div>
                 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
-                  <div><span style="background: var(--accent-color); width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; margin-right: 5px; font-weight: bold;">1</span> 切换到“控制台”点击右侧大按钮启动本地网关。</div>
-                  <div><span style="background: #00e676; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; margin-right: 5px; font-weight: bold;">2</span> 点击“绑定微信”扫描生成的二维码授权登录。</div>
-                  <div><span style="background: #ffd54f; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: black; margin-right: 5px; font-weight: bold;">3</span> 在“用量监控”面板实时查看模型调用的开销趋势。</div>
+                  <div><span style="background: var(--accent-color); width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; margin-right: 5px; font-weight: bold;">1</span> <span data-i18n="about.guide.step1.desc">切换到“控制台”点击右侧大按钮启动本地网关。</span></div>
+                  <div><span style="background: #00e676; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; margin-right: 5px; font-weight: bold;">2</span> <span data-i18n="about.guide.step2.desc">点击“绑定微信”扫描生成的二维码授权登录。</span></div>
+                  <div><span style="background: #ffd54f; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: black; margin-right: 5px; font-weight: bold;">3</span> <span data-i18n="about.guide.step3.desc">在“用量监控”面板实时查看模型调用的开销趋势。</span></div>
                 </div>
               </div>
             </div>
