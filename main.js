@@ -955,8 +955,8 @@ function getLatestVersionFromRedirect(url) {
 // 1. 检查更新
 ipcMain.handle('check-update', async (event, isManual) => {
     const currentVersion = app.getVersion();
-    const repoUrl = 'https://api.github.com/repos/2014-y/AI-v24.13.0/releases/latest';
-    const redirectUrl = 'https://github.com/2014-y/AI-v24.13.0/releases/latest';
+    const repoUrl = 'https://api.github.com/repos/2014-y/ClawAI/releases/latest';
+    const redirectUrl = 'https://github.com/2014-y/ClawAI/releases/latest';
     
     let latestVersion = '';
     let hasUpdate = false;
@@ -1008,7 +1008,7 @@ ipcMain.handle('check-update', async (event, isManual) => {
             // 构造默认的下载文件名与地址 (使用点号命名以匹配 GitHub 线上附件格式)
             fileName = `ClawAI.Setup.${latestVersion}.exe`;
             const tag = redirectTag || `v${latestVersion}`;
-            downloadUrl = `https://github.com/2014-y/AI-v24.13.0/releases/download/${tag}/${fileName}`;
+            downloadUrl = `https://github.com/2014-y/ClawAI/releases/download/${tag}/${fileName}`;
         }
         
         return {
@@ -1027,7 +1027,7 @@ ipcMain.handle('check-update', async (event, isManual) => {
         latestVersion: '未知',
         currentVersion,
         releaseNotes: '由于 GitHub 接口访问受限（如 IP 请求次数超限或网络无法直连），且重定向检测也失败，无法自动下载安装包。\n\n建议点击下方按钮，直接在您的浏览器中打开项目主页进行手动下载与升级。',
-        downloadUrl: 'https://github.com/2014-y/AI-v24.13.0/releases',
+        downloadUrl: 'https://github.com/2014-y/ClawAI/releases',
         fileName: ''
     };
 });

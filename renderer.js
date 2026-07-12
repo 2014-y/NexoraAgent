@@ -4458,7 +4458,7 @@ function setupUpdateModal() {
                 
                 // 自动打开浏览器到 GitHub Releases 页面
                 if (window.api && window.api.openExternal) {
-                    window.api.openExternal('https://github.com/2014-y/AI-v24.13.0/releases');
+                    window.api.openExternal('https://github.com/2014-y/ClawAI/releases');
                 }
                 
                 // 恢复按钮状态
