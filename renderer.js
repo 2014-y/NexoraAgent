@@ -46,6 +46,31 @@ function formatContextWindow(num) {
     return num.toString();
 }
 
+function formatNumberWithUnit(num, isApprox = false) {
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    const approxSymbol = isApprox ? '≈ ' : '';
+    if (currentLang === 'en-US') {
+        if (num >= 1000000) {
+            return `${approxSymbol}${(num / 1000000).toFixed(1)}M`;
+        }
+        if (num >= 1000) {
+            return `${approxSymbol}${(num / 1000).toFixed(1)}k`;
+        }
+        return `${approxSymbol}${num}`;
+    } else {
+        // zh-CN or zh-TW
+        const unitYi = currentLang === 'zh-TW' ? '億' : '亿';
+        const unitWan = currentLang === 'zh-TW' ? '萬' : '万';
+        if (num >= 100000000) {
+            return `${approxSymbol}${(num / 100000000).toFixed(2)} ${unitYi}`;
+        }
+        if (num >= 10000) {
+            return `${approxSymbol}${(num / 10000).toFixed(1)} ${unitWan}`;
+        }
+        return `${approxSymbol}${num.toLocaleString()}`;
+    }
+}
+
 // 标记配置文件有未保存的改动，高亮提示保存按钮
 function markConfigDirty() {
     const saveBtns = [
@@ -2388,24 +2413,14 @@ async function renderUsageCharts() {
             tokensApprox.style.display = 'none';
         } else {
             tokensApprox.style.display = 'inline';
-            if (stats.total_tokens >= 100000000) {
-                tokensApprox.innerText = `≈ ${(stats.total_tokens / 100000000).toFixed(2)} 亿`;
-            } else {
-                tokensApprox.innerText = `≈ ${(stats.total_tokens / 10000).toFixed(1)} 万`;
-            }
+            tokensApprox.innerText = formatNumberWithUnit(stats.total_tokens, true);
         }
     }
     document.getElementById('summary-requests').innerText = stats.total_requests.toLocaleString();
     document.getElementById('summary-cost').innerText = `$${stats.total_cost.toFixed(4)}`;
-    document.getElementById('sub-input').innerText = stats.sub_input_tokens >= 100000000 
-        ? `${(stats.sub_input_tokens / 100000000).toFixed(2)} 亿` 
-        : `${(stats.sub_input_tokens / 10000).toFixed(1)} 万`;
-    document.getElementById('sub-output').innerText = stats.sub_output_tokens >= 10000 
-        ? `${(stats.sub_output_tokens / 10000).toFixed(1)} 万` 
-        : stats.sub_output_tokens.toLocaleString();
-    document.getElementById('sub-hit').innerText = stats.sub_hit_tokens >= 10000 
-        ? `${(stats.sub_hit_tokens / 10000).toFixed(1)} 万` 
-        : stats.sub_hit_tokens.toLocaleString();
+    document.getElementById('sub-input').innerText = formatNumberWithUnit(stats.sub_input_tokens);
+    document.getElementById('sub-output').innerText = formatNumberWithUnit(stats.sub_output_tokens);
+    document.getElementById('sub-hit').innerText = formatNumberWithUnit(stats.sub_hit_tokens);
     document.getElementById('hit-rate-val').innerText = `${stats.hit_rate.toFixed(1)}%`;
     document.getElementById('hit-rate-bar').style.width = `${stats.hit_rate}%`;
 
@@ -2531,7 +2546,7 @@ async function renderUsageCharts() {
                   <td style="padding: 8px;">${log.output.toLocaleString()}</td>
                   <td style="padding: 8px; color: #00e676;">${log.hit > 0 ? `🎯 ${log.hit.toLocaleString()}` : '--'}</td>
                   <td style="padding: 8px;">${log.duration}</td>
-                  <td style="padding: 8px; color: #00e676;">${log.status}</td>
+                  <td style="padding: 8px; color: #00e676;">${t(log.status)}</td>
                 </tr>
             `;
         });
@@ -2540,14 +2555,14 @@ async function renderUsageCharts() {
             <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
               <thead>
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); color: var(--text-secondary);">
-                  <th style="padding: 8px;">请求时间</th>
-                  <th style="padding: 8px;">提供商</th>
-                  <th style="padding: 8px;">模型名称</th>
-                  <th style="padding: 8px;">输入 Tokens</th>
-                  <th style="padding: 8px;">输出 Tokens</th>
-                  <th style="padding: 8px;">缓存命中</th>
-                  <th style="padding: 8px;">耗时</th>
-                  <th style="padding: 8px;">状态</th>
+                  <th style="padding: 8px;">${t('stats.th.time', '请求时间')}</th>
+                  <th style="padding: 8px;">${t('stats.th.provider', '提供商')}</th>
+                  <th style="padding: 8px;">${t('stats.th.model', '模型名称')}</th>
+                  <th style="padding: 8px;">${t('stats.th.input', '输入 Tokens')}</th>
+                  <th style="padding: 8px;">${t('stats.th.output', '输出 Tokens')}</th>
+                  <th style="padding: 8px;">${t('stats.th.hit', '缓存命中')}</th>
+                  <th style="padding: 8px;">${t('stats.th.duration', '耗时')}</th>
+                  <th style="padding: 8px;">${t('stats.th.status', '状态')}</th>
                 </tr>
               </thead>
               <tbody style="color: var(--text-primary);">
@@ -2766,26 +2781,14 @@ function applyStatsFilters() {
             tokensApprox.style.display = 'none';
         } else {
             tokensApprox.style.display = 'inline';
-            if (total_tokens >= 100000000) {
-                tokensApprox.innerText = `≈ ${(total_tokens / 100000000).toFixed(2)} 亿`;
-            } else {
-                tokensApprox.innerText = `≈ ${(total_tokens / 10000).toFixed(1)} 万`;
-            }
+            tokensApprox.innerText = formatNumberWithUnit(total_tokens, true);
         }
     }
     document.getElementById('summary-requests').innerText = total_requests.toLocaleString();
     document.getElementById('summary-cost').innerText = `$${total_cost.toFixed(4)}`;
-    document.getElementById('sub-input').innerText = sub_input_tokens >= 100000000 
-        ? `${(sub_input_tokens / 100000000).toFixed(2)} 亿` 
-        : `${(sub_input_tokens / 10000).toFixed(1)} 万`;
-    
-    document.getElementById('sub-output').innerText = sub_output_tokens >= 10000 
-        ? `${(sub_output_tokens / 10000).toFixed(1)} 万` 
-        : sub_output_tokens.toLocaleString();
-        
-    document.getElementById('sub-hit').innerText = sub_hit_tokens >= 10000 
-        ? `${(sub_hit_tokens / 10000).toFixed(1)} 万` 
-        : sub_hit_tokens.toLocaleString();
+    document.getElementById('sub-input').innerText = formatNumberWithUnit(sub_input_tokens);
+    document.getElementById('sub-output').innerText = formatNumberWithUnit(sub_output_tokens);
+    document.getElementById('sub-hit').innerText = formatNumberWithUnit(sub_hit_tokens);
         
     document.getElementById('hit-rate-val').innerText = `${hit_rate.toFixed(1)}%`;
     document.getElementById('hit-rate-bar').style.width = `${hit_rate}%`;
@@ -3185,6 +3188,9 @@ function applyLanguage(lang) {
     }
     if (typeof updateWeChatStatusUI === 'function') {
         try { updateWeChatStatusUI(); } catch(e) { console.error(e); }
+    }
+    if (typeof updateFilterOptions === 'function') {
+        try { updateFilterOptions(); } catch(e) { console.error(e); }
     }
 }
 
@@ -3990,7 +3996,7 @@ function updateFilterOptions() {
             if (log.model) models.add(log.model.trim());
         });
 
-        let optHtml = '<option value="all">全部模型</option>';
+        let optHtml = `<option value="all" data-i18n="stats.model.all">${t('stats.model.all', '全部模型')}</option>`;
         models.forEach(m => {
             optHtml += `<option value="${m}">${m}</option>`;
         });
