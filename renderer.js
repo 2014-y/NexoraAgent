@@ -4386,7 +4386,10 @@ async function updateWeChatStatusUI() {
                 
                 // 填充详细信息
                 if (result.details) {
-                    if (detailId) detailId.innerText = result.details.accountId || '--';
+                    if (detailId) {
+                        detailId.innerText = result.details.accountId || '--';
+                        detailId.style.color = 'white';
+                    }
                     if (detailTime && result.details.savedAt) {
                         try {
                             const date = new Date(result.details.savedAt);
@@ -4401,7 +4404,12 @@ async function updateWeChatStatusUI() {
                 statusEl.style.color = '#ff5252'; // 红色高亮
                 if (bindBtn) bindBtn.style.display = 'block';
                 if (unbindBtn) unbindBtn.style.display = 'none';
-                if (detailsPanel) detailsPanel.style.display = 'none';
+                if (detailsPanel) detailsPanel.style.display = 'block';
+                if (detailId) {
+                    detailId.innerText = t('wechat.status.unbound');
+                    detailId.style.color = '#ff5252';
+                }
+                if (detailTime) detailTime.innerText = '--';
             }
         }
     } catch (e) {
