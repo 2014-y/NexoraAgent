@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "AI-v24.13.0 开源版 - 本地 AI 助手网关（基于 OpenClaw）",
   "keywords": [
     "ai",
@@ -36,6 +36,7 @@
     "app:pack": "electron-packager . \"ClawAI\" --platform=win32 --arch=x64 --out=dist --overwrite"
   },
   "dependencies": {
+    "jsdom": "^29.1.1",
     "open-computer-use": "^0.1.54",
     "openclaw": "^2026.6.11"
   },
@@ -74,6 +75,7 @@
       "preload.js",
       "patch_gateway.js",
       "renderer.js",
+      "locales.js",
       "index.html",
       "index.css",
       "config/openclaw.json.example",
