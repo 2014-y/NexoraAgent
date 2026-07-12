@@ -594,10 +594,11 @@ ipcMain.handle('wechat-login', async () => {
 
         const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
         const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+        const patchPath = path.join(__dirname, 'patch_gateway.js');
         const forkOptions = {
             cwd: CONFIG_DIR,
             stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-            execArgv: ['--no-warnings', '--dns-result-order=ipv4first'],
+            execArgv: ['--require', patchPath, '--no-warnings', '--dns-result-order=ipv4first'],
             env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' }
         };
         if (fs.existsSync(nodeExePath)) {
