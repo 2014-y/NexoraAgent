@@ -238,8 +238,8 @@ function wrapFetch(originalFetch) {
         const isCompletions = url.includes('/completions') || url.includes('/embeddings');
         const startMs = Date.now();
         
-        if (isCompletions) {
-            try {
+        try {
+            if (isCompletions) {
                 const response = await originalFetch.apply(this, arguments);
                 const cloneRes = response.clone();
                 const elapsed = Date.now() - startMs;
@@ -249,11 +249,14 @@ function wrapFetch(originalFetch) {
                 }).catch(() => {});
                 
                 return response;
-            } catch (err) {
-                throw err;
             }
+            return await originalFetch.apply(this, arguments);
+        } catch (err) {
+            if (url && url.includes('ilinkai')) {
+                console.error(`[FetchError] Failed to fetch ${url}. Cause:`, err.cause || err);
+            }
+            throw err;
         }
-        return originalFetch.apply(this, arguments);
     };
 }
 

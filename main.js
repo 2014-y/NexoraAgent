@@ -598,7 +598,6 @@ ipcMain.handle('wechat-login', async () => {
         const forkOptions = {
             cwd: CONFIG_DIR,
             stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-            execArgv: ['--require', patchPath, '--no-warnings', '--dns-result-order=ipv4first'],
             env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' }
         };
         if (fs.existsSync(nodeExePath)) {
