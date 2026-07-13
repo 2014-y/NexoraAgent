@@ -1899,7 +1899,7 @@ function bindProviderEvents() {
                 return;
             }
 
-            if (apiType === 'ollama') {
+            if (provider === 'ollama' || apiType === 'ollama') {
                 if (resultSpan) {
                     resultSpan.innerText = t('✅ 本地 Ollama 无需密钥验证', '✅ Local Ollama requires no key validation', '✅ 本地 Ollama 無需金鑰驗證');
                     resultSpan.style.color = '#00e676';
@@ -1923,10 +1923,23 @@ function bindProviderEvents() {
                 let testModel = 'gpt-3.5-turbo';
                 if (provider === 'agnes-ai') {
                     testModel = 'agnes-2.0-flash';
-                } else if (localProviders[provider] && localProviders[provider].models && localProviders[provider].models.length > 0) {
-                    const matchedModel = localProviders[provider].models.find(m => m.id);
-                    if (matchedModel) {
-                        testModel = matchedModel.id;
+                } else {
+                    // 优先从 DOM 读取当前的模型白名单列表第一项
+                    const domModelInputs = document.querySelectorAll(`#model-list-container-${provider} .model-id-edit-input`);
+                    let firstDomModel = '';
+                    for (const inp of domModelInputs) {
+                        if (inp.value.trim()) {
+                            firstDomModel = inp.value.trim();
+                            break;
+                        }
+                    }
+                    if (firstDomModel) {
+                        testModel = firstDomModel;
+                    } else if (localProviders[provider] && localProviders[provider].models && localProviders[provider].models.length > 0) {
+                        const matchedModel = localProviders[provider].models.find(m => m.id);
+                        if (matchedModel) {
+                            testModel = matchedModel.id;
+                        }
                     }
                 }
 

@@ -16,6 +16,31 @@ process.on('unhandledRejection', (reason) => {
     } catch(e) {}
 });
 
+// 获取可用的 Node 可执行文件路径
+function getAvailableNodePath() {
+    const sandboxPath = path.join(__dirname, '.node-sandbox', 'node.exe');
+    if (fs.existsSync(sandboxPath)) {
+        return sandboxPath;
+    }
+    
+    // 如果内置沙箱不存在，尝试获取系统全局 Node 绝对路径
+    try {
+        const which = require('child_process').execSync('where node', { encoding: 'utf8' }).trim().split('\r\n')[0];
+        if (which && fs.existsSync(which)) {
+            // 简单校验一下系统 Node 版本是否满足要求
+            const versionOutput = require('child_process').execSync(`"${which}" -v`, { encoding: 'utf8' }).trim();
+            const match = versionOutput.match(/^v(\d+)/);
+            if (match && parseInt(match[1], 10) >= 22) {
+                return which;
+            }
+        }
+    } catch (e) {
+        // Ignore
+    }
+    
+    return null;
+}
+
 let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
@@ -610,8 +635,8 @@ ipcMain.on('gateway-action', (event, action) => {
                 openclawEntry = require.resolve('openclaw/dist/index.js');
             }
             
-            // 强制使用打包内置的原生独立 Node 运行时（实现 100% 闭环，免装全局 Node 依赖）
-            const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+            // 优先使用打包内置的或系统全局符合版本要求的 Node 运行时
+            const nodeExePath = getAvailableNodePath();
             const patchPath = 'C:/Users/Public/patch_gateway.js';
             const forkOptions = {
                 cwd: CONFIG_DIR,
@@ -620,7 +645,7 @@ ipcMain.on('gateway-action', (event, action) => {
                 // NODE_OPTIONS 确保补丁被继承到 openclaw 派生的所有后代 node 进程 (修复子进程 EPERM 顽疾)
                 env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_OPTIONS: buildPatchedNodeOptions(patchPath) }
             };
-            if (fs.existsSync(nodeExePath)) {
+            if (nodeExePath) {
                 forkOptions.execPath = nodeExePath;
                 const sandboxDir = path.dirname(nodeExePath);
                 const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
@@ -1001,7 +1026,7 @@ ipcMain.handle('wechat-login', async () => {
         }
 
         const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
-        const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+        const nodeExePath = getAvailableNodePath();
         const patchPath = path.join(__dirname, 'patch_gateway.js');
         const cleanEnv = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
         for (const key of Object.keys(cleanEnv)) {
@@ -1017,7 +1042,7 @@ ipcMain.handle('wechat-login', async () => {
             execArgv: ['--require', patchPath, '--dns-result-order=ipv4first'],
             env: cleanEnv
         };
-        if (fs.existsSync(nodeExePath)) {
+        if (nodeExePath) {
             forkOptions.execPath = nodeExePath;
             const sandboxDir = path.dirname(nodeExePath);
             const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
@@ -1269,7 +1294,7 @@ ipcMain.handle('open-external', async (event, url) => {
             }
 
             return new Promise((resolve) => {
-                const nodeExePath = path.join(__dirname, '.node-sandbox', 'node.exe');
+                const nodeExePath = getAvailableNodePath();
                 const forkOptions = {
                     stdio: 'pipe',
                     execArgv: ['--no-warnings', '--dns-result-order=ipv4first'],
@@ -1278,7 +1303,7 @@ ipcMain.handle('open-external', async (event, url) => {
                         NODE_TLS_REJECT_UNAUTHORIZED: '0'
                     }
                 };
-                if (fs.existsSync(nodeExePath)) {
+                if (nodeExePath) {
                     forkOptions.execPath = nodeExePath;
                     const sandboxDir = path.dirname(nodeExePath);
                     const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
