@@ -923,9 +923,15 @@ function wrapFetch(originalFetch) {
         const startMs = Date.now();
         
         // 自动干预大模型请求，剔除本地模型的 tools 并清洗上下文脏数据
-        if (isCompletions && init && init.body && typeof init.body === 'string') {
+        if (isCompletions && init && init.body) {
             try {
-                let parsedBody = JSON.parse(init.body);
+                let bodyStr = null;
+                if (typeof init.body === 'string') bodyStr = init.body;
+                else if (Buffer.isBuffer(init.body)) bodyStr = init.body.toString('utf8');
+                else if (init.body instanceof Uint8Array) bodyStr = Buffer.from(init.body).toString('utf8');
+
+                if (bodyStr) {
+                    let parsedBody = JSON.parse(bodyStr);
                 
                 // 1. 自愈逻辑：清洗历史会话中的脏数据（过滤报错，将硬编码的工具调用重写为纯文本）
                 if (Array.isArray(parsedBody.messages)) {
@@ -971,17 +977,69 @@ function wrapFetch(originalFetch) {
                     String(parsedBody.model).includes('llama') ||
                     url.includes('11434') ||
                     url.includes('localhost') ||
-                    url.includes('127.0.0.1')
-                );
+                    let hasModified = false;
                 
-                // 3. 如果是本地模型，强行剔除 tools 和 tool_choice，防止其出现工具调用幻觉
-                if (isLocalModel && (parsedBody.tools || parsedBody.tool_choice)) {
-                    delete parsedBody.tools;
-                    delete parsedBody.tool_choice;
-                    console.log(`[TokenGuard] Cleaned messages and stripped tools for local model: ${parsedBody.model}`);
+                    // 1. 自愈逻辑：清洗历史会话中的脏数据
+                    if (Array.isArray(parsedBody.messages)) {
+                        let cleanedMessages = [];
+                        for (let msg of parsedBody.messages) {
+                            if (!msg || typeof msg !== 'object') continue;
+                            let content = msg.content || '';
+                            if (typeof content === 'string') {
+                                if (content.includes('None of the functions provided') || 
+                                    content.includes('None of the functions in the provided list') ||
+                                    content.includes('None of the functions listed')) {
+                                    hasModified = true;
+                                    continue;
+                                }
+                                if (content.includes('"name"') && content.includes('"tts"') && content.includes('"arguments"')) {
+                                    hasModified = true;
+                                    try {
+                                        const textMatch = content.match(/"text"\s*:\s*"([^"]+)"/);
+                                        if (textMatch && textMatch[1]) {
+                                            msg.content = textMatch[1];
+                                        } else {
+                                            msg.content = '你好';
+                                        }
+                                    } catch (e) {
+                                        msg.content = '你好';
+                                    }
+                                }
+                            }
+                            cleanedMessages.push(msg);
+                        }
+                        if (parsedBody.messages.length !== cleanedMessages.length) hasModified = true;
+                        parsedBody.messages = cleanedMessages;
+                    }
+                    
+                    // 2. 本地模型判定
+                    const isLocalModel = parsedBody.model && (
+                        String(parsedBody.model).includes('ollama') || 
+                        String(parsedBody.model).includes('gemma') || 
+                        String(parsedBody.model).includes('jarvis') ||
+                        String(parsedBody.model).includes('qwen') ||
+                        String(parsedBody.model).includes('deepseek') ||
+                        String(parsedBody.model).includes('llama') ||
+                        url.includes('11434') ||
+                        url.includes('localhost') ||
+                        url.includes('127.0.0.1')
+                    );
+                    
+                    // 3. 剔除 tools
+                    if (isLocalModel && (parsedBody.tools || parsedBody.tool_choice)) {
+                        delete parsedBody.tools;
+                        delete parsedBody.tool_choice;
+                        hasModified = true;
+                    }
+                    
+                    if (hasModified) {
+                        const newBodyStr = JSON.stringify(parsedBody);
+                        if (Buffer.isBuffer(init.body)) init.body = Buffer.from(newBodyStr, 'utf8');
+                        else if (init.body instanceof Uint8Array) init.body = new Uint8Array(Buffer.from(newBodyStr, 'utf8'));
+                        else init.body = newBodyStr;
+                        console.log(`[TokenGuard] Cleaned messages and stripped tools in fetch for model: ${parsedBody.model}`);
+                    }
                 }
-                
-                init.body = JSON.stringify(parsedBody);
             } catch (err) {
                 // 仅作防爆，解析失败不阻断请求
             }
@@ -1036,9 +1094,15 @@ Module._load = function(request, parent, isMain) {
                         else if (url && url.url) urlStr = url.url;
                         else if (url && url.href) urlStr = url.href;
                         
-                        if ((urlStr.includes('/completions') || urlStr.includes('/embeddings')) && options && options.body && typeof options.body === 'string') {
+                        if ((urlStr.includes('/completions') || urlStr.includes('/embeddings')) && options && options.body) {
                             try {
-                                let parsedBody = JSON.parse(options.body);
+                                let bodyStr = null;
+                                if (typeof options.body === 'string') bodyStr = options.body;
+                                else if (Buffer.isBuffer(options.body)) bodyStr = options.body.toString('utf8');
+                                else if (options.body instanceof Uint8Array) bodyStr = Buffer.from(options.body).toString('utf8');
+
+                                if (bodyStr) {
+                                    let parsedBody = JSON.parse(bodyStr);
                                 let hasModified = false;
                                 
                                 if (Array.isArray(parsedBody.messages)) {
@@ -1072,7 +1136,10 @@ Module._load = function(request, parent, isMain) {
                                 }
                                 
                                 if (hasModified) {
-                                    options.body = JSON.stringify(parsedBody);
+                                    const newBodyStr = JSON.stringify(parsedBody);
+                                    if (Buffer.isBuffer(options.body)) options.body = Buffer.from(newBodyStr, 'utf8');
+                                    else if (options.body instanceof Uint8Array) options.body = new Uint8Array(Buffer.from(newBodyStr, 'utf8'));
+                                    else options.body = newBodyStr;
                                     console.log(`[TokenGuard] Cleaned messages and stripped tools in undici.request for model: ${parsedBody.model}`);
                                 }
                             } catch(e) {}

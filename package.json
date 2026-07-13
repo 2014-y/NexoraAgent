@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "AI-v24.13.0 开源版 - 本地 AI 助手网关（基于 OpenClaw）",
   "keywords": [
     "ai",
