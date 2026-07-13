@@ -788,6 +788,58 @@ select option {
   font-weight: 700;
 }
 
+.plugin-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.plugin-card-title-row h4 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.plugin-avail-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.plugin-avail-badge.ready {
+  color: #1b7a3d;
+  background: rgba(46, 204, 113, 0.18);
+}
+
+.plugin-avail-badge.needs-config {
+  color: #9a6b00;
+  background: rgba(241, 196, 15, 0.2);
+}
+
+.plugin-avail-badge.needs-software {
+  color: #8a3a00;
+  background: rgba(230, 126, 34, 0.2);
+}
+
+.plugin-avail-badge.missing-runtime {
+  color: #8b1e2d;
+  background: rgba(231, 76, 60, 0.18);
+}
+
+.plugin-card-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
 .plugin-card-top p {
   font-size: 12px;
   color: var(--text-secondary);

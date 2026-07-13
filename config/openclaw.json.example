@@ -327,6 +327,10 @@
       "remote-policy",
       "ollama",
       "duckduckgo",
+      "webhooks",
+      "workboard",
+      "bonjour",
+      "llm-task",
       "slack",
       "googlechat",
       "line",
@@ -347,6 +351,9 @@
     "internal": {
       "enabled": false,
       "entries": {
+        "auto-start-codex": {
+          "enabled": false
+        },
         "emotion-state": {
           "enabled": false,
           "skill": "emotion-state"

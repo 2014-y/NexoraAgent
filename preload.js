@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('api', {
     readSystemLogs: () => ipcRenderer.invoke('read-system-logs'),
     clearSystemLogs: () => ipcRenderer.invoke('clear-system-logs'),
     getStatsData: () => ipcRenderer.invoke('stats-get'),
+    probePlugins: () => ipcRenderer.invoke('plugins-probe'),
+    probePlugin: (pluginId) => ipcRenderer.invoke('plugin-probe', pluginId),
+    savePluginCredentials: (payload) => ipcRenderer.invoke('plugin-save-credentials', payload),
+    promptPluginCredentials: (pluginId) => ipcRenderer.invoke('plugin-prompt-credentials', pluginId),
     
     // 开机自启
     getAutoStart: () => ipcRenderer.invoke('autostart-get'),

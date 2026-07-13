@@ -12,6 +12,13 @@ const {
     writeHomeHealthMarker
 } = require('./home-resolve');
 const { ensureLatencySafeConfig } = require('./latency-tune');
+const {
+    ensureUiPluginCatalog,
+    ensureAllow,
+    probeAllUiPlugins,
+    probePlugin,
+    applyPluginCredentials
+} = require('./plugin-catalog');
 process.on('uncaughtException', (err) => {
     try {
         const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'main_error.log');
@@ -904,6 +911,10 @@ ipcMain.handle('config-read', async () => {
                 config.plugins.entries[name].enabled = true;
                 if (!config.plugins.allow.includes(name)) config.plugins.allow.push(name);
             }
+            const catalogFirst = ensureUiPluginCatalog(config, { forceDefaultOn: true });
+            if (catalogFirst.changed) {
+                console.log('[PluginCatalog] First-run:', catalogFirst.changes.join(' | '));
+            }
             try { fs.writeFileSync(stampPath, appVersion, 'utf8'); } catch (e) {}
             needsSave = true;
             console.log(`[PluginSeed] Enabled ${BUNDLED_CUSTOM_PLUGINS.length} bundled plugins for v${appVersion}`);
@@ -918,6 +929,11 @@ ipcMain.handle('config-read', async () => {
                     config.plugins.allow.push(name);
                     needsSave = true;
                 }
+            }
+            const catalogNext = ensureUiPluginCatalog(config, { forceDefaultOn: false });
+            if (catalogNext.changed) {
+                needsSave = true;
+                console.log('[PluginCatalog] Ensured:', catalogNext.changes.join(' | '));
             }
         }
 
@@ -1026,6 +1042,17 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         const cleanConfig = JSON.parse(JSON.stringify(newConfig));
         delete cleanConfig.videoGenerator;
         delete cleanConfig.imageGenerator;
+
+        // 启用插件必须进 allow，保证别人电脑上开关真能加载
+        try {
+            if (cleanConfig.plugins && cleanConfig.plugins.entries) {
+                if (!Array.isArray(cleanConfig.plugins.allow)) cleanConfig.plugins.allow = [];
+                for (const [id, entry] of Object.entries(cleanConfig.plugins.entries)) {
+                    if (entry && entry.enabled === true) ensureAllow(cleanConfig, id);
+                }
+            }
+            ensureUiPluginCatalog(cleanConfig, { forceDefaultOn: false });
+        } catch (e) {}
         
         // 读取原本的文件尺寸
         const originalBytes = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).size : 39500;
@@ -1043,6 +1070,97 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         return { success: true };
     } catch (e) {
         console.error('Failed to save config:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 插件探活：UI 徽章 / 开关前检查
+ipcMain.handle('plugins-probe', async () => {
+    try {
+        let config = {};
+        try {
+            if (fs.existsSync(CONFIG_PATH)) {
+                config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+            }
+        } catch (e) {}
+        const probes = probeAllUiPlugins({
+            config,
+            appRoot: __dirname,
+            stateDir: CONFIG_DIR
+        });
+        return { success: true, probes };
+    } catch (e) {
+        return { success: false, error: e.message, probes: [] };
+    }
+});
+
+ipcMain.handle('plugin-probe', async (event, pluginId) => {
+    try {
+        let config = {};
+        try {
+            if (fs.existsSync(CONFIG_PATH)) {
+                config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+            }
+        } catch (e) {}
+        const probe = probePlugin(String(pluginId || ''), {
+            config,
+            appRoot: __dirname,
+            stateDir: CONFIG_DIR
+        });
+        return { success: true, probe };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('plugin-save-credentials', async (event, payload) => {
+    try {
+        const pluginId = payload && payload.pluginId;
+        const fields = (payload && payload.fields) || {};
+        if (!pluginId) return { success: false, error: 'missing pluginId' };
+        if (!fs.existsSync(CONFIG_PATH)) return { success: false, error: 'config missing' };
+        const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+        const result = applyPluginCredentials(config, pluginId, fields);
+        if (!result.ok) return { success: false, error: result.error || 'failed' };
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+        return { success: true, config };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('plugin-prompt-credentials', async (event, pluginId) => {
+    try {
+        const id = String(pluginId || '');
+        if (id === 'slack') {
+            const r = await dialog.showMessageBox(mainWindow || undefined, {
+                type: 'question',
+                title: '配置 Slack',
+                message: '需要 Slack Bot Token 才能启用。请在 Slack API 后台创建应用后复制 Bot Token（xoxb-…）。',
+                detail: '点击「继续」后将弹出输入框；也可先取消，稍后再开。',
+                buttons: ['取消', '继续'],
+                defaultId: 1,
+                cancelId: 0
+            });
+            if (r.response !== 1) return { success: false, cancelled: true };
+            // Electron 无原生 prompt，用简易两个输入通过顺序 MessageBox 不够；改用临时 HTML 不可行时用 env 写入要求渲染进程弹窗
+            return { success: true, needsRendererPrompt: true, fields: ['botToken', 'appToken'] };
+        }
+        if (id === 'matrix') {
+            const r = await dialog.showMessageBox(mainWindow || undefined, {
+                type: 'question',
+                title: '配置 Matrix',
+                message: '需要 Matrix Homeserver 与 Access Token。',
+                detail: '点击「继续」后在应用内填写。',
+                buttons: ['取消', '继续'],
+                defaultId: 1,
+                cancelId: 0
+            });
+            if (r.response !== 1) return { success: false, cancelled: true };
+            return { success: true, needsRendererPrompt: true, fields: ['homeserver', 'accessToken'] };
+        }
+        return { success: false, error: 'unsupported' };
+    } catch (e) {
         return { success: false, error: e.message };
     }
 });

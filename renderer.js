@@ -238,6 +238,64 @@ window.confirm = function (message, title = '操作确认') {
     });
 };
 
+/** 插件凭证等多字段表单弹窗，fields: [{ key, label, placeholder, type? }] */
+window.promptFields = function (title, fields) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(10, 8, 20, 0.4); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 99999; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        `;
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px;
+            width: 440px; max-width: 92vw; padding: 24px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.3); color: var(--text-primary);
+            transform: scale(0.9); transition: transform 0.2s ease;
+        `;
+        const inputsHtml = (fields || []).map((f, i) => `
+            <label style="display:block; font-size:12px; color: var(--text-secondary); margin: 10px 0 4px;">${f.label || f.key}</label>
+            <input id="pf-input-${i}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}"
+              style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary); font-size:13px;" />
+        `).join('');
+        modal.innerHTML = `
+            <h3 style="margin:0 0 8px; font-size:16px; color: var(--accent-color);">${title}</h3>
+            <p style="margin:0 0 8px; font-size:12px; color: var(--text-secondary); line-height:1.5;">填写后将写入本地配置并尝试加载插件。凭证仅保存在本机。</p>
+            ${inputsHtml}
+            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
+                <button id="pf-cancel" style="background:var(--bg-input); border:1px solid var(--border-color); color:var(--text-secondary); padding:8px 20px; border-radius:8px; cursor:pointer;">取消</button>
+                <button id="pf-ok" style="background:linear-gradient(135deg, var(--accent-color), rgba(var(--accent-rgb),0.7)); border:none; color:#fff; padding:8px 24px; border-radius:8px; font-weight:600; cursor:pointer;">保存并启用</button>
+            </div>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        setTimeout(() => {
+            overlay.style.opacity = '1';
+            overlay.style.pointerEvents = 'auto';
+            modal.style.transform = 'scale(1)';
+        }, 10);
+        const close = (value) => {
+            overlay.style.opacity = '0';
+            overlay.style.pointerEvents = 'none';
+            setTimeout(() => {
+                try { document.body.removeChild(overlay); } catch (e) {}
+                resolve(value);
+            }, 200);
+        };
+        modal.querySelector('#pf-cancel').addEventListener('click', () => close(null));
+        modal.querySelector('#pf-ok').addEventListener('click', () => {
+            const out = {};
+            (fields || []).forEach((f, i) => {
+                const el = modal.querySelector(`#pf-input-${i}`);
+                out[f.key] = el ? el.value.trim() : '';
+            });
+            close(out);
+        });
+    });
+};
+
 // 绑定查看详情按钮点击事件
 function bindDetailsClick(container) {
     const detailsBtn = container.querySelector('.btn-view-request-details');
@@ -279,21 +337,53 @@ let gatewayStatus = 'stopped';
 let gatewayFullyReady = false;
 
 // 常见插件元数据（用于生成美观的插件网格）
+// 顺序即 UI 卡片顺序；自动摘要主卡映射自研 auto-summary（llm-task 仍会进 allow）
+const UI_PLUGIN_ORDER = [
+    'dual-model-trainer',
+    'slack',
+    'auto-summary',
+    'matrix',
+    'duckduckgo',
+    'webhooks',
+    'bonjour',
+    'workboard',
+    'auto-start-codex'
+];
+
 const pluginMetadata = {
-    'dual-model-trainer': { name: '🧠 双模型教学', desc: '利用主备模型对比，自动本地收集并训练属于你的专属模型' },
-    'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将网关接入微信聊天，支持私聊、群聊和图片理解' },
-    'voice-call': { name: '📞 语音通话', desc: '开启实时语音对话服务，支持通过微信向 AI 拨打电话' },
-    'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI 网关对话' },
-    'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地网关作为应用机器人接入到您的团队 Slack 频道中' },
-    'whatsapp': { name: '🟢 WhatsApp', desc: '接入全球 WhatsApp 消息服务，支持媒体及文本处理' },
-    'llm-task': { name: '📝 自动摘要', desc: '向 AI 发送超长链接或长文本，自动为您提炼和总结要点' },
-    'matrix': { name: '🛡️ Matrix 通道', desc: '将网关挂载到去中心化的加密通信 Matrix 消息信道上' },
-    'duckduckgo': { name: '🔍 DuckDuckGo 搜索', desc: '允许 AI 调用搜索引擎进行网页实时检索，获取最新资讯' },
-    'webhooks': { name: '🔌 Webhooks', desc: '支持外部系统通过标准的 Webhook 事件触发网关的定制指令' },
-    'bonjour': { name: '📡 Bonjour 发现', desc: '启用本地零配置组网，自动发布网关局域网服务广播' },
-    'workboard': { name: '📋 任务看板', desc: '提供待办任务的可视化任务跟踪面板，帮助有序规划工作' },
-    'auto-start-codex': { name: '🤖 自动唤醒 Codex', desc: '接收微信消息时自动唤醒本地 Codex 桌面 AI 助手（若不需电脑操控可关闭）' }
+    'dual-model-trainer': { name: '🧠 双模型教学', desc: '利用主备模型对比，自动本地收集并训练属于你的专属模型', tier: 'zero' },
+    'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将网关接入微信聊天，支持私聊、群聊和图片理解', tier: 'zero' },
+    'voice-call': { name: '📞 语音通话', desc: '开启实时语音对话服务，支持通过微信向 AI 拨打电话', tier: 'credentials' },
+    'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI 网关对话', tier: 'credentials' },
+    'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地网关作为应用机器人接入到您的团队 Slack 频道中', tier: 'credentials' },
+    'whatsapp': { name: '🟢 WhatsApp', desc: '接入全球 WhatsApp 消息服务，支持媒体及文本处理', tier: 'credentials' },
+    'auto-summary': { name: '📝 自动摘要', desc: '每日自动总结聊天与训练数据写入记忆；亦可配合长文摘要能力', tier: 'zero' },
+    'llm-task': { name: '📝 长文摘要任务', desc: '向 AI 发送超长链接或长文本，自动提炼要点', tier: 'zero' },
+    'matrix': { name: '🛡️ Matrix 通道', desc: '将网关挂载到去中心化的加密通信 Matrix 消息信道上', tier: 'credentials' },
+    'duckduckgo': { name: '🔍 DuckDuckGo 搜索', desc: '允许 AI 调用搜索引擎进行网页实时检索，获取最新资讯', tier: 'zero' },
+    'webhooks': { name: '🔌 Webhooks', desc: '支持外部系统通过标准的 Webhook 事件触发网关的定制指令', tier: 'zero' },
+    'bonjour': { name: '📡 Bonjour 发现', desc: '启用本地零配置组网，自动发布网关局域网服务广播', tier: 'zero' },
+    'workboard': { name: '📋 任务看板', desc: '提供待办任务的可视化任务跟踪面板，帮助有序规划工作', tier: 'zero' },
+    'auto-start-codex': { name: '🤖 自动唤醒 Codex', desc: '接收微信消息时自动唤醒本地 Codex 桌面 AI 助手（若不需电脑操控可关闭）', tier: 'software' }
 };
+
+let pluginProbeMap = {};
+
+function badgeLabelForProbe(probe) {
+    const b = (probe && probe.badge) || 'ready';
+    if (b === 'needs-config') return t('plugin.badge.needs_config');
+    if (b === 'needs-software') return t('plugin.badge.needs_software');
+    if (b === 'missing-runtime') return t('plugin.badge.missing_runtime');
+    return t('plugin.badge.ready');
+}
+
+function badgeClassForProbe(probe) {
+    const b = (probe && probe.badge) || 'ready';
+    if (b === 'needs-config') return 'plugin-avail-badge needs-config';
+    if (b === 'needs-software') return 'plugin-avail-badge needs-software';
+    if (b === 'missing-runtime') return 'plugin-avail-badge missing-runtime';
+    return 'plugin-avail-badge ready';
+}
 
 let chatInitialized = false;
 let statsRefreshInterval = null;
@@ -2255,31 +2345,52 @@ if (topSaveBtn) {
 }
 
 // 渲染插件卡片网格
-function renderPluginsGrid() {
-    const grid = document.getElementById('tour-plugins-grid');
+async function renderPluginsGrid() {
+    const grid = document.getElementById('cfg-plugins-grid');
+    if (!grid) return;
     grid.innerHTML = '';
 
     if (!configData || !configData.plugins || !configData.plugins.entries) return;
 
+    try {
+        if (window.api && window.api.probePlugins) {
+            const res = await window.api.probePlugins();
+            pluginProbeMap = {};
+            if (res && res.success && Array.isArray(res.probes)) {
+                for (const p of res.probes) pluginProbeMap[p.id] = p;
+            }
+        }
+    } catch (e) {
+        console.warn('plugins probe failed', e);
+    }
+
     const entries = configData.plugins.entries;
-    for (const key of Object.keys(pluginMetadata)) {
-        if (['openclaw-weixin', 'voice-call', 'telegram', 'whatsapp'].includes(key)) continue;
-        const plugin = pluginMetadata[key];
+    if (!Array.isArray(configData.plugins.allow)) configData.plugins.allow = [];
+
+    for (const key of UI_PLUGIN_ORDER) {
+        if (!pluginMetadata[key]) continue;
         let isEnabled = false;
         if (key === 'auto-start-codex') {
             isEnabled = (configData.hooks && configData.hooks.internal && configData.hooks.internal.entries && configData.hooks.internal.entries['auto-start-codex'])
                 ? configData.hooks.internal.entries['auto-start-codex'].enabled === true
                 : false;
         } else {
-            isEnabled = entries[key] ? entries[key].enabled : false;
+            isEnabled = entries[key] ? entries[key].enabled === true : false;
         }
+
+        const probe = pluginProbeMap[key] || { badge: 'ready' };
+        const hint = probe.hint ? `<div class="plugin-card-hint">${probe.hint}</div>` : '';
 
         const card = document.createElement('div');
         card.className = 'plugin-card-item';
         card.innerHTML = `
             <div class="plugin-card-top">
-                <h4>${t('plugin.' + key + '.name')}</h4>
+                <div class="plugin-card-title-row">
+                    <h4>${t('plugin.' + key + '.name')}</h4>
+                    <span class="${badgeClassForProbe(probe)}">${badgeLabelForProbe(probe)}</span>
+                </div>
                 <p>${t('plugin.' + key + '.desc')}</p>
+                ${hint}
             </div>
             <div class="plugin-card-bot">
                 <span style="font-size: 12px; color: ${isEnabled ? 'var(--accent-color)' : 'var(--text-secondary)'}; font-weight: 600;">
@@ -2294,11 +2405,92 @@ function renderPluginsGrid() {
         grid.appendChild(card);
     }
 
-    // 绑定卡片开关事件
     document.querySelectorAll('.plugin-toggle-checkbox').forEach((checkbox) => {
         checkbox.addEventListener('change', async (e) => {
             const pluginKey = e.target.getAttribute('data-plugin');
             const checked = e.target.checked;
+
+            if (checked) {
+                let probe = pluginProbeMap[pluginKey];
+                try {
+                    if (window.api && window.api.probePlugin) {
+                        const pr = await window.api.probePlugin(pluginKey);
+                        if (pr && pr.success) {
+                            probe = pr.probe;
+                            pluginProbeMap[pluginKey] = probe;
+                        }
+                    }
+                } catch (err) {}
+
+                if (pluginKey === 'auto-start-codex' && probe && !probe.available) {
+                    e.target.checked = false;
+                    showToast(probe.hint || t('plugin.toast.codex_missing'));
+                    await renderPluginsGrid();
+                    return;
+                }
+
+                if ((pluginKey === 'slack' || pluginKey === 'matrix') && probe && probe.needsConfig) {
+                    const ok = await confirm(
+                        (probe.hint || '') + '\n\n' + t('plugin.toast.need_credentials'),
+                        t('plugin.' + pluginKey + '.name')
+                    );
+                    if (!ok) {
+                        e.target.checked = false;
+                        await renderPluginsGrid();
+                        return;
+                    }
+                    const fieldDefs = pluginKey === 'slack'
+                        ? [
+                            { key: 'botToken', label: 'Bot Token (xoxb-…)', placeholder: 'xoxb-...' },
+                            { key: 'appToken', label: 'App Token 可选 (xapp-…)', placeholder: 'xapp-...' }
+                          ]
+                        : [
+                            { key: 'homeserver', label: 'Homeserver URL', placeholder: 'https://matrix.org' },
+                            { key: 'accessToken', label: 'Access Token', placeholder: 'syt_...' }
+                          ];
+                    const values = await window.promptFields(
+                        t('plugin.wizard.title') + ' · ' + t('plugin.' + pluginKey + '.name'),
+                        fieldDefs
+                    );
+                    if (!values) {
+                        e.target.checked = false;
+                        await renderPluginsGrid();
+                        return;
+                    }
+                    if (pluginKey === 'slack' && !values.botToken) {
+                        showToast(t('plugin.toast.token_required'));
+                        e.target.checked = false;
+                        await renderPluginsGrid();
+                        return;
+                    }
+                    if (pluginKey === 'matrix' && (!values.homeserver || !values.accessToken)) {
+                        showToast(t('plugin.toast.token_required'));
+                        e.target.checked = false;
+                        await renderPluginsGrid();
+                        return;
+                    }
+                    try {
+                        const saved = await window.api.savePluginCredentials({ pluginId: pluginKey, fields: values });
+                        if (!saved || !saved.success) {
+                            showToast((saved && saved.error) || t('plugin.toast.save_failed'));
+                            e.target.checked = false;
+                            await renderPluginsGrid();
+                            return;
+                        }
+                        if (saved.config) configData = saved.config;
+                        showToast(t('plugin.toast.credentials_saved'));
+                    } catch (err) {
+                        showToast(String(err.message || err));
+                        e.target.checked = false;
+                        await renderPluginsGrid();
+                        return;
+                    }
+                }
+
+                if (probe && probe.badge === 'missing-runtime') {
+                    showToast(t('plugin.toast.missing_runtime'));
+                }
+            }
 
             if (pluginKey === 'auto-start-codex') {
                 if (!configData.hooks) configData.hooks = {};
@@ -2308,19 +2500,25 @@ function renderPluginsGrid() {
                     configData.hooks.internal.entries['auto-start-codex'] = {};
                 }
                 configData.hooks.internal.entries['auto-start-codex'].enabled = checked;
+                if (checked) configData.hooks.internal.enabled = true;
             } else {
                 if (!configData.plugins.entries[pluginKey]) {
                     configData.plugins.entries[pluginKey] = {};
                 }
                 configData.plugins.entries[pluginKey].enabled = checked;
+                if (checked) {
+                    if (!configData.plugins.allow.includes(pluginKey)) {
+                        configData.plugins.allow.push(pluginKey);
+                    }
+                    if (pluginKey === 'auto-summary' && !configData.plugins.allow.includes('llm-task')) {
+                        configData.plugins.allow.push('llm-task');
+                    }
+                }
             }
 
-            // 存盘
             await window.api.saveConfig(configData);
-            // 重新刷新视图
-            renderPluginsGrid();
+            await renderPluginsGrid();
 
-            // 若在运行，提醒热重载
             if (gatewayStatus === 'running') {
                 window.api.gatewayAction('stop');
                 setTimeout(() => window.api.gatewayAction('start'), 1200);
