@@ -4096,11 +4096,17 @@ async function handleSendMessage() {
             reqBody.stream = false;
         }
 
+        // 增加 120 秒超时机制，防范上游 API 挂死导致界面无限卡顿
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+
         const response = await fetch(chatUrl, {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify(reqBody)
+            body: JSON.stringify(reqBody),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const result = await response.json();
