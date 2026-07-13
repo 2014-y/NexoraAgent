@@ -14,29 +14,33 @@
           {
             "id": "jarvis-learned",
             "name": "Jarvis Learned",
-            "contextWindow": 4718592,
-            "maxTokens": 4096,
+            "contextWindow": 8192,
+            "maxTokens": 1024,
+            "params": { "num_ctx": 8192, "thinking": false },
             "compat": { "supportsTools": false }
           },
           {
             "id": "jarvis",
             "name": "Jarvis",
-            "contextWindow": 32768,
-            "maxTokens": 4096,
+            "contextWindow": 8192,
+            "maxTokens": 1024,
+            "params": { "num_ctx": 8192, "thinking": false },
             "compat": { "supportsTools": false }
           },
           {
             "id": "gemma4:latest",
             "name": "Gemma 4",
-            "contextWindow": 32768,
-            "maxTokens": 4096,
+            "contextWindow": 8192,
+            "maxTokens": 1024,
+            "params": { "num_ctx": 8192, "thinking": false },
             "compat": { "supportsTools": false }
           },
           {
             "id": "gemma4",
             "name": "Gemma 4",
-            "contextWindow": 32768,
-            "maxTokens": 4096,
+            "contextWindow": 8192,
+            "maxTokens": 1024,
+            "params": { "num_ctx": 8192, "thinking": false },
             "compat": { "supportsTools": false }
           }
         ]
@@ -62,31 +66,31 @@
           {
             "id": "agnes-2.0-flash",
             "name": "agnes-2.0-flash",
-            "contextWindow": 1048576,
+            "contextWindow": 131072,
             "maxTokens": 8192
           },
           {
             "id": "agnes-1.5-flash",
             "name": "agnes-1.5-flash",
-            "contextWindow": 2097152,
+            "contextWindow": 131072,
             "maxTokens": 8192
           },
           {
             "id": "agnes-video-v2.0",
             "name": "agnes-video-v2.0",
-            "contextWindow": 1048576,
+            "contextWindow": 131072,
             "maxTokens": 8192
           },
           {
             "id": "agnes-image-2.1-flash",
             "name": "agnes-image-2.1-flash",
-            "contextWindow": 1048576,
+            "contextWindow": 131072,
             "maxTokens": 8192
           },
           {
             "id": "agnes-image-2.0-flash",
             "name": "agnes-image-2.0-flash",
-            "contextWindow": 1048576,
+            "contextWindow": 131072,
             "maxTokens": 8192
           }
         ]
@@ -101,7 +105,9 @@
           "agnes-ai/agnes-1.5-flash"
         ]
       },
-      "maxConcurrent": 4
+      "maxConcurrent": 4,
+      "bootstrapMaxChars": 8000,
+      "bootstrapTotalMaxChars": 24000
     }
   },
   "channels": {
@@ -136,7 +142,7 @@
         "*"
       ],
       "inbound": {
-        "debounceMs": 2000
+        "debounceMs": 500
       }
     }
   },
@@ -152,7 +158,12 @@
         "enabled": true
       },
       "dual-model-trainer": {
-        "enabled": true
+        "enabled": true,
+        "config": {
+          "mode": "collect-only",
+          "enableTeachLearn": false,
+          "timeoutMs": 20000
+        }
       },
       "memory-rotate": {
         "enabled": true

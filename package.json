@@ -75,6 +75,7 @@
     "files": [
       "main.js",
       "home-resolve.js",
+      "latency-tune.js",
       "preload.js",
       "patch_gateway.js",
       "capture-desktop.ps1",

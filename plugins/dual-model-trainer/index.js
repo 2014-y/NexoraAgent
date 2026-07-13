@@ -59,15 +59,15 @@ export default function createPlugin(runtime) {
     teacherModel: String(pluginConfig.teacherModel || 'yitong/qwen3-max'),
     studentModel: String(pluginConfig.studentModel || 'ollama/gemma4:latest'),
     mode: ['teach-learn', 'fallback', 'collect-only'].includes(pluginConfig.mode)
-      ? pluginConfig.mode : 'teach-learn',
-    enableTeachLearn: Boolean(pluginConfig.enableTeachLearn !== false),
+      ? pluginConfig.mode : 'collect-only',
+    enableTeachLearn: Boolean(pluginConfig.enableTeachLearn === true),
     enableFallback: Boolean(pluginConfig.enableFallback !== false),
     trainingDataPath: String(pluginConfig.trainingDataPath || path.join(os.homedir(), 'glm4_finetune', 'learning_data', 'learning_log.jsonl')),
     minAnswerLength: Number(pluginConfig.minAnswerLength) || 10,
-    maxRetries: Number(pluginConfig.maxRetries) || 2,
-    retryDelay: Number(pluginConfig.retryDelay) || 3000,
+    maxRetries: Number(pluginConfig.maxRetries) || 1,
+    retryDelay: Number(pluginConfig.retryDelay) || 1000,
     enableVoiceMimicry: Boolean(pluginConfig.enableVoiceMimicry !== false),
-    timeoutMs: Number(pluginConfig.timeoutMs) || TEACH_LEARN_TIMEOUT_MS,
+    timeoutMs: Number(pluginConfig.timeoutMs) || 20000,
   };
 
   // 校验模型名称不为空

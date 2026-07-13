@@ -11,6 +11,7 @@ const {
     detectRestrictedDesktop,
     writeHomeHealthMarker
 } = require('./home-resolve');
+const { ensureLatencySafeConfig } = require('./latency-tune');
 process.on('uncaughtException', (err) => {
     try {
         const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'main_error.log');
@@ -705,6 +706,21 @@ ipcMain.on('gateway-action', (event, action) => {
             // 部署内置自定义插件到用户状态目录, 确保打包后在别人电脑上插件也能被 openclaw 发现并加载
             seedBundledPlugins();
 
+            // 启动网关前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
+            try {
+                if (fs.existsSync(CONFIG_PATH)) {
+                    const raw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
+                    const parsed = JSON.parse(raw);
+                    const tuned = ensureLatencySafeConfig(parsed);
+                    if (tuned.changed) {
+                        fs.writeFileSync(CONFIG_PATH, JSON.stringify(tuned.config, null, 2), 'utf8');
+                        console.log('[LatencyTune] Pre-gateway:', tuned.changes.join(' | '));
+                    }
+                }
+            } catch (e) {
+                console.warn('[LatencyTune] pre-gateway skipped:', e.message);
+            }
+
             // 在杀掉所有可能锁定补丁的僵尸进程后，安全地拷贝最新的 patch_gateway.js 与截图脚本
             try {
                 const localPatch = path.join(__dirname, 'patch_gateway.js');
@@ -977,6 +993,18 @@ ipcMain.handle('config-read', async () => {
             config.plugins.load.paths = filteredPaths;
             needsSave = true;
         }
+
+        // 回复速度：纠正常见慢配置（debounce / 夸张 num_ctx / 超大 bootstrap）
+        try {
+            const tuned = ensureLatencySafeConfig(config);
+            if (tuned.changed) {
+                needsSave = true;
+                console.log('[LatencyTune] Applied:', tuned.changes.join(' | '));
+            }
+        } catch (e) {
+            console.warn('[LatencyTune] skipped:', e.message);
+        }
+
         if (needsSave) {
             try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8'); } catch(e) {}
         }
