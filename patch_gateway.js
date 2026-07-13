@@ -932,53 +932,8 @@ function wrapFetch(originalFetch) {
 
                 if (bodyStr) {
                     let parsedBody = JSON.parse(bodyStr);
-                
-                // 1. 自愈逻辑：清洗历史会话中的脏数据（过滤报错，将硬编码的工具调用重写为纯文本）
-                if (Array.isArray(parsedBody.messages)) {
-                    let cleanedMessages = [];
-                    for (let msg of parsedBody.messages) {
-                        if (!msg || typeof msg !== 'object') continue;
-                        let content = msg.content || '';
-                        if (typeof content === 'string') {
-                            // 丢弃无用的工具调用报错回显
-                            if (content.includes('None of the functions provided') || 
-                                content.includes('None of the functions in the provided list') ||
-                                content.includes('None of the functions listed')) {
-                                continue;
-                            }
-                            // 如果本地模型之前幻觉输出了包含 "name"、"tts"、"arguments" 的纯文本
-                            // 例如 "ronics {"name": "tts", "arguments": {"text": "你好"}}"
-                            // 我们在此自愈，将其重写为 "你好" 纯文本
-                            if (content.includes('"name"') && content.includes('"tts"') && content.includes('"arguments"')) {
-                                try {
-                                    const textMatch = content.match(/"text"\s*:\s*"([^"]+)"/);
-                                    if (textMatch && textMatch[1]) {
-                                        msg.content = textMatch[1];
-                                    } else {
-                                        msg.content = '你好';
-                                    }
-                                } catch (e) {
-                                    msg.content = '你好';
-                                }
-                            }
-                        }
-                        cleanedMessages.push(msg);
-                    }
-                    parsedBody.messages = cleanedMessages;
-                }
-                
-                // 2. 本地模型判定：检查是否是本地 Ollama/Llama 或是直连本地模型
-                const isLocalModel = parsedBody.model && (
-                    String(parsedBody.model).includes('ollama') || 
-                    String(parsedBody.model).includes('gemma') || 
-                    String(parsedBody.model).includes('jarvis') ||
-                    String(parsedBody.model).includes('qwen') ||
-                    String(parsedBody.model).includes('deepseek') ||
-                    String(parsedBody.model).includes('llama') ||
-                    url.includes('11434') ||
-                    url.includes('localhost') ||
                     let hasModified = false;
-                
+                    
                     // 1. 自愈逻辑：清洗历史会话中的脏数据
                     if (Array.isArray(parsedBody.messages)) {
                         let cleanedMessages = [];
@@ -1058,11 +1013,8 @@ function wrapFetch(originalFetch) {
                 return response;
             }
             return await originalFetch.apply(this, arguments);
-        } catch (err) {
-            if (url && url.includes('ilinkai')) {
-                console.error(`[FetchError] Failed to fetch ${url}. Cause:`, err.cause || err);
-            }
-            throw err;
+        } catch (e) {
+            return await originalFetch.apply(this, arguments);
         }
     };
 }
@@ -1103,44 +1055,45 @@ Module._load = function(request, parent, isMain) {
 
                                 if (bodyStr) {
                                     let parsedBody = JSON.parse(bodyStr);
-                                let hasModified = false;
-                                
-                                if (Array.isArray(parsedBody.messages)) {
-                                    let cleanedMessages = [];
-                                    for (let msg of parsedBody.messages) {
-                                        if (!msg || typeof msg !== 'object') continue;
-                                        if (typeof msg.content === 'string') {
-                                            if (msg.content.includes('None of the functions provided')) continue;
-                                            if (msg.content.includes('"name"') && msg.content.includes('"tts"') && msg.content.includes('"arguments"')) {
-                                                hasModified = true;
-                                                const textMatch = msg.content.match(/"text"\s*:\s*"([^"]+)"/);
-                                                msg.content = (textMatch && textMatch[1]) ? textMatch[1] : '你好';
+                                    let hasModified = false;
+                                    
+                                    if (Array.isArray(parsedBody.messages)) {
+                                        let cleanedMessages = [];
+                                        for (let msg of parsedBody.messages) {
+                                            if (!msg || typeof msg !== 'object') continue;
+                                            if (typeof msg.content === 'string') {
+                                                if (msg.content.includes('None of the functions provided')) continue;
+                                                if (msg.content.includes('"name"') && msg.content.includes('"tts"') && msg.content.includes('"arguments"')) {
+                                                    hasModified = true;
+                                                    const textMatch = msg.content.match(/"text"\s*:\s*"([^"]+)"/);
+                                                    msg.content = (textMatch && textMatch[1]) ? textMatch[1] : '你好';
+                                                }
                                             }
+                                            cleanedMessages.push(msg);
                                         }
-                                        cleanedMessages.push(msg);
+                                        if (parsedBody.messages.length !== cleanedMessages.length) hasModified = true;
+                                        parsedBody.messages = cleanedMessages;
                                     }
-                                    if (parsedBody.messages.length !== cleanedMessages.length) hasModified = true;
-                                    parsedBody.messages = cleanedMessages;
-                                }
-                                
-                                const isLocalModel = parsedBody.model && (
-                                    String(parsedBody.model).includes('ollama') || String(parsedBody.model).includes('gemma') || 
-                                    String(parsedBody.model).includes('qwen') || String(parsedBody.model).includes('deepseek') || 
-                                    String(parsedBody.model).includes('llama') || urlStr.includes('11434') || urlStr.includes('localhost') || urlStr.includes('127.0.0.1')
-                                );
-                                
-                                if (isLocalModel && (parsedBody.tools || parsedBody.tool_choice)) {
-                                    delete parsedBody.tools;
-                                    delete parsedBody.tool_choice;
-                                    hasModified = true;
-                                }
-                                
-                                if (hasModified) {
-                                    const newBodyStr = JSON.stringify(parsedBody);
-                                    if (Buffer.isBuffer(options.body)) options.body = Buffer.from(newBodyStr, 'utf8');
-                                    else if (options.body instanceof Uint8Array) options.body = new Uint8Array(Buffer.from(newBodyStr, 'utf8'));
-                                    else options.body = newBodyStr;
-                                    console.log(`[TokenGuard] Cleaned messages and stripped tools in undici.request for model: ${parsedBody.model}`);
+                                    
+                                    const isLocalModel = parsedBody.model && (
+                                        String(parsedBody.model).includes('ollama') || String(parsedBody.model).includes('gemma') || 
+                                        String(parsedBody.model).includes('qwen') || String(parsedBody.model).includes('deepseek') || 
+                                        String(parsedBody.model).includes('llama') || urlStr.includes('11434') || urlStr.includes('localhost') || urlStr.includes('127.0.0.1')
+                                    );
+                                    
+                                    if (isLocalModel && (parsedBody.tools || parsedBody.tool_choice)) {
+                                        delete parsedBody.tools;
+                                        delete parsedBody.tool_choice;
+                                        hasModified = true;
+                                    }
+                                    
+                                    if (hasModified) {
+                                        const newBodyStr = JSON.stringify(parsedBody);
+                                        if (Buffer.isBuffer(options.body)) options.body = Buffer.from(newBodyStr, 'utf8');
+                                        else if (options.body instanceof Uint8Array) options.body = new Uint8Array(Buffer.from(newBodyStr, 'utf8'));
+                                        else options.body = newBodyStr;
+                                        console.log(`[TokenGuard] Cleaned messages and stripped tools in undici.request for model: ${parsedBody.model}`);
+                                    }
                                 }
                             } catch(e) {}
                         }
