@@ -406,6 +406,7 @@ body.maximized .app-container {
   display: none;
   height: 100%;
   flex-direction: column;
+  min-height: 0;
   animation: fadeIn 0.25s ease-in-out;
 }
 
@@ -416,6 +417,7 @@ body.maximized .app-container {
 /* 模块标题 */
 .view-header {
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .view-header h2 {
@@ -760,9 +762,13 @@ select option {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   align-content: start;
   gap: 16px;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 8px;
+  padding-bottom: 24px;
 }
 
 .plugin-card-item {

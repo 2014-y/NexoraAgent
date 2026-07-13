@@ -340,7 +340,11 @@ let gatewayFullyReady = false;
 // 顺序即 UI 卡片顺序；自动摘要主卡映射自研 auto-summary（llm-task 仍会进 allow）
 const UI_PLUGIN_ORDER = [
     'dual-model-trainer',
+    'openclaw-weixin',
+    'voice-call',
+    'telegram',
     'slack',
+    'whatsapp',
     'auto-summary',
     'matrix',
     'duckduckgo',
@@ -2348,183 +2352,257 @@ if (topSaveBtn) {
 async function renderPluginsGrid() {
     const grid = document.getElementById('cfg-plugins-grid');
     if (!grid) return;
-    grid.innerHTML = '';
 
-    if (!configData || !configData.plugins || !configData.plugins.entries) return;
+    if (!configData) configData = {};
+    if (!configData.plugins) configData.plugins = {};
+    if (!configData.plugins.entries) configData.plugins.entries = {};
+    if (!Array.isArray(configData.plugins.allow)) configData.plugins.allow = [];
 
+    const entries = configData.plugins.entries;
+
+    const bindToggles = () => {
+        document.querySelectorAll('.plugin-toggle-checkbox').forEach((checkbox) => {
+            checkbox.addEventListener('change', onPluginToggle);
+        });
+    };
+
+    const paintCards = () => {
+        try {
+            grid.innerHTML = '';
+            let painted = 0;
+            for (const key of UI_PLUGIN_ORDER) {
+                if (!pluginMetadata[key]) continue;
+                if (!entries[key] && key !== 'auto-start-codex') {
+                    entries[key] = { enabled: false };
+                }
+
+                let isEnabled = false;
+                if (key === 'auto-start-codex') {
+                    isEnabled = (configData.hooks && configData.hooks.internal && configData.hooks.internal.entries && configData.hooks.internal.entries['auto-start-codex'])
+                        ? configData.hooks.internal.entries['auto-start-codex'].enabled === true
+                        : false;
+                } else {
+                    isEnabled = entries[key] ? entries[key].enabled === true : false;
+                }
+
+                const probe = pluginProbeMap[key] || { badge: 'ready' };
+                const name = (() => { try { return t('plugin.' + key + '.name'); } catch (e) { return pluginMetadata[key].name; } })();
+                const desc = (() => { try { return t('plugin.' + key + '.desc'); } catch (e) { return pluginMetadata[key].desc; } })();
+                const statusText = (() => {
+                    try { return isEnabled ? t('plugin.status.enabled') : t('plugin.status.disabled'); }
+                    catch (e) { return isEnabled ? '已启用' : '已禁用'; }
+                })();
+                const badgeText = (() => { try { return badgeLabelForProbe(probe); } catch (e) { return '开箱可用'; } })();
+                const hintText = probe.hint ? String(probe.hint) : '';
+
+                const card = document.createElement('div');
+                card.className = 'plugin-card-item';
+
+                const top = document.createElement('div');
+                top.className = 'plugin-card-top';
+
+                const titleRow = document.createElement('div');
+                titleRow.className = 'plugin-card-title-row';
+                const h4 = document.createElement('h4');
+                h4.textContent = name;
+                const badge = document.createElement('span');
+                badge.className = badgeClassForProbe(probe);
+                badge.textContent = badgeText;
+                titleRow.appendChild(h4);
+                titleRow.appendChild(badge);
+
+                const p = document.createElement('p');
+                p.textContent = desc;
+                top.appendChild(titleRow);
+                top.appendChild(p);
+                if (hintText) {
+                    const hint = document.createElement('div');
+                    hint.className = 'plugin-card-hint';
+                    hint.textContent = hintText;
+                    top.appendChild(hint);
+                }
+
+                const bot = document.createElement('div');
+                bot.className = 'plugin-card-bot';
+                const status = document.createElement('span');
+                status.style.cssText = `font-size: 12px; color: ${isEnabled ? 'var(--accent-color)' : 'var(--text-secondary)'}; font-weight: 600;`;
+                status.textContent = statusText;
+
+                const label = document.createElement('label');
+                label.className = 'switch-slider-btn';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.className = 'plugin-toggle-checkbox';
+                input.setAttribute('data-plugin', key);
+                if (isEnabled) input.checked = true;
+                const knob = document.createElement('span');
+                knob.className = 'slider-knob';
+                label.appendChild(input);
+                label.appendChild(knob);
+
+                bot.appendChild(status);
+                bot.appendChild(label);
+                card.appendChild(top);
+                card.appendChild(bot);
+                grid.appendChild(card);
+                painted += 1;
+            }
+            if (painted === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'padding:24px;color:var(--text-secondary);font-size:13px;';
+                empty.textContent = '暂无可用插件条目。请检查 UI_PLUGIN_ORDER 或刷新应用。';
+                grid.appendChild(empty);
+            }
+            bindToggles();
+        } catch (err) {
+            console.error('paintCards failed', err);
+            grid.innerHTML = `<div style="padding:24px;color:#ff8a80;">插件列表渲染失败：${String(err && err.message || err)}</div>`;
+        }
+    };
+
+    async function onPluginToggle(e) {
+        const pluginKey = e.target.getAttribute('data-plugin');
+        const checked = e.target.checked;
+
+        if (checked) {
+            let probe = pluginProbeMap[pluginKey];
+            try {
+                if (window.api && window.api.probePlugin) {
+                    const pr = await Promise.race([
+                        window.api.probePlugin(pluginKey),
+                        new Promise((resolve) => setTimeout(() => resolve(null), 2000))
+                    ]);
+                    if (pr && pr.success) {
+                        probe = pr.probe;
+                        pluginProbeMap[pluginKey] = probe;
+                    }
+                }
+            } catch (err) {}
+
+            if (pluginKey === 'auto-start-codex' && probe && !probe.available) {
+                e.target.checked = false;
+                showToast(probe.hint || t('plugin.toast.codex_missing'));
+                paintCards();
+                return;
+            }
+
+            if ((pluginKey === 'slack' || pluginKey === 'matrix' || pluginKey === 'telegram') && probe && probe.needsConfig) {
+                const ok = await confirm(
+                    (probe.hint || '') + '\n\n' + t('plugin.toast.need_credentials'),
+                    t('plugin.' + pluginKey + '.name')
+                );
+                if (!ok) {
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+                let fieldDefs;
+                if (pluginKey === 'slack') {
+                    fieldDefs = [
+                        { key: 'botToken', label: 'Bot Token (xoxb-…)', placeholder: 'xoxb-...' },
+                        { key: 'appToken', label: 'App Token 可选 (xapp-…)', placeholder: 'xapp-...' }
+                    ];
+                } else if (pluginKey === 'telegram') {
+                    fieldDefs = [
+                        { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF...' }
+                    ];
+                } else {
+                    fieldDefs = [
+                        { key: 'homeserver', label: 'Homeserver URL', placeholder: 'https://matrix.org' },
+                        { key: 'accessToken', label: 'Access Token', placeholder: 'syt_...' }
+                    ];
+                }
+                const values = await window.promptFields(
+                    t('plugin.wizard.title') + ' · ' + t('plugin.' + pluginKey + '.name'),
+                    fieldDefs
+                );
+                if (!values) {
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+                if ((pluginKey === 'slack' || pluginKey === 'telegram') && !values.botToken) {
+                    showToast(t('plugin.toast.token_required'));
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+                if (pluginKey === 'matrix' && (!values.homeserver || !values.accessToken)) {
+                    showToast(t('plugin.toast.token_required'));
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+                try {
+                    const saved = await window.api.savePluginCredentials({ pluginId: pluginKey, fields: values });
+                    if (!saved || !saved.success) {
+                        showToast((saved && saved.error) || t('plugin.toast.save_failed'));
+                        e.target.checked = false;
+                        paintCards();
+                        return;
+                    }
+                    if (saved.config) configData = saved.config;
+                    showToast(t('plugin.toast.credentials_saved'));
+                } catch (err) {
+                    showToast(String(err.message || err));
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+            }
+
+            if (pluginKey === 'whatsapp' && probe && probe.hint) showToast(probe.hint);
+            if (pluginKey === 'voice-call') showToast((probe && probe.hint) || t('plugin.voice-call.desc'));
+            if (probe && probe.badge === 'missing-runtime') showToast(t('plugin.toast.missing_runtime'));
+        }
+
+        if (pluginKey === 'auto-start-codex') {
+            if (!configData.hooks) configData.hooks = {};
+            if (!configData.hooks.internal) configData.hooks.internal = {};
+            if (!configData.hooks.internal.entries) configData.hooks.internal.entries = {};
+            if (!configData.hooks.internal.entries['auto-start-codex']) {
+                configData.hooks.internal.entries['auto-start-codex'] = {};
+            }
+            configData.hooks.internal.entries['auto-start-codex'].enabled = checked;
+            if (checked) configData.hooks.internal.enabled = true;
+        } else {
+            if (!configData.plugins.entries[pluginKey]) configData.plugins.entries[pluginKey] = {};
+            configData.plugins.entries[pluginKey].enabled = checked;
+            if (checked) {
+                if (!configData.plugins.allow.includes(pluginKey)) configData.plugins.allow.push(pluginKey);
+                if (pluginKey === 'auto-summary' && !configData.plugins.allow.includes('llm-task')) {
+                    configData.plugins.allow.push('llm-task');
+                }
+            }
+        }
+
+        try { await window.api.saveConfig(configData); } catch (err) {}
+        paintCards();
+
+        if (gatewayStatus === 'running') {
+            window.api.gatewayAction('stop');
+            setTimeout(() => window.api.gatewayAction('start'), 1200);
+        }
+    }
+
+    // 先立刻画卡片，避免探活卡住整页空白
+
+    paintCards();
     try {
         if (window.api && window.api.probePlugins) {
-            const res = await window.api.probePlugins();
-            pluginProbeMap = {};
+            const res = await Promise.race([
+                window.api.probePlugins(),
+                new Promise((resolve) => setTimeout(() => resolve(null), 2500))
+            ]);
             if (res && res.success && Array.isArray(res.probes)) {
+                pluginProbeMap = {};
                 for (const p of res.probes) pluginProbeMap[p.id] = p;
+                paintCards();
             }
         }
     } catch (e) {
         console.warn('plugins probe failed', e);
     }
-
-    const entries = configData.plugins.entries;
-    if (!Array.isArray(configData.plugins.allow)) configData.plugins.allow = [];
-
-    for (const key of UI_PLUGIN_ORDER) {
-        if (!pluginMetadata[key]) continue;
-        let isEnabled = false;
-        if (key === 'auto-start-codex') {
-            isEnabled = (configData.hooks && configData.hooks.internal && configData.hooks.internal.entries && configData.hooks.internal.entries['auto-start-codex'])
-                ? configData.hooks.internal.entries['auto-start-codex'].enabled === true
-                : false;
-        } else {
-            isEnabled = entries[key] ? entries[key].enabled === true : false;
-        }
-
-        const probe = pluginProbeMap[key] || { badge: 'ready' };
-        const hint = probe.hint ? `<div class="plugin-card-hint">${probe.hint}</div>` : '';
-
-        const card = document.createElement('div');
-        card.className = 'plugin-card-item';
-        card.innerHTML = `
-            <div class="plugin-card-top">
-                <div class="plugin-card-title-row">
-                    <h4>${t('plugin.' + key + '.name')}</h4>
-                    <span class="${badgeClassForProbe(probe)}">${badgeLabelForProbe(probe)}</span>
-                </div>
-                <p>${t('plugin.' + key + '.desc')}</p>
-                ${hint}
-            </div>
-            <div class="plugin-card-bot">
-                <span style="font-size: 12px; color: ${isEnabled ? 'var(--accent-color)' : 'var(--text-secondary)'}; font-weight: 600;">
-                    ${isEnabled ? t('plugin.status.enabled') : t('plugin.status.disabled')}
-                </span>
-                <label class="switch-slider-btn">
-                    <input type="checkbox" class="plugin-toggle-checkbox" data-plugin="${key}" ${isEnabled ? 'checked' : ''}>
-                    <span class="slider-knob"></span>
-                </label>
-            </div>
-        `;
-        grid.appendChild(card);
-    }
-
-    document.querySelectorAll('.plugin-toggle-checkbox').forEach((checkbox) => {
-        checkbox.addEventListener('change', async (e) => {
-            const pluginKey = e.target.getAttribute('data-plugin');
-            const checked = e.target.checked;
-
-            if (checked) {
-                let probe = pluginProbeMap[pluginKey];
-                try {
-                    if (window.api && window.api.probePlugin) {
-                        const pr = await window.api.probePlugin(pluginKey);
-                        if (pr && pr.success) {
-                            probe = pr.probe;
-                            pluginProbeMap[pluginKey] = probe;
-                        }
-                    }
-                } catch (err) {}
-
-                if (pluginKey === 'auto-start-codex' && probe && !probe.available) {
-                    e.target.checked = false;
-                    showToast(probe.hint || t('plugin.toast.codex_missing'));
-                    await renderPluginsGrid();
-                    return;
-                }
-
-                if ((pluginKey === 'slack' || pluginKey === 'matrix') && probe && probe.needsConfig) {
-                    const ok = await confirm(
-                        (probe.hint || '') + '\n\n' + t('plugin.toast.need_credentials'),
-                        t('plugin.' + pluginKey + '.name')
-                    );
-                    if (!ok) {
-                        e.target.checked = false;
-                        await renderPluginsGrid();
-                        return;
-                    }
-                    const fieldDefs = pluginKey === 'slack'
-                        ? [
-                            { key: 'botToken', label: 'Bot Token (xoxb-…)', placeholder: 'xoxb-...' },
-                            { key: 'appToken', label: 'App Token 可选 (xapp-…)', placeholder: 'xapp-...' }
-                          ]
-                        : [
-                            { key: 'homeserver', label: 'Homeserver URL', placeholder: 'https://matrix.org' },
-                            { key: 'accessToken', label: 'Access Token', placeholder: 'syt_...' }
-                          ];
-                    const values = await window.promptFields(
-                        t('plugin.wizard.title') + ' · ' + t('plugin.' + pluginKey + '.name'),
-                        fieldDefs
-                    );
-                    if (!values) {
-                        e.target.checked = false;
-                        await renderPluginsGrid();
-                        return;
-                    }
-                    if (pluginKey === 'slack' && !values.botToken) {
-                        showToast(t('plugin.toast.token_required'));
-                        e.target.checked = false;
-                        await renderPluginsGrid();
-                        return;
-                    }
-                    if (pluginKey === 'matrix' && (!values.homeserver || !values.accessToken)) {
-                        showToast(t('plugin.toast.token_required'));
-                        e.target.checked = false;
-                        await renderPluginsGrid();
-                        return;
-                    }
-                    try {
-                        const saved = await window.api.savePluginCredentials({ pluginId: pluginKey, fields: values });
-                        if (!saved || !saved.success) {
-                            showToast((saved && saved.error) || t('plugin.toast.save_failed'));
-                            e.target.checked = false;
-                            await renderPluginsGrid();
-                            return;
-                        }
-                        if (saved.config) configData = saved.config;
-                        showToast(t('plugin.toast.credentials_saved'));
-                    } catch (err) {
-                        showToast(String(err.message || err));
-                        e.target.checked = false;
-                        await renderPluginsGrid();
-                        return;
-                    }
-                }
-
-                if (probe && probe.badge === 'missing-runtime') {
-                    showToast(t('plugin.toast.missing_runtime'));
-                }
-            }
-
-            if (pluginKey === 'auto-start-codex') {
-                if (!configData.hooks) configData.hooks = {};
-                if (!configData.hooks.internal) configData.hooks.internal = {};
-                if (!configData.hooks.internal.entries) configData.hooks.internal.entries = {};
-                if (!configData.hooks.internal.entries['auto-start-codex']) {
-                    configData.hooks.internal.entries['auto-start-codex'] = {};
-                }
-                configData.hooks.internal.entries['auto-start-codex'].enabled = checked;
-                if (checked) configData.hooks.internal.enabled = true;
-            } else {
-                if (!configData.plugins.entries[pluginKey]) {
-                    configData.plugins.entries[pluginKey] = {};
-                }
-                configData.plugins.entries[pluginKey].enabled = checked;
-                if (checked) {
-                    if (!configData.plugins.allow.includes(pluginKey)) {
-                        configData.plugins.allow.push(pluginKey);
-                    }
-                    if (pluginKey === 'auto-summary' && !configData.plugins.allow.includes('llm-task')) {
-                        configData.plugins.allow.push('llm-task');
-                    }
-                }
-            }
-
-            await window.api.saveConfig(configData);
-            await renderPluginsGrid();
-
-            if (gatewayStatus === 'running') {
-                window.api.gatewayAction('stop');
-                setTimeout(() => window.api.gatewayAction('start'), 1200);
-            }
-        });
-    });
 }
 
 // 进度更新中心驱动
@@ -2800,6 +2878,11 @@ function setupTabSwitching() {
             // 切换到用量页重画图表防自适应显示错误
             if (currentTab === 'dashboard-view') {
                 renderUsageCharts();
+            }
+
+            // 切到插件页必须重绘（避免 flex 布局下初次隐藏时网格高度为 0）
+            if (currentTab === 'plugins-view') {
+                try { await renderPluginsGrid(); } catch (err) { console.error(err); }
             }
 
             // 切换到内置网关面板时，拉取最新免密 URL 并载入 webview（提示与用量监控无关）

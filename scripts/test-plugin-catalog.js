@@ -27,6 +27,10 @@ assert(ZERO_CONFIG_DEFAULT_ON.includes('dual-model-trainer'), 'dual-model defaul
 assert(CREDENTIAL_PLUGINS.includes('slack') && CREDENTIAL_PLUGINS.includes('matrix'), 'slack/matrix credentials');
 assert(LOCAL_SOFTWARE_PLUGINS.includes('auto-start-codex'), 'codex is software tier');
 assert(UI_PLUGIN_IDS.includes('auto-summary') && !UI_PLUGIN_IDS.includes('llm-task'), 'UI shows auto-summary not llm-task');
+assert(UI_PLUGIN_IDS.includes('voice-call'), 'voice-call shown in UI');
+assert(UI_PLUGIN_IDS.includes('openclaw-weixin'), 'weixin shown in UI');
+assert(UI_PLUGIN_IDS.includes('telegram') && UI_PLUGIN_IDS.includes('whatsapp'), 'telegram/whatsapp shown');
+assert(CREDENTIAL_PLUGINS.includes('voice-call'), 'voice-call credential tier');
 
 const empty = { plugins: { entries: {}, allow: [] } };
 const first = ensureUiPluginCatalog(empty, { forceDefaultOn: true });

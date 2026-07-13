@@ -16,14 +16,15 @@ const ZERO_CONFIG_PLUGINS = [
   'workboard',
   'bonjour',
   'llm-task',
-  'auto-summary'
+  'auto-summary',
+  'openclaw-weixin'
 ];
 
 /** 新机首次 stamp：推荐默认开启 */
-const ZERO_CONFIG_DEFAULT_ON = ['dual-model-trainer', 'duckduckgo', 'auto-summary'];
+const ZERO_CONFIG_DEFAULT_ON = ['dual-model-trainer', 'duckduckgo', 'auto-summary', 'openclaw-weixin'];
 
-/** B：需外部平台凭证 */
-const CREDENTIAL_PLUGINS = ['slack', 'matrix'];
+/** B：需外部平台凭证 / 渠道配置 */
+const CREDENTIAL_PLUGINS = ['slack', 'matrix', 'telegram', 'whatsapp', 'voice-call'];
 
 /** C：需本机安装软件 */
 const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
@@ -31,7 +32,11 @@ const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
 /** UI 插件页展示的完整列表（顺序即卡片顺序） */
 const UI_PLUGIN_IDS = [
   'dual-model-trainer',
+  'openclaw-weixin',
+  'voice-call',
+  'telegram',
   'slack',
+  'whatsapp',
   'auto-summary',
   'matrix',
   'duckduckgo',
@@ -202,7 +207,7 @@ function detectCodexInstalled() {
       'powershell.exe',
       ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command',
         "try { $c = Get-Command codex -ErrorAction SilentlyContinue; if ($c) { $c.Source } else { '' } } catch { '' }"],
-      { encoding: 'utf8', timeout: 8000, windowsHide: true }
+      { encoding: 'utf8', timeout: 1500, windowsHide: true }
     ).trim();
     if (out) return { installed: true, path: out };
   } catch (e) {}
@@ -235,6 +240,40 @@ function matrixNeedsConfig(config) {
     return { needsConfig: true, missingFields: missing, hint: '需要 Matrix 服务器地址与 Access Token' };
   }
   return { needsConfig: false, missingFields: [], hint: '' };
+}
+
+function telegramNeedsConfig(config) {
+  const tg = (config.channels && config.channels.telegram) ||
+    (config.plugins && config.plugins.entries && config.plugins.entries.telegram && config.plugins.entries.telegram.config) ||
+    {};
+  const token = tg.botToken || tg.token || tg.bot_token ||
+    (config.env && (config.env.TELEGRAM_BOT_TOKEN || config.env.TELEGRAM_TOKEN));
+  if (!token || String(token).includes('YOUR_') || String(token).length < 10) {
+    return { needsConfig: true, missingFields: ['botToken'], hint: '需要 Telegram Bot Token（向 @BotFather 申请）' };
+  }
+  return { needsConfig: false, missingFields: [], hint: '' };
+}
+
+function whatsappNeedsConfig(config) {
+  // WhatsApp 通常扫码登录，配置非静态 Token；仅提示
+  const wa = (config.channels && config.channels.whatsapp) || {};
+  if (wa.linked === true || wa.session || wa.authDir) {
+    return { needsConfig: false, missingFields: [], hint: '已有会话痕迹，可尝试开启' };
+  }
+  return {
+    needsConfig: true,
+    missingFields: ['session'],
+    hint: '开启后请到网关控制台完成 WhatsApp 扫码绑定'
+  };
+}
+
+function voiceCallNeedsConfig() {
+  // 语音通话默认关闭；开启即可加载插件，细项可在控制台配置
+  return {
+    needsConfig: false,
+    missingFields: [],
+    hint: '默认关闭；开启后可通过微信等进行语音通话（需网关语音能力可用）'
+  };
 }
 
 /**
@@ -280,15 +319,44 @@ function probePlugin(pluginId, opts = {}) {
       const n = matrixNeedsConfig(config);
       Object.assign(base, n);
       base.badge = n.needsConfig ? 'needs-config' : 'ready';
+    } else if (pluginId === 'telegram') {
+      const n = telegramNeedsConfig(config);
+      Object.assign(base, n);
+      base.badge = n.needsConfig ? 'needs-config' : 'ready';
+    } else if (pluginId === 'whatsapp') {
+      const n = whatsappNeedsConfig(config);
+      Object.assign(base, n);
+      // WhatsApp 允许先开再扫码，不强制拦截开关
+      base.badge = n.needsConfig ? 'needs-config' : 'ready';
+      base.blockEnable = false;
+    } else if (pluginId === 'voice-call') {
+      const n = voiceCallNeedsConfig();
+      Object.assign(base, n);
+      base.badge = 'ready';
     }
     if (!presence.present) {
-      base.badge = 'missing-runtime';
-      base.hint = (base.hint ? base.hint + '；' : '') + '运行时未发现插件包，首次开启可能需联网安装';
+      // 核心渠道插件多数随 gateway 分发
+      const softChannels = new Set(['telegram', 'whatsapp', 'voice-call', 'slack', 'matrix']);
+      if (softChannels.has(pluginId)) {
+        base.available = true;
+        base.soft = true;
+        if (!base.hint) base.hint = '随网关渠道插件分发';
+      } else {
+        base.badge = 'missing-runtime';
+        base.hint = (base.hint ? base.hint + '；' : '') + '运行时未发现插件包，首次开启可能需联网安装';
+      }
     }
     return base;
   }
 
   // zero-config
+  if (pluginId === 'openclaw-weixin') {
+    base.badge = 'ready';
+    base.hint = '微信渠道（建议保持开启）';
+    base.available = true;
+    return base;
+  }
+
   if (!presence.present) {
     base.badge = 'missing-runtime';
     base.hint = '当前 OpenClaw 运行时未发现该插件';
@@ -341,6 +409,20 @@ function applyPluginCredentials(config, pluginId, fields) {
     };
     config.plugins.entries.matrix.enabled = true;
     ensureAllow(config, 'matrix');
+    return { ok: true };
+  }
+
+  if (pluginId === 'telegram') {
+    if (!config.channels.telegram) config.channels.telegram = {};
+    if (fields.botToken) {
+      config.channels.telegram.botToken = String(fields.botToken).trim();
+      config.plugins.entries.telegram.config = {
+        ...(config.plugins.entries.telegram.config || {}),
+        botToken: String(fields.botToken).trim()
+      };
+    }
+    config.plugins.entries.telegram.enabled = true;
+    ensureAllow(config, 'telegram');
     return { ok: true };
   }
 
