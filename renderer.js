@@ -1737,13 +1737,10 @@ function setupIpcListeners() {
         }
 
         qrcodeOverlay.style.display = 'flex';
-        qrcodeOverlay.style.opacity = '0';
+        qrcodeOverlay.style.opacity = '1';
         document.getElementById('qrcode-raw-url').value = url;
         drawQrCode(url);
-        markCommBindingQrReady(
-            channel,
-            channel === 'feishu' ? '⏳ 飞书扫码绑定进行中...' : '⏳ 微信扫码绑定进行中...'
-        );
+        markCommBindingQrReady(channel);
         if (channel === 'wechat' || channel === 'openclaw-weixin') startWeChatBindingFastPoll();
     });
 
@@ -4827,8 +4824,8 @@ function beginCommBinding(channel, wakeMsg, tip) {
     }, COMM_BINDING_WAKE_MS);
 }
 
-/** 已拿到二维码：结束唤醒超时，进入扫码等待超时。 */
-function markCommBindingQrReady(channel, scanningMsg) {
+/** 已拿到二维码：关掉全屏加载遮罩（绝不能挡码），只保留扫码弹窗 + 扫码超时。 */
+function markCommBindingQrReady(channel, _scanningMsg) {
     if (channel) {
         __commBindingSession.channel = channel;
         window.__activeQrChannel = channel;
@@ -4842,12 +4839,10 @@ function markCommBindingQrReady(channel, scanningMsg) {
         __commBindingSession.wakeTimer = null;
     }
     __commBindingSession.phase = 'scanning';
+    // 出码后立即卸全屏 spinner，否则会盖住二维码无法扫描
+    hideCommBindingOverlay();
     const ch = __commBindingSession.channel || channel || 'channel';
     const label = labelForBindChannel(ch);
-    showCommBindingOverlay(
-        scanningMsg || `⏳ ${label}扫码绑定进行中...`,
-        `请用手机完成扫码授权。扫码窗口可关闭取消；最多等待约 ${Math.round(COMM_BINDING_SCAN_MS / 60000)} 分钟。`
-    );
     if (__commBindingSession.scanTimer) clearTimeout(__commBindingSession.scanTimer);
     __commBindingSession.scanTimer = setTimeout(() => {
         failCommBinding(`${label}扫码超时，请重新发起绑定。`);

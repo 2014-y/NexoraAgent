@@ -1047,14 +1047,14 @@ input:checked + .slider-knob:before {
   border-color: transparent;
 }
 
-/* --- 微信扫码弹出遮罩 --- */
+/* --- 微信 / 飞书扫码弹出遮罩（需高于全局 plugin-async-overlay，避免挡码） --- */
 .qrcode-overlay-mask {
   opacity: 0;
   transition: opacity 0.2s ease;
-  position: absolute;
+  position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.8);
-  z-index: 101;
+  z-index: 9700;
   display: none;
   justify-content: center;
   align-items: center;

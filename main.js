@@ -1427,6 +1427,7 @@ async function startGatewayProcess() {
             showNotification('ClawAI已成功启动', 'AI 本地ClawAI已在后台运行，开始监听 18789 端口。');
 
             // 提取日志及匹配登录二维码的公共处理函数
+            let gatewayLogTail = '';
             const handleLogData = (data) => {
                 let text = data.toString();
                 if (text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
@@ -1434,9 +1435,8 @@ async function startGatewayProcess() {
                 }
                 if (!text.trim()) return;
 
-                // OpenClaw 偶发弹出「* Install xxx plugin?」交互问答；stdin 已 pipe，无人应答会永久卡死。
-                // 插件随 ClawAI 内置，统一自动选 Skip。
-                tryAutoSkipInstallPluginPrompt(gatewayProcess, text, 'Gateway');
+                // OpenClaw 偶发弹出「* Install xxx plugin?」；必须选「用本地内置」而不是 Skip，否则渠道会报 does not support login
+                tryAutoAnswerInstallPluginPrompt(gatewayProcess, text, 'Gateway');
                 
                 // 实时保存流日志用于诊断
                 try {
@@ -1456,11 +1456,16 @@ async function startGatewayProcess() {
                         global.latestAcpDashboardUrl = acpMatch[0].trim();
                     }
 
-                    // 自动匹配微信扫码登录 URL (支持 weixin.qq.com 或者是 wechaty.js.org 专属二维码链接)
-                    const qrMatch = text.match(/https?:\/\/(?:login\.)?weixin\.qq\.com\/l\/[^\s"'\n]+/) || 
-                                    text.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
-                    if (qrMatch) {
-                        mainWindow.webContents.send('gateway-qrcode', qrMatch[0]);
+                    // 跨分片拼接后再抓微信扫码 URL（liteapp.weixin.qq.com/q/... 等）
+                    gatewayLogTail = (gatewayLogTail + text).slice(-12000);
+                    const qrUrl = extractChannelLoginQrUrl(gatewayLogTail);
+                    if (qrUrl) {
+                        mainWindow.webContents.send('gateway-qrcode', {
+                            url: qrUrl,
+                            channel: 'wechat',
+                            title: '微信扫码登录',
+                            tip: '请使用手机微信扫描下方二维码授权登录。'
+                        });
                     }
                 }
             };
@@ -2217,23 +2222,49 @@ function emitWeChatLoginFailed(error) {
     }
 }
 
-/** 给管道 stdin 的子进程自动跳过「* Install xxx plugin?」，避免登录/网关永久卡住。 */
-function tryAutoSkipInstallPluginPrompt(child, text, label) {
-    if (!child || !child.__installPromptSkipped) child.__installPromptSkipped = false;
-    if (child.__installPromptSkipped) return false;
-    if (!/\*\s*Install\s+.+\s+plugin\?/i.test(String(text || ''))) return false;
-    child.__installPromptSkipped = true;
+/** 从日志中提取微信 / 通用扫码登录 URL（兼容 liteapp.weixin.qq.com/q/...）。 */
+function extractChannelLoginQrUrl(rawText) {
+    const cleanText = String(rawText || '').replace(/\x1B\[[0-9;]*m/g, '');
+    const patterns = [
+        /https?:\/\/liteapp\.weixin\.qq\.com\/q\/[^\s"'<>\]\)\}\n]+/i,
+        /https?:\/\/(?:login\.)?weixin\.qq\.com\/[^\s"'<>\]\)\}\n]+/i,
+        /https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'<>\]\)\}\n]+/i
+    ];
+    for (const re of patterns) {
+        const m = cleanText.match(re);
+        if (m && m[0]) return m[0].replace(/[),.;]+$/g, '');
+    }
+    return null;
+}
+
+/**
+ * 管道 stdin 下 OpenClaw 会卡在「* Install xxx plugin?」。
+ * 绝不能选 Skip（会导致 Channel does not support login）；优先选本地内置（↓1 + Enter），否则回车接受默认。
+ */
+function tryAutoAnswerInstallPluginPrompt(child, text, label) {
+    if (!child || child.__installPromptAnswered) return false;
+    const raw = String(text || '');
+    if (!/\*\s*Install\s+.+\s+plugin\?/i.test(raw) && !/Install\s+\w+\s+plugin\?/i.test(raw)) {
+        return false;
+    }
+    child.__installPromptAnswered = true;
     try {
         if (child.stdin && child.stdin.writable) {
-            for (let i = 0; i < 5; i++) child.stdin.write('\x1b[B');
+            // 常见选项：ClawHub / npm / local / skip。微信等内置包 default 常在 npm；↓ 一次落到 local。
+            child.stdin.write('\x1b[B');
             child.stdin.write('\r');
         }
     } catch (e) {}
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('gateway-log',
-            `[System] ${label || '子进程'}：检测到插件安装询问，已自动跳过（插件已内置）\n`);
+            `[System] ${label || '子进程'}：检测到插件安装询问，已自动选择本地/默认安装（禁止 Skip，避免渠道无法登录）\n`);
     }
     return true;
+}
+
+/** @deprecated 保留别名，防止遗漏调用点 */
+function tryAutoSkipInstallPluginPrompt(child, text, label) {
+    return tryAutoAnswerInstallPluginPrompt(child, text, label);
 }
 
 /** 当前通用渠道 login 会话（微信 + 以后 ASYNC_CHANNEL_LOGIN / IPC 传入的任意内置扫码插件） */
@@ -2410,6 +2441,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
     }, spec.wakeTimeoutMs);
     if (spec.openclawChannel === 'openclaw-weixin') wechatQrWaitTimer = sess.wakeTimer;
 
+    let loginLogTail = '';
     const handleLoginLog = (data) => {
         let text = data.toString();
         if (text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
@@ -2418,18 +2450,22 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
             ).join('\n');
         }
         if (!text.trim()) return;
-        tryAutoSkipInstallPluginPrompt(child, text, `${sess.label}绑定`);
+        tryAutoAnswerInstallPluginPrompt(child, text, `${sess.label}绑定`);
+        loginLogTail = (loginLogTail + text).slice(-16000);
         if (!mainWindow || mainWindow.isDestroyed()) return;
         mainWindow.webContents.send('gateway-log', text);
-        const cleanText = text.replace(/\x1B\[[0-9;]*m/g, '');
-        let qrUrl = null;
-        const weixinMatch = cleanText.match(/https?:\/\/[^\s"'\n]*weixin\.qq\.com\/[^\s"'\n]+/)
-            || cleanText.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
-        if (weixinMatch) qrUrl = weixinMatch[0];
-        if (!qrUrl && sess.openclawChannel !== 'openclaw-weixin') {
-            const generic = cleanText.match(/https?:\/\/[^\s"'\n]{12,}/);
-            if (generic && /qr|login|auth|oauth|scan|bind/i.test(generic[0])) qrUrl = generic[0];
+
+        if (/does not support\s+login/i.test(loginLogTail)) {
+            forceKillChildProcess(sess.process);
+            if (wechatLoginProcess === sess.process) wechatLoginProcess = null;
+            sess.process = null;
+            emitChannelLoginFailed(sess,
+                `${sess.label}渠道当前无法登录（插件未正确加载）。请停止后再启动 ClawAI，然后重试扫码绑定。`);
+            if (activeChannelLogin === sess) activeChannelLogin = null;
+            return;
         }
+
+        const qrUrl = extractChannelLoginQrUrl(loginLogTail);
         if (qrUrl) {
             sess.qrEmitted = true;
             if (sess.openclawChannel === 'openclaw-weixin') wechatQrEmitted = true;
