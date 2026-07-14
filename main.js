@@ -57,6 +57,293 @@ function getAvailableNodePath() {
     return null;
 }
 
+// ==========================================
+// 内置 Node 运行时（.node-sandbox）自动升级
+// ==========================================
+
+// 比较两个 x.y.z 版本号：a>b →1, a<b →-1, 相等 →0
+function compareNodeVersions(a, b) {
+    const pa = String(a).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+        const x = pa[i] || 0, y = pb[i] || 0;
+        if (x > y) return 1;
+        if (x < y) return -1;
+    }
+    return 0;
+}
+
+// 单个比较符是否满足（支持 >= > <= < = ^ ~ 及裸版本号）
+function satisfiesComparator(version, comp) {
+    comp = String(comp || '').trim();
+    if (!comp || comp === '*' || comp === 'x') return true;
+    let m;
+    if ((m = comp.match(/^(>=|<=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/))) {
+        const op = m[1] || '=';
+        const target = `${m[2]}.${m[3] || 0}.${m[4] || 0}`;
+        const c = compareNodeVersions(version, target);
+        switch (op) {
+            case '>': return c > 0;
+            case '>=': return c >= 0;
+            case '<': return c < 0;
+            case '<=': return c <= 0;
+            case '=': return c === 0;
+        }
+    }
+    if ((m = comp.match(/^\^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/))) {
+        const maj = parseInt(m[1], 10), min = parseInt(m[2] || 0, 10), pat = parseInt(m[3] || 0, 10);
+        const lower = `${maj}.${min}.${pat}`;
+        const upper = maj > 0 ? `${maj + 1}.0.0` : (min > 0 ? `0.${min + 1}.0` : `0.0.${pat + 1}`);
+        return compareNodeVersions(version, lower) >= 0 && compareNodeVersions(version, upper) < 0;
+    }
+    if ((m = comp.match(/^~v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/))) {
+        const maj = parseInt(m[1], 10), min = parseInt(m[2] || 0, 10), pat = parseInt(m[3] || 0, 10);
+        const lower = `${maj}.${min}.${pat}`;
+        const upper = (m[2] != null) ? `${maj}.${min + 1}.0` : `${maj + 1}.0.0`;
+        return compareNodeVersions(version, lower) >= 0 && compareNodeVersions(version, upper) < 0;
+    }
+    return false;
+}
+
+// 版本号是否满足 semver 范围（支持 ||（OR）与空格分隔（AND））
+function satisfiesNodeRange(version, range) {
+    if (!range || range === '*' || range === 'latest') return true;
+    return String(range).split('||').some(group => {
+        const comps = group.trim().split(/\s+/).filter(Boolean);
+        return comps.length > 0 && comps.every(c => satisfiesComparator(version, c));
+    });
+}
+
+// 轻量 https GET（自动跟随重定向），返回 Buffer 或 JSON
+function httpGetBuffer(url, { json = false, timeout = 30000 } = {}) {
+    return new Promise((resolve, reject) => {
+        const https = require('https');
+        const doReq = (u, redirects) => {
+            const req = https.get(u, { headers: { 'User-Agent': 'ClawAI-Updater' } }, (res) => {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    if (redirects > 5) { res.resume(); return reject(new Error('重定向次数过多')); }
+                    res.resume();
+                    return doReq(new URL(res.headers.location, u).toString(), redirects + 1);
+                }
+                if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+                const chunks = [];
+                res.on('data', c => chunks.push(c));
+                res.on('end', () => {
+                    const buf = Buffer.concat(chunks);
+                    if (json) { try { resolve(JSON.parse(buf.toString('utf8'))); } catch (e) { reject(e); } }
+                    else resolve(buf);
+                });
+            });
+            req.on('error', reject);
+            req.setTimeout(timeout, () => { req.destroy(new Error('请求超时')); });
+        };
+        doReq(url, 0);
+    });
+}
+
+// 自愈升级内置的 Node.js 绿色沙箱
+async function checkAndHealSandboxNode() {
+    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const nodeExePath = path.join(sandboxDir, 'node.exe');
+    
+    let isOk = false;
+    let currentVersion = 'none';
+    let currentSqlite = 'none';
+    
+    if (fs.existsSync(nodeExePath)) {
+        try {
+            // 版本校验使用非阻塞异步 execFile 包装，保证事件循环畅通
+            const { execFile } = require('child_process');
+            const checkCode = `
+                try {
+                    const s = require('node:sqlite');
+                    const db = new s.DatabaseSync(':memory:');
+                    const sqliteVer = db.prepare('SELECT sqlite_version() AS version').get().version;
+                    console.log(process.version + ',' + sqliteVer);
+                } catch (e) {
+                    console.log(process.version + ',');
+                }
+            `;
+            const output = await new Promise((resolve, reject) => {
+                execFile(nodeExePath, ['-e', checkCode], { timeout: 5000 }, (err, stdout) => {
+                    if (err) return reject(err);
+                    resolve(stdout.trim());
+                });
+            });
+            const parts = output.split(',');
+            if (parts[0]) {
+                currentVersion = parts[0];
+                currentSqlite = parts[1] || 'none';
+                
+                const cleanNodeVer = currentVersion.replace(/^v/, '');
+                const satisfyNode = satisfiesNodeRange(cleanNodeVer, '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0');
+                const satisfySqlite = currentSqlite !== 'none' && satisfiesNodeRange(currentSqlite, '>=3.51.3');
+                
+                if (satisfyNode && satisfySqlite) {
+                    isOk = true;
+                }
+            }
+        } catch (err) {
+            console.error('Failed to run check code on sandbox node:', err.message);
+        }
+    }
+    
+    if (isOk) {
+        console.log(`[SandboxCheck] Sandbox Node version ${currentVersion} and SQLite ${currentSqlite} are compliant. No upgrade needed.`);
+        return;
+    }
+    
+    console.warn(`[SandboxCheck] Mismatch detected. Current node: ${currentVersion}, SQLite: ${currentSqlite}. Starting self-healing sandbox upgrade...`);
+    
+    if (mainWindow) {
+        mainWindow.webContents.send('gateway-status', 'upgrading');
+        mainWindow.webContents.send('gateway-log', `[System] 检测到内置沙箱环境 (Node: ${currentVersion}, SQLite: ${currentSqlite}) 不适用，正在启动自动环境自愈升级...\n`);
+    }
+    
+    const targetVersion = '24.15.0';
+    const tempZip = path.join(__dirname, 'node-v24.15.0.zip');
+    const tempExtract = path.join(__dirname, 'node-v24.15.0-temp');
+    const arch = process.arch === 'arm64' ? 'win-arm64' : (process.arch === 'ia32' ? 'win-x86' : 'win-x64');
+    
+    // 优先尝试阿里的国内淘宝/阿里镜像以获得极速下载，备用 Node.js 官方链接
+    const urls = [
+        `https://npmmirror.com/mirrors/node/v${targetVersion}/node-v${targetVersion}-${arch}.zip`,
+        `https://nodejs.org/dist/v${targetVersion}/node-v${targetVersion}-${arch}.zip`
+    ];
+    
+    let downloadSuccess = false;
+    for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        try {
+            console.log(`[SandboxUpgrade] Downloading sandbox zip from: ${url}`);
+            if (mainWindow) {
+                mainWindow.webContents.send('gateway-log', `[System] 正在连接下载源 (${i === 0 ? '阿里镜像源' : '官方源'})...\n`);
+            }
+            
+            await new Promise((resolve, reject) => {
+                const https = require('https');
+                const fs = require('fs');
+                const doReq = (u, redirects) => {
+                    const req = https.get(u, { headers: { 'User-Agent': 'ClawAI-Updater' } }, (res) => {
+                        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                            if (redirects > 5) { res.resume(); return reject(new Error('重定向次数过多')); }
+                            res.resume();
+                            return doReq(new URL(res.headers.location, u).toString(), redirects + 1);
+                        }
+                        if (res.statusCode !== 200) {
+                            res.resume();
+                            return reject(new Error(`HTTP ${res.statusCode}`));
+                        }
+                        const total = parseInt(res.headers['content-length'] || '0', 10);
+                        let received = 0;
+                        const out = fs.createWriteStream(tempZip);
+                        let lastPercent = -1;
+                        
+                        res.on('data', (chunk) => {
+                            received += chunk.length;
+                            const percent = total > 0 ? Math.floor((received / total) * 100) : 0;
+                            if (percent !== lastPercent) {
+                                lastPercent = percent;
+                                if (mainWindow) {
+                                    mainWindow.webContents.send('sandbox-upgrade-progress', {
+                                        progress: Math.floor(percent * 0.9), // 下载占 90% 进度
+                                        text: `正在下载 Node.js 沙箱环境 (${percent}%)`
+                                    });
+                                    mainWindow.webContents.send('gateway-log', `[System] 正在下载内置 Node.js 运行时：${percent}% (已接收 ${(received / 1024 / 1024).toFixed(1)}MB / 共 ${(total / 1024 / 1024).toFixed(1)}MB)\r`);
+                                }
+                            }
+                        });
+                        res.pipe(out);
+                        out.on('finish', () => out.close(() => resolve()));
+                        out.on('error', reject);
+                    });
+                    req.on('error', reject);
+                    req.setTimeout(120000, () => { req.destroy(new Error('下载超时')); });
+                };
+                doReq(url, 0);
+            });
+            downloadSuccess = true;
+            break;
+        } catch (err) {
+            console.error(`[SandboxUpgrade] Failed downloading from ${url}:`, err.message);
+            if (fs.existsSync(tempZip)) {
+                try { fs.unlinkSync(tempZip); } catch(e) {}
+            }
+        }
+    }
+    
+    if (!downloadSuccess) {
+        throw new Error('下载 Node.js 绿色沙箱包失败，请检查您的网络连接并重试。');
+    }
+    
+    if (mainWindow) {
+        mainWindow.webContents.send('sandbox-upgrade-progress', { progress: 92, text: '下载完成，正在解压沙箱文件...' });
+        mainWindow.webContents.send('gateway-log', '\n[System] 下载完成，正在解压 Node.js 沙箱文件...\n');
+    }
+    
+    // 异步非阻塞解包，防止主进程卡死
+    if (fs.existsSync(tempExtract)) {
+        fs.rmSync(tempExtract, { recursive: true, force: true });
+    }
+    const { exec } = require('child_process');
+    await new Promise((resolve, reject) => {
+        exec(`powershell -ExecutionPolicy Bypass -NoProfile -Command "Expand-Archive -Path '${tempZip}' -DestinationPath '${tempExtract}' -Force"`, (err) => {
+            if (err) return reject(new Error('解压失败: ' + err.message));
+            resolve();
+        });
+    });
+    
+    if (mainWindow) {
+        mainWindow.webContents.send('sandbox-upgrade-progress', { progress: 96, text: '解压完成，正在替换核心组件...' });
+        mainWindow.webContents.send('gateway-log', '[System] 解压完成，正在部署核心二进制组件...\n');
+    }
+    
+    const extractedDir = path.join(tempExtract, `node-v${targetVersion}-win-x64`);
+    
+    // 物理覆盖
+    if (!fs.existsSync(sandboxDir)) {
+        fs.mkdirSync(sandboxDir, { recursive: true });
+    }
+    
+    // 异步复制核心 node.exe
+    await fs.promises.copyFile(path.join(extractedDir, 'node.exe'), path.join(sandboxDir, 'node.exe'));
+    
+    // 异步复制 npm/npx 等脚本
+    const scripts = ['npm', 'npm.cmd', 'npx', 'npx.cmd', 'corepack', 'corepack.cmd'];
+    for (const s of scripts) {
+        const src = path.join(extractedDir, s);
+        if (fs.existsSync(src)) {
+            await fs.promises.copyFile(src, path.join(sandboxDir, s));
+        }
+    }
+    
+    // 覆盖整个 node_modules 目录 (npm 自体)
+    const destModules = path.join(sandboxDir, 'node_modules');
+    if (fs.existsSync(destModules)) {
+        fs.rmSync(destModules, { recursive: true, force: true });
+    }
+    
+    // 异步非阻塞运行 robocopy，防止进程阻塞导致无响应
+    await new Promise((resolve) => {
+        exec(`robocopy "${path.join(extractedDir, 'node_modules')}" "${destModules}" /E /NJH /NJS /ndl /nc /ns`, () => {
+            resolve();
+        });
+    });
+    
+    // 清理临时文件
+    try {
+        if (fs.existsSync(tempZip)) fs.unlinkSync(tempZip);
+        if (fs.existsSync(tempExtract)) fs.rmSync(tempExtract, { recursive: true, force: true });
+    } catch(e) {}
+    
+    if (mainWindow) {
+        mainWindow.webContents.send('sandbox-upgrade-progress', { progress: 100, text: '沙箱升级完成！' });
+        mainWindow.webContents.send('gateway-log', '[System] 沙箱环境成功联动升级！\n');
+    }
+    
+    console.log('[SandboxUpgrade] Sandbox Node.js successfully upgraded to compliant v24.15.0!');
+}
+
 let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
@@ -519,6 +806,9 @@ function createWindow() {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+
+    // 移除硬编码自动拉起，改由前端根据设置（setting_auto_launch_gateway）自主判断并发送 IPC 触发拉起
+    // startGatewayProcess();
 }
 
 // 创建系统托盘
@@ -570,31 +860,42 @@ function showNotification(title, body) {
     }
 }
 
+// 异步非阻塞执行命令，防止锁死主进程事件循环导致的界面卡死
+function execAsync(cmd) {
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+        exec(cmd, (err, stdout) => {
+            resolve(stdout || '');
+        });
+    });
+}
+
 // 停止后台网关子进程
-function stopGatewayProcess() {
+async function stopGatewayProcess() {
     if (gatewayProcess) {
         gatewayProcess.isIntentionallyStopped = true; // 标记为主动停止，避免触发意外退出警报
         if (process.platform === 'win32') {
             try {
-                const { execSync } = require('child_process');
-                execSync(`taskkill /pid ${gatewayProcess.pid} /T /F`);
+                // 精准物理强杀所有可能遗留的旧沙箱 node.exe 僵尸进程，彻底杜绝多实例抢占和日志刷屏
+                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*ClawAI*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
+                await execAsync(killCmd);
+                await execAsync(`taskkill /pid ${gatewayProcess.pid} /T /F`);
             } catch (err) {
                 try { gatewayProcess.kill('SIGKILL'); } catch (e) {}
             }
             // 保底物理清除霸占端口 18789 的残留
             try {
-                const { execSync } = require('child_process');
-                const netstatOut = execSync('netstat -ano').toString();
+                const netstatOut = await execAsync('netstat -ano');
                 const lines = netstatOut.split('\n');
-                lines.forEach(line => {
+                for (const line of lines) {
                     if (line.includes(':18789') && line.includes('LISTENING')) {
                         const parts = line.trim().split(/\s+/);
                         const pid = parts[parts.length - 1];
                         if (pid && parseInt(pid) > 0) {
-                            try { execSync(`taskkill /pid ${pid} /F /T`); } catch(e) {}
+                            try { await execAsync(`taskkill /pid ${pid} /F /T`); } catch(e) {}
                         }
                     }
-                });
+                }
             } catch(err) {}
         } else {
             gatewayProcess.kill('SIGTERM');
@@ -631,35 +932,52 @@ ipcMain.on('window-action', (event, action) => {
 });
 
 // 启动后台网关进程
-ipcMain.on('gateway-action', (event, action) => {
-    if (action === 'start') {
-        if (gatewayProcess) return;
+async function startGatewayProcess() {
+        if (gatewayProcess) {
+            if (mainWindow) {
+                mainWindow.webContents.send('gateway-status', 'running');
+            }
+            return;
+        }
+
+        try {
+            await checkAndHealSandboxNode();
+        } catch (err) {
+            console.error('[SandboxCheck] Error during check and heal:', err);
+            if (mainWindow) {
+                mainWindow.webContents.send('gateway-status', 'stopped');
+                mainWindow.webContents.send('gateway-log', `[System] 环境自愈升级出错: ${err.message}\n`);
+            }
+            showNotification('环境自愈失败', err.message);
+            return;
+        }
 
         // 每次拉起网关前，先物理强制杀掉任何霸占 18789 端口的残留进程，确保新实例完美就绪
         if (process.platform === 'win32') {
             try {
-                const { execSync } = require('child_process');
+                // 精准物理强杀所有可能遗留的旧沙箱 node.exe 僵尸进程，彻底杜绝多实例抢占和日志刷屏
+                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*ClawAI*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
+                await execAsync(killCmd);
+
                 const currentPid = process.pid;
                 const parentPid = process.ppid;
-                const netstatOut = execSync('netstat -ano').toString();
+                const netstatOut = await execAsync('netstat -ano');
                 const lines = netstatOut.split('\n');
                 const pidsToKill = new Set();
-                lines.forEach(line => {
+                for (const line of lines) {
                     if (line.includes(':18789') && line.includes('LISTENING')) {
                         const parts = line.trim().split(/\s+/);
                         const pid = parts[parts.length - 1];
-                        if (pid && parseInt(pid) > 0) {
+                        if (pid && parseInt(pid) > 0 && pid !== currentPid.toString() && pid !== parentPid.toString()) {
                             pidsToKill.add(pid);
                         }
                     }
-                });
-                pidsToKill.forEach(pid => {
-                    if (pid === currentPid.toString() || pid === parentPid.toString()) return;
+                }
+                for (const pid of pidsToKill) {
                     try {
-                        execSync(`taskkill /pid ${pid} /F`);
-                        console.log(`Successfully killed leftover gateway process occupying port 18789, PID: ${pid}`);
-                    } catch(e) {}
-                });
+                        await execAsync(`taskkill /pid ${pid} /F`);
+                    } catch (e) {}
+                }
             } catch(err) {
                 console.error('Failed to cleanup leftover port 18789 processes:', err);
             }
@@ -669,30 +987,7 @@ ipcMain.on('gateway-action', (event, action) => {
             mainWindow.webContents.send('gateway-status', 'starting');
             mainWindow.webContents.send('gateway-log', '[System] 正在拉起内置 OpenClaw Gateway 核心...\n');
         }
-
         try {
-            // 物理强杀所有后台遗存的 node.exe 僵尸进程，彻底释放可能死锁的 skills-prompts 目录和 18789 端口
-            if (process.platform === 'win32') {
-                try {
-                    const { execSync } = require('child_process');
-                    const currentPid = process.pid;
-                    const parentPid = process.ppid;
-                    const netstatOut = execSync('netstat -ano').toString();
-                    const lines = netstatOut.split('\n');
-                    const gatewayLine = lines.find(line => line.includes('18789') && line.includes('LISTENING'));
-                    if (gatewayLine) {
-                        const match = gatewayLine.trim().split(/\s+/);
-                        const pid = match[match.length - 1];
-                        if (pid && pid !== '0' && pid !== currentPid.toString() && pid !== parentPid.toString()) {
-                            // 安全强杀：绝不加 /T 参数，避免误杀 npm/electron 祖先进程引发大面积应用闪退
-                            try { execSync(`taskkill /pid ${pid} /F`); } catch(e) {}
-                        }
-                    }
-                } catch(err) {
-                    console.error('Failed to cleanup node zombie processes:', err);
-                }
-            }
-
             // 终极物理自愈：强行清理可能引发 EPERM 的 skills-prompts 缓存（不管它是文件还是损坏目录）
             const cleanupPaths = [
                 path.join(process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\admin', '.openclaw', 'agents', 'main', 'sessions', 'skills-prompts'),
@@ -851,9 +1146,53 @@ ipcMain.on('gateway-action', (event, action) => {
                 mainWindow.webContents.send('gateway-log', `[System] [ERROR] 无法找到内置网关模块: ${e.message}\n`);
             }
         }
+}
+
+ipcMain.on('gateway-action', (event, action) => {
+    if (action === 'start') {
+        startGatewayProcess();
     } else if (action === 'stop') {
         stopGatewayProcess();
+    } else if (action === 'query-status') {
+        if (mainWindow) {
+            mainWindow.webContents.send('gateway-status', gatewayProcess ? 'running' : 'stopped');
+        }
     }
+});
+
+ipcMain.on('open-sandbox-terminal', () => {
+    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const { spawn } = require('child_process');
+    
+    // 终极无痛方案：使用 PowerShell 的 -EncodedCommand 特性！
+    // 将整个包含特殊字符、中文、和环境变量的脚本打包为 Base64 传递，彻底避开 CMD 的单双引号解析、吃字符以及防病毒脚本策略的拦截。
+    const initScript = [
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
+        `$env:Path = "${sandboxDir.replace(/\\/g, '\\\\')};" + $env:Path`,
+        `Clear-Host`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host "         ClawAI 绿色沙箱开发终端 (PowerShell)             " -ForegroundColor Green`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host "  * 内置 Node 运行时已成功注入环境变量 PATH 最前面。" -ForegroundColor Cyan`,
+        `Write-Host "  * 您可以直接在此处执行以下命令：" -ForegroundColor Cyan`,
+        `Write-Host "      - node -v            (查看内置沙箱 Node 版本)" -ForegroundColor White`,
+        `Write-Host "      - npm -v             (查看内置沙箱 npm 版本)" -ForegroundColor White`,
+        `Write-Host "      - npx openclaw doctor (执行网关 CLI 诊断自检)" -ForegroundColor White`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host ""`
+    ].join('\r\n');
+
+    // 必须转换为 UTF-16LE 编码的 Buffer，然后再转 Base64 才能被 PowerShell 正确识别
+    const encodedCmd = Buffer.from(initScript, 'utf16le').toString('base64');
+    
+    // 现在调用的命令行里，只有绝对安全的英文字母 Base64 字符串，不可能再有任何解析边界和乱码问题！
+    const cmdLine = `start powershell -NoExit -ExecutionPolicy Bypass -EncodedCommand ${encodedCmd}`;
+
+    spawn('cmd.exe', ['/c', cmdLine], {
+        cwd: __dirname,
+        detached: true,
+        stdio: 'ignore'
+    }).unref();
 });
 
 // 配置文件的读写 IPC
@@ -1983,6 +2322,217 @@ ipcMain.handle('install-update', async (event, savePath) => {
     } catch (err) {
         console.error('无法启动安装程序:', err);
         return { success: false, message: `启动安装程序失败: ${err.message}` };
+    }
+});
+
+// 4. 内置网关核心包更新（openclaw npm 包热更新）
+ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
+    const { execFile } = require('child_process');
+    const path = require('path');
+    const fs = require('fs');
+
+    const appDir = __dirname;
+    const log = (msg) => {
+        console.log(`[GatewayUpdate] ${msg}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gateway-update-progress', { message: msg });
+        }
+    };
+
+    try {
+        // 1) 查询 npm 最新版本
+        let version = targetVersion;
+        if (!version) {
+            log('正在查询 npm 最新版本...');
+            try {
+                const result = await new Promise((resolve, reject) => {
+                    execFile('npm', ['view', 'openclaw', 'version', '--json'], {
+                        cwd: appDir, shell: true, timeout: 30000
+                    }, (err, stdout) => {
+                        if (err) return reject(err);
+                        try { resolve(JSON.parse(stdout.trim())); }
+                        catch (e) { resolve(stdout.trim().replace(/"/g, '')); }
+                    });
+                });
+                version = String(result);
+            } catch (e) {
+                log('查询版本失败，将使用 latest 标签');
+                version = 'latest';
+            }
+        }
+        log(`目标版本: openclaw@${version}`);
+
+        // 2) 检查 Node.js 运行时兼容性（从 npm 查引擎约束），决定是否需要自动升级内置 Node
+        log('正在检查 Node.js 运行时兼容性...');
+        let nodeUpgrade = null; // { targetVersion } 需要升级时填充
+        try {
+            const engineInfo = await new Promise((resolve) => {
+                execFile('npm', ['view', `openclaw@${version}`, 'engines.node', '--json'], {
+                    cwd: appDir, shell: true, timeout: 15000
+                }, (err, stdout) => {
+                    if (err) return resolve(null);
+                    try { resolve(JSON.parse(stdout.trim())); }
+                    catch (e) { resolve(stdout.trim().replace(/"/g, '')); }
+                });
+            });
+
+            if (engineInfo) {
+                const engineRange = String(engineInfo);
+                // 读取当前内置沙箱 Node 版本（不存在或系统 Node 也一并纳入判断）
+                let currentNodeVer = null;
+                const nodeExePath = getAvailableNodePath();
+                if (nodeExePath) {
+                    try { currentNodeVer = require('child_process').execSync(`"${nodeExePath}" -v`, { encoding: 'utf8', timeout: 10000 }).trim().replace(/^v/, ''); } catch (e) {}
+                }
+                log(`当前 Node: ${currentNodeVer ? 'v' + currentNodeVer : '未安装'} | 新版要求: ${engineRange}`);
+
+                const compatible = currentNodeVer && satisfiesNodeRange(currentNodeVer, engineRange);
+                if (compatible) {
+                    log('内置 Node 版本兼容，无需升级');
+                } else {
+                    log('内置 Node 不满足新版要求，正在为您匹配可用版本...');
+                    const currentMajor = currentNodeVer ? parseInt(currentNodeVer.split('.')[0], 10) : 0;
+                    const target = await resolveBestNodeVersion(engineRange, currentMajor);
+                    if (target) {
+                        nodeUpgrade = { targetVersion: target };
+                        log(`将自动升级内置 Node → v${target}`);
+                    } else {
+                        log('未找到满足要求的 Node 版本，将跳过 Node 自动升级');
+                    }
+                }
+            }
+        } catch (e) {
+            log('兼容性检查跳过: ' + e.message);
+        }
+
+        // 3) 停止网关（同时释放 node.exe 文件句柄，便于随后替换）
+        log('正在停止网关...');
+        stopGatewayProcess();
+        gatewayProcess = null;
+        await new Promise(r => setTimeout(r, 1500));
+
+        // 3.5) 如需升级内置 Node 运行时，下载并替换 .node-sandbox/node.exe
+        if (nodeUpgrade) {
+            try {
+                log(`正在下载 Node v${nodeUpgrade.targetVersion} 运行时...`);
+                let lastPct = -1;
+                await downloadAndInstallSandboxNode(nodeUpgrade.targetVersion, (received, total) => {
+                    if (total > 0) {
+                        const pct = Math.floor((received / total) * 100);
+                        if (pct >= lastPct + 10 || pct === 100) {
+                            lastPct = pct;
+                            const mb = (received / 1048576).toFixed(1);
+                            const totalMb = (total / 1048576).toFixed(1);
+                            log(`Node 下载中 ${pct}% (${mb} MB / ${totalMb} MB)`);
+                        }
+                    }
+                });
+                log(`内置 Node 运行时已升级到 v${nodeUpgrade.targetVersion}`);
+            } catch (e) {
+                // Node 升级失败不阻断 openclaw 安装，但要明确告知（否则新核心可能无法启动）
+                log(`Node 自动升级失败: ${e.message}（将继续安装核心，如无法启动请手动升级 Node）`);
+            }
+        }
+
+        // 4) 执行 npm install
+        log(`正在安装 openclaw@${version}，请稍候...`);
+        const installResult = await new Promise((resolve, reject) => {
+            const npmArgs = ['install', `openclaw@${version}`, '--save', '--save-exact'];
+            const child = execFile('npm', npmArgs, {
+                cwd: appDir,
+                shell: true,
+                timeout: 120000,
+                env: { ...process.env }
+            }, (err, stdout, stderr) => {
+                if (err) {
+                    reject(new Error(`npm install 失败: ${err.message}\n${stderr || ''}`));
+                } else {
+                    resolve(stdout);
+                }
+            });
+
+            // 实时输出安装日志
+            if (child.stdout) child.stdout.on('data', (d) => log(d.toString().trim()));
+            if (child.stderr) child.stderr.on('data', (d) => {
+                const text = d.toString().trim();
+                if (text && !text.startsWith('npm warn')) log(text);
+            });
+        });
+        log('npm install 完成');
+
+        // 5) 验证新版本是否安装成功
+        let installedVersion = '未知';
+        try {
+            const pkgPath = path.join(appDir, 'node_modules', 'openclaw', 'package.json');
+            if (fs.existsSync(pkgPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                installedVersion = pkg.version || '未知';
+            }
+        } catch (e) {}
+        log(`已安装版本: openclaw@${installedVersion}`);
+
+        // 6) 同步锁定 package.json 中的版本号
+        try {
+            const appPkgPath = path.join(appDir, 'package.json');
+            const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf8'));
+            if (appPkg.dependencies && appPkg.dependencies.openclaw) {
+                appPkg.dependencies.openclaw = installedVersion;
+                fs.writeFileSync(appPkgPath, JSON.stringify(appPkg, null, 2) + '\n', 'utf8');
+                log('package.json 版本已锁定');
+            }
+        } catch (e) {
+            log('锁定 package.json 版本失败（非致命）: ' + e.message);
+        }
+
+        // 7) 自动重启网关（直接在主进程内拉起并校验，避免 IPC 往返 + 端口/文件句柄未释放导致的重启失败）
+        log('正在重启网关...');
+
+        // 确保上一实例已被彻底回收：Windows 释放 18789 端口与 node_modules 文件句柄需要更充裕的时间
+        gatewayProcess = null;
+        await new Promise(r => setTimeout(r, 2000));
+
+        let restarted = false;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                startGatewayProcess();
+            } catch (e) {
+                log(`启动尝试 ${attempt}/${maxAttempts} 异常: ${e.message}`);
+            }
+            // 等待网关进程真正就绪（若入口缺失或崩溃，exit 回调会把 gatewayProcess 复位为 null）
+            await new Promise(r => setTimeout(r, 2500));
+            if (gatewayProcess) { restarted = true; break; }
+            if (attempt < maxAttempts) {
+                log(`网关尚未就绪，正在重试 (${attempt}/${maxAttempts})...`);
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+
+        if (restarted) {
+            log('网关已重启成功');
+        } else {
+            log('网关自动重启失败，请手动点击右侧「启动网关」按钮');
+            // 兜底：再通过渲染层触发一次，双保险
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('gateway-control-trigger', 'start');
+            }
+        }
+
+        return {
+            success: true,
+            installedVersion,
+            restarted,
+            message: restarted
+                ? `网关核心已成功更新到 openclaw@${installedVersion}，网关已重启完成。`
+                : `网关核心已更新到 openclaw@${installedVersion}，但自动重启失败，请手动点击「启动网关」。`
+        };
+
+    } catch (err) {
+        console.error('[GatewayUpdate] 更新失败:', err);
+        return {
+            success: false,
+            message: `更新失败: ${err.message}`
+        };
     }
 });
 

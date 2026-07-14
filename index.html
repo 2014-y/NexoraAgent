@@ -53,13 +53,15 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="8.5" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="15.5" cy="13" r="1.5" fill="currentColor" stroke="none"/><path d="M9 17h6"/></svg>
               <span data-i18n="nav.config">模型配置</span>
             </div>
+            <div class="nav-item" data-tab="communication-view" id="nav-communication-mgmt">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span>通讯管理</span>
+            </div>
             <div class="nav-item" data-tab="plugins-view" id="tour-nav-plugins">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
               <span data-i18n="nav.plugins">内置插件</span>
-            </div>
-            <div class="nav-item" data-tab="dashboard-view" id="tour-nav-stats">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              <span data-i18n="nav.stats">用量监控</span>
             </div>
             <div class="nav-item" data-tab="openclaw-panel-view" id="btn-nav-openclaw-web">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -78,29 +80,16 @@
               <span data-i18n="nav.openclaw_panel">OpenClaw</span>
             </div>
             
-            <!-- 新增“系统日志”菜单项 -->
-            <div class="nav-item" data-tab="system-logs-view" id="tour-nav-system-logs">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              <span data-i18n="nav.system_logs">系统日志</span>
+            <div class="nav-item" data-tab="dashboard-view" id="tour-nav-stats">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span data-i18n="nav.stats">用量监控</span>
             </div>
  
+            
+            
             <div class="nav-item" data-tab="settings-view" id="tour-nav-settings">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               <span data-i18n="nav.settings">系统设置</span>
-            </div>
-            <div class="nav-item" id="nav-check-update">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-              <span data-i18n="nav.update">检查更新</span>
-            </div>
-            <div class="nav-item" id="nav-acceleration-channel">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-              </svg>
-              <span data-i18n="nav.acceleration_channel">加速通道</span>
             </div>
           </nav>
         </div>
@@ -124,7 +113,16 @@
         <section class="tab-pane active" id="console-view">
           <div class="view-header" style="display: flex; justify-content: space-between; align-items: center;">
             <div>
-              <h2 style="margin: 0;" data-i18n="console.title">网关控制台</h2>
+              <div style="display: flex; align-items: center; gap: 16px;">
+                <h2 style="margin: 0;" data-i18n="console.title">网关控制台</h2>
+                <button id="btn-open-terminal" class="terminal-open-btn" style="padding: 4px 10px; font-size: 12px; height: 26px;">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 5px; filter: drop-shadow(0 0 3px var(--accent-color));">
+                    <polyline points="4 17 10 11 4 5"></polyline>
+                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                  </svg>
+                  <span>终端</span>
+                </button>
+              </div>
               <p style="margin: 4px 0 0 0;" data-i18n="console.desc">实时监控本地 AI 助手的消息处理流与日志输出</p>
             </div>
             <!-- 右上角科技风实时监控时钟 -->
@@ -195,27 +193,24 @@
                   <span data-i18n="console.today_requests">今日请求次数</span>
                   <div class="stat-card-name-val" id="stat-total-requests">0 次</div>
                 </div>
-                <div class="stat-card-mini" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 48px;">
-                  <span style="font-size: 10px; color: var(--text-secondary); margin-bottom: 2px;" data-i18n="console.wechat_status_title">微信通道状态</span>
-                  <div class="stat-card-name-val" id="stat-wechat-status" style="font-size: 13px; font-weight: bold; color: #ff5252;">未绑定</div>
+                <div class="stat-card-mini" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 72px; padding: 8px 10px; box-sizing: border-box; position: relative;">
+                  <!-- 动态状态字样 -->
+                  <div class="stat-card-name-val" id="stat-channel-status" style="font-size: 13px; font-weight: bold; color: #ff5252; display: flex; align-items: center; gap: 6px; justify-content: center; margin-bottom: 8px;">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #ff5252; display: inline-block; transition: background 0.3s;" id="stat-channel-status-dot"></span>
+                    <span id="stat-channel-status-text">未启用</span>
+                  </div>
+                  <!-- 胶囊选项卡 -->
+                  <div style="display: flex; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 20px; padding: 2px; gap: 2px; width: 100%; box-sizing: border-box;">
+                    <div class="console-channel-pill active" data-channel="qqbot" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: white; transition: all 0.2s; font-weight: bold; background: linear-gradient(135deg, var(--accent-color), #4f46e5); box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);">QQ</div>
+                    <div class="console-channel-pill" data-channel="wechat" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">微信</div>
+                    <div class="console-channel-pill" data-channel="feishu" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">飞书</div>
+                  </div>
                 </div>
-              </div>
-              <div class="wechat-control-group" style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px; width: 100%;">
-                <button class="btn-wechat-bind" id="wechat-bind-btn" title="点击手动生成登录二维码，以绑定微信" style="width: 100%;" data-i18n="console.wechat_btn.bind">
-                  🔑 绑定微信
-                </button>
                 
-                <!-- 微信绑定详细信息容器，默认隐藏 -->
-                <div id="wechat-details-panel" style="display: block; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font-size: 11px; margin-bottom: 4px; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left;">
-                  <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;" data-i18n="console.wechat_title.credentials">👤 绑定账户凭证</div>
-                  <div><span style="color: var(--text-secondary);" data-i18n="console.wechat_label.id">账户标识: </span><span id="wechat-detail-id" style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">--</span></div>
-                  <div><span style="color: var(--text-secondary);" data-i18n="console.wechat_label.time">绑定时间: </span><span id="wechat-detail-time" style="color: var(--text-primary);">--</span></div>
-                  <div><span style="color: var(--text-secondary);" data-i18n="console.wechat_label.protocol">通道协议: </span><span style="color: var(--accent-color); font-weight: bold;">WeChat / WA (iLink)</span></div>
+                <!-- 控制台通道详细绑定信息 -->
+                <div id="console-channel-details-panel" style="display: block; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-size: 11px; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left;">
+                  <!-- 动态渲染绑定信息 -->
                 </div>
-
-                <button class="btn-wechat-unbind" id="wechat-unbind-btn" title="点击清空微信登录缓存，以解绑微信号" style="margin-top: 0; width: 100%;" data-i18n="console.wechat_btn.unbind">
-                  💬 微信解绑
-                </button>
               </div>
               <div class="app-uptime-zone">
                 <span data-i18n="console.app_uptime">应用已运行时间:</span>
@@ -640,23 +635,7 @@
           </div>
         </section>
 
-        <!-- Tab: 系统日志 -->
-        <section class="tab-pane" id="system-logs-view" style="height: 100%; box-sizing: border-box; padding: 20px;">
-          <div class="view-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-shrink: 0;">
-            <div>
-              <h2 style="margin: 0;" data-i18n="logs.title">系统运行日志</h2>
-              <p style="margin: 4px 0 0 0;" data-i18n="logs.desc">展示网关子进程拉起时的完整 stdout/stderr 原生输出（可用于问题排查与诊断）</p>
-            </div>
-            <div style="display: flex; gap: 8px;">
-              <button type="button" class="btn-secondary" id="btn-copy-system-logs" style="padding: 0 14px; font-size: 12px; font-weight: 500; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.copy">📋 复制日志</button>
-              <button type="button" class="btn-secondary" id="btn-clear-system-logs" style="padding: 0 14px; font-size: 12px; font-weight: 500; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: #ff5252; cursor: pointer; height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.clear">🗑️ 清空日志</button>
-            </div>
-          </div>
-          
-          <div class="system-logs-container" style="background: #0d0e15; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; flex: 1; min-height: 0; display: flex; flex-direction: column; box-sizing: border-box;">
-            <textarea id="system-raw-logs-area" readonly spellcheck="false" style="flex: 1; background: transparent; border: none; outline: none; color: #a5d6a7; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: none; overflow-y: auto; white-space: pre; margin: 0; padding: 0; box-sizing: border-box; font-weight: 500;" placeholder="等待网关子进程启动并喷吐系统日志..." data-i18n-placeholder="logs.placeholder"></textarea>
-          </div>
-        </section>
+        
 
         <!-- Tab 5.5: 系统设置 -->
         <section class="tab-pane" id="settings-view" style="overflow-y: auto; height: 100%; box-sizing: border-box; padding: 20px;">
@@ -756,6 +735,37 @@
                 </select>
               </div>
             </div>
+
+            <!-- 专属网络加速通道 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
+              <div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);">⚡ 专属网络加速通道</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">优化网关在海外模型网络下的连通性能，大幅度缩短启动插件与请求模型的握手延迟。</div>
+              </div>
+              <div>
+                <button type="button" id="btn-open-acceleration" style="background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; color: white; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2); transition: all 0.2s;">
+                  去配置
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 系统运行日志板块 -->
+          <div class="form-group-section" style="width: 100%; margin-bottom: 24px; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div>
+                <h3 style="margin: 0; border-left: 3px solid var(--accent-color); padding-left: 10px;" data-i18n="logs.title">📋 系统运行日志</h3>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: var(--text-secondary);" data-i18n="logs.desc">展示网关子进程拉起时的完整 stdout/stderr 原生输出（可用于问题排查与诊断）</p>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn-secondary" id="btn-copy-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.copy">📋 复制日志</button>
+                <button type="button" class="btn-secondary" id="btn-clear-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: #ff5252; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.clear">🗑️ 清空日志</button>
+              </div>
+            </div>
+            
+            <div class="system-logs-container" style="background: #0d0e15; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; height: 220px; display: flex; flex-direction: column; box-sizing: border-box; width: 100%;">
+              <textarea id="system-raw-logs-area" readonly spellcheck="false" style="flex: 1; background: transparent; border: none; outline: none; color: #a5d6a7; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: none; overflow-y: auto; white-space: pre; margin: 0; padding: 0; box-sizing: border-box; font-weight: 500;" placeholder="等待网关子进程启动并喷吐系统日志..." data-i18n-placeholder="logs.placeholder"></textarea>
+            </div>
           </div>
 
           <!-- 软件版本与检测更新 -->
@@ -785,7 +795,7 @@
               </div>
 
               <!-- 2. 核心服务能力 -->
-              <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
+                <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
                 <div style="font-size: 13px; font-weight: bold; color: var(--accent-color); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;" data-i18n="about.service.title">🔥 核心服务能力</div>
                 <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5; display: flex; flex-direction: column; gap: 6px;">
                   <div><span style="color: white; font-weight: bold;" data-i18n="about.service.wechat.title">💬 微信 AI 伴侣</span> - <span data-i18n="about.service.wechat.desc">扫码一键绑定，支持私聊、群聊艾特智能对话。</span></div>
@@ -807,7 +817,69 @@
           </div>
         </section>
 
+        <!-- Tab 5.8: 通讯管理 -->
+        <section class="tab-pane" id="communication-view" style="overflow-y: auto; height: 100%; box-sizing: border-box; padding: 20px; position: relative;">
+          <!-- 微信扫码绑定期间全局操作锁遮罩 -->
+          <div id="comm-binding-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px); z-index: 90; border-radius: 8px; justify-content: center; align-items: center; flex-direction: column; gap: 16px;">
+            <div style="width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <div style="color: rgba(255,255,255,0.85); font-size: 14px; font-weight: 600; text-align: center; line-height: 1.6;">
+              <div id="comm-binding-overlay-title">⏳ 微信扫码绑定进行中...</div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">请在手机微信扫描二维码完成授权，期间请勿操作其他通道</div>
+            </div>
+          </div>
+          <div class="view-header" style="margin-bottom: 20px;">
+            <h2>💬 多渠道通讯管理</h2>
+            <p>集中配置和管理微信、飞书、QQ 机器人等外部即时通讯渠道的接入与多账户绑定</p>
+          </div>
 
+          <!-- 1. 微信渠道绑定管理 -->
+          <div class="form-group-section" style="width: 100%; margin-bottom: 24px;">
+            <h3 style="border-left: 3px solid var(--accent-color); padding-left: 10px;">💬 微信渠道绑定管理</h3>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; margin-top: -6px;">通过扫码方式绑定个人微信号，作为智能助手的专属通道入口。</p>
+            
+            <div id="wechat-accounts-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; width: 100%;">
+              <!-- 动态渲染的微信账号状态卡片 -->
+            </div>
+            
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" class="btn-primary" id="wechat-bind-btn" title="点击手动生成登录二维码，以绑定微信" style="width: auto; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; font-weight: 600; cursor: pointer; color: white;">
+                🔑 扫码绑定微信
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. 飞书多用户绑定管理 -->
+          <div class="form-group-section" style="width: 100%; margin-bottom: 24px;">
+            <h3 style="border-left: 3px solid var(--accent-color); padding-left: 10px;">🦆 飞书多用户绑定管理</h3>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; margin-top: -6px;">配置和管理多个飞书机器人的接入凭证，实现多用户/多群组的飞书通道绑定。</p>
+            
+            <div id="feishu-accounts-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              <!-- 动态渲染的飞书账号卡片 -->
+            </div>
+            
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" class="btn-primary" id="btn-add-feishu-account" style="width: auto; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; font-weight: 600; cursor: pointer;">
+                ➕ 添加飞书绑定账号
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. QQ机器人多用户绑定管理 -->
+          <div class="form-group-section" style="width: 100%; margin-bottom: 24px;">
+            <h3 style="border-left: 3px solid var(--accent-color); padding-left: 10px;">🐧 QQ机器人多用户绑定管理</h3>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; margin-top: -6px;">配置和管理多个 QQ 开放平台机器人（QQ Bot）的接入凭证，实现多渠道绑定。</p>
+            
+            <div id="qqbot-accounts-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              <!-- 动态渲染的 QQ 机器人账号卡片 -->
+            </div>
+            
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" class="btn-primary" id="btn-add-qqbot-account" style="width: auto; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; font-weight: 600; cursor: pointer;">
+                ➕ 添加 QQ机器人绑定账号
+              </button>
+            </div>
+          </div>
+        </section>
 
         <!-- Tab 7: 内置 OpenClaw 面板 -->
         <section class="tab-pane" id="openclaw-panel-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: #0b0b14;">

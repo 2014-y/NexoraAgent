@@ -24,7 +24,7 @@ const ZERO_CONFIG_PLUGINS = [
 const ZERO_CONFIG_DEFAULT_ON = ['dual-model-trainer', 'duckduckgo', 'auto-summary', 'openclaw-weixin'];
 
 /** B：需外部平台凭证 / 渠道配置 */
-const CREDENTIAL_PLUGINS = ['slack', 'matrix', 'telegram', 'whatsapp', 'voice-call'];
+const CREDENTIAL_PLUGINS = ['slack', 'matrix', 'telegram', 'whatsapp', 'voice-call', 'openclaw-qqbot'];
 
 /** C：需本机安装软件 */
 const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
@@ -33,6 +33,7 @@ const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
 const UI_PLUGIN_IDS = [
   'dual-model-trainer',
   'openclaw-weixin',
+  'openclaw-qqbot',
   'voice-call',
   'telegram',
   'slack',
@@ -86,25 +87,32 @@ function ensureUiPluginCatalog(config, opts = {}) {
   const forceDefaultOn = Boolean(opts.forceDefaultOn);
 
   for (const id of ZERO_CONFIG_PLUGINS) {
-    const defaultOn = ZERO_CONFIG_DEFAULT_ON.includes(id);
-    if (forceDefaultOn && defaultOn) {
-      if (!config.plugins) config.plugins = {};
-      if (!config.plugins.entries) config.plugins.entries = {};
-      if (!config.plugins.entries[id]) config.plugins.entries[id] = {};
-      if (config.plugins.entries[id].enabled !== true) {
-        config.plugins.entries[id].enabled = true;
-        changes.push(`${id}: enabled -> true (default-on)`);
-      }
-    } else if (ensureEntry(config, id, false)) {
+    if (ensureEntry(config, id, true)) {
       changes.push(`${id}: entry created`);
+    }
+    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
+      config.plugins.entries[id].enabled = true;
+      changes.push(`${id}: enabled -> true (force default-on)`);
     }
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
   }
 
   for (const id of CREDENTIAL_PLUGINS) {
-    if (ensureEntry(config, id, false)) changes.push(`${id}: entry created`);
+    if (ensureEntry(config, id, true)) changes.push(`${id}: entry created`);
+    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
+      config.plugins.entries[id].enabled = true;
+      changes.push(`${id}: enabled -> true (force default-on)`);
+    }
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
   }
+
+  // 确保飞书 (feishu) 默认创建并开启
+  if (ensureEntry(config, 'feishu', true)) changes.push('feishu: entry created');
+  if (config.plugins.entries['feishu'] && config.plugins.entries['feishu'].enabled !== true) {
+    config.plugins.entries['feishu'].enabled = true;
+    changes.push('feishu: enabled -> true (force default-on)');
+  }
+  if (ensureAllow(config, 'feishu')) changes.push('feishu: +allow');
 
   // llm-task 作为摘要能力补充始终允许（即使 UI 主卡是 auto-summary）
   if (ensureAllow(config, 'llm-task')) changes.push('llm-task: +allow');
@@ -155,6 +163,17 @@ function pluginLooksPresent(pluginId, opts = {}) {
       const local = path.join(appRoot, rel, pluginId);
       if (fs.existsSync(path.join(local, 'index.js')) || fs.existsSync(path.join(local, 'openclaw.plugin.json'))) {
         return { present: true, source: rel };
+      }
+    }
+  }
+
+  // 检查直接安装在 node_modules 中的独立包（如 @openclaw/qqbot, @openclaw/feishu, @openclaw/voice-call 等）
+  if (appRoot) {
+    const names = [pluginId, `@openclaw/${pluginId.replace('openclaw-', '')}`];
+    for (const name of names) {
+      const p = path.join(appRoot, 'node_modules', name);
+      if (fs.existsSync(p)) {
+        return { present: true, source: 'node_modules' };
       }
     }
   }

@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('api', {
     installUpdate: (savePath) => ipcRenderer.invoke('install-update', savePath),
     onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (event, progress) => callback(progress)),
     
+    // 内置网关核心包热更新
+    updateOpenclawPackage: (opts) => ipcRenderer.invoke('update-openclaw-package', opts || {}),
+    onGatewayUpdateProgress: (callback) => ipcRenderer.on('gateway-update-progress', (event, data) => callback(data)),
+    onSandboxUpdateProgress: (callback) => ipcRenderer.on('sandbox-upgrade-progress', (event, data) => callback(data)),
+    
     // 主进程向渲染进程的数据推送回调
     onLogReceived: (callback) => ipcRenderer.on('gateway-log', (event, data) => callback(data)),
     onStatusChanged: (callback) => ipcRenderer.on('gateway-status', (event, status) => callback(status)),
@@ -42,5 +47,6 @@ contextBridge.exposeInMainWorld('api', {
     onControlTriggered: (callback) => ipcRenderer.on('gateway-control-trigger', (event, action) => callback(action)),
     onMaximizedStatus: (callback) => ipcRenderer.on('window-maximized-status', (event, isMaximized) => callback(isMaximized)),
     getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
-    getAppVersion: () => ipcRenderer.invoke('get-app-version')
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    openSandboxTerminal: () => ipcRenderer.send('open-sandbox-terminal')
 });

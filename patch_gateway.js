@@ -1126,7 +1126,7 @@ function wrapRequest(originalRequest, defaultProto) {
 
 http.request = wrapRequest(http.request, 'http');
 https.request = wrapRequest(https.request, 'https');
-console.log('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.');
+console.error('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.');
 
 // ─── 代理 2：fetch / globalThis.fetch 拦截通道 (Node 18+ 闭环) ───
 function wrapFetch(originalFetch) {
@@ -1194,7 +1194,7 @@ function wrapFetch(originalFetch) {
 
 if (typeof globalThis === 'object' && globalThis.fetch) {
     globalThis.fetch = wrapFetch(globalThis.fetch);
-    console.log('[TokenGuard] Transparent globalThis.fetch hook successfully loaded.');
+    console.error('[TokenGuard] Transparent globalThis.fetch hook successfully loaded.');
 }
 
 // ─── 代理 3：天罗地网 (拦截基于 Require 的第三方底层网络库) ───
@@ -1262,7 +1262,7 @@ Module._load = function(request, parent, isMain) {
                         return res;
                     };
                 }
-                console.log('[TokenGuard] Transparent undici module hook successfully loaded.');
+                console.error('[TokenGuard] Transparent undici module hook successfully loaded.');
             } catch (e) {}
         }
     }
@@ -1275,7 +1275,7 @@ Module._load = function(request, parent, isMain) {
                 if (typeof exports === 'function') {
                     const newExport = wrapFetch(exports);
                     Object.assign(newExport, exports);
-                    console.log('[TokenGuard] node-fetch module hook successfully loaded.');
+                    console.error('[TokenGuard] node-fetch module hook successfully loaded.');
                     return newExport;
                 }
             } catch(e) {}
@@ -1286,7 +1286,7 @@ Module._load = function(request, parent, isMain) {
 };
 if (typeof global === 'object' && global.fetch && global.fetch !== (globalThis && globalThis.fetch)) {
     global.fetch = wrapFetch(global.fetch);
-    console.log('[TokenGuard] Transparent global.fetch hook successfully loaded.');
+    console.error('[TokenGuard] Transparent global.fetch hook successfully loaded.');
 }
 
 // ─── fs.writeFileSync 防爆盾 ───

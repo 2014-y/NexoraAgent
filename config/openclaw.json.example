@@ -187,16 +187,16 @@
         "enabled": false
       },
       "voice-call": {
-        "enabled": false
+        "enabled": true
       },
       "telegram": {
-        "enabled": false
+        "enabled": true
       },
       "slack": {
-        "enabled": false
+        "enabled": true
       },
       "whatsapp": {
-        "enabled": false
+        "enabled": true
       },
       "lobster": {
         "enabled": false
@@ -208,7 +208,7 @@
         "enabled": false
       },
       "matrix": {
-        "enabled": false
+        "enabled": true
       },
       "msteams": {
         "enabled": false
@@ -274,7 +274,10 @@
         "enabled": false
       },
       "feishu": {
-        "enabled": false
+        "enabled": true
+      },
+      "openclaw-qqbot": {
+        "enabled": true
       },
       "duckduckgo": {
         "enabled": true
@@ -286,13 +289,13 @@
         "enabled": false
       },
       "webhooks": {
-        "enabled": false
+        "enabled": true
       },
       "irc": {
         "enabled": false
       },
       "bonjour": {
-        "enabled": false
+        "enabled": true
       },
       "oc-path": {
         "enabled": false
@@ -301,7 +304,7 @@
         "enabled": false
       },
       "workboard": {
-        "enabled": false
+        "enabled": true
       },
       "waltz-flight-assistant": {
         "enabled": false
@@ -344,6 +347,7 @@
       "zalouser",
       "imessage",
       "feishu",
+      "openclaw-qqbot",
       "discord"
     ]
   },

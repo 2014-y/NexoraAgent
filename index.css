@@ -1093,6 +1093,10 @@ input:checked + .slider-knob:before {
   to { transform: scale(1); opacity: 1; }
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* 滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
@@ -1643,4 +1647,31 @@ input:focus, select:focus, textarea:focus {
 #system-logs-view.active {
   display: flex !important;
   flex-direction: column;
+}
+
+.terminal-open-btn {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-color);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.terminal-open-btn:hover {
+  background: var(--accent-color);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.5);
+  transform: translateY(-1px);
+}
+
+.terminal-open-btn:active {
+  transform: translateY(0);
 }

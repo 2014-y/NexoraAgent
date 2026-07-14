@@ -257,7 +257,7 @@ window.promptFields = function (title, fields) {
         `;
         const inputsHtml = (fields || []).map((f, i) => `
             <label style="display:block; font-size:12px; color: var(--text-secondary); margin: 10px 0 4px;">${f.label || f.key}</label>
-            <input id="pf-input-${i}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}"
+            <input id="pf-input-${i}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" value="${f.value || ''}"
               style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary); font-size:13px;" />
         `).join('');
         modal.innerHTML = `
@@ -330,6 +330,286 @@ function bindDetailsClick(container) {
     }
 }
 
+// 渲染飞书多用户绑定管理卡片
+function renderFeishuAccounts() {
+    const container = document.getElementById('feishu-accounts-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!configData) return;
+    if (!configData.channels) configData.channels = {};
+    if (!configData.channels.feishu) configData.channels.feishu = { accounts: {} };
+    if (!configData.channels.feishu.accounts) configData.channels.feishu.accounts = {};
+
+    const accounts = configData.channels.feishu.accounts;
+    const defaultAccount = configData.channels.feishu.defaultAccount || '';
+
+    const accountIds = Object.keys(accounts);
+    if (accountIds.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 16px; text-align: center; color: var(--text-secondary); background: rgba(255,255,255,0.01); border: 1px dashed var(--border-color); border-radius: 8px; font-size: 12px;">
+                暂无绑定的飞书账号。请点击下方“添加飞书绑定账号”进行配置。
+            </div>
+        `;
+        return;
+    }
+
+    accountIds.forEach(id => {
+        const acc = accounts[id] || {};
+        const isDefault = id === defaultAccount;
+        const card = document.createElement('div');
+        card.style.cssText = `
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px; background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-color); border-radius: 10px;
+        `;
+        card.innerHTML = `
+            <div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                    👤 账号标识: <span style="color: var(--accent-color);">${id}</span>
+                    ${isDefault ? '<span style="font-size: 10px; background: rgba(0, 230, 118, 0.15); color: #00e676; border: 1px solid rgba(0, 230, 118, 0.3); padding: 1px 6px; border-radius: 4px;">默认账号</span>' : ''}
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; display: flex; flex-direction: column; gap: 2px;">
+                    <span>App ID: ${acc.appId || '--'}</span>
+                    <span>Encrypt Key: ${acc.encryptKey ? '已配置' : '未配置'}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                ${!isDefault ? `<button type="button" class="btn-primary btn-set-default-feishu" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer;">设为默认</button>` : ''}
+                <button type="button" class="btn-primary btn-edit-feishu" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(140, 82, 255, 0.1); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff; cursor: pointer;">编辑</button>
+                <button type="button" class="btn-primary btn-delete-feishu" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255, 82, 82, 0.1); border: 1px solid rgba(255, 82, 82, 0.3); color: #ff5252; cursor: pointer;">删除</button>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    // 绑定事件
+    container.querySelectorAll('.btn-set-default-feishu').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            configData.channels.feishu.defaultAccount = id;
+            try {
+                await window.api.saveConfig(configData);
+                renderFeishuAccounts();
+                showToast('已成功切换默认飞书账号！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('保存切换失败: ' + err.message);
+            }
+        });
+    });
+
+    container.querySelectorAll('.btn-delete-feishu').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            if (confirm(`确认要删除飞书账号 [ ${id} ] 吗？`)) {
+                delete configData.channels.feishu.accounts[id];
+                if (configData.channels.feishu.defaultAccount === id) {
+                    const keys = Object.keys(configData.channels.feishu.accounts);
+                    configData.channels.feishu.defaultAccount = keys[0] || '';
+                }
+                try {
+                    await window.api.saveConfig(configData);
+                    renderFeishuAccounts();
+                    showToast('飞书账号已删除！');
+                    if (gatewayStatus === 'running') {
+                        window.api.gatewayAction('stop');
+                        setTimeout(() => window.api.gatewayAction('start'), 1200);
+                    }
+                } catch(err) {
+                    showToast('删除保存失败: ' + err.message);
+                }
+            }
+        });
+    });
+
+    container.querySelectorAll('.btn-edit-feishu').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            const acc = configData.channels.feishu.accounts[id] || {};
+            const values = await window.promptFields(`编辑飞书账号 · ${id}`, [
+                { key: 'appId', label: 'App ID', placeholder: 'cli_...', value: acc.appId || '' },
+                { key: 'appSecret', label: 'App Secret', placeholder: 'App Secret 密匙', type: 'password', value: acc.appSecret || '' },
+                { key: 'encryptKey', label: 'Encrypt Key (可选)', placeholder: '解密 Key', value: acc.encryptKey || '' },
+                { key: 'verificationToken', label: 'Verification Token (可选)', placeholder: '验证 Token', value: acc.verificationToken || '' }
+            ]);
+            if (!values) return;
+            if (!values.appId || !values.appSecret) {
+                showToast('App ID 和 App Secret 不能为空！');
+                return;
+            }
+            configData.channels.feishu.accounts[id] = {
+                appId: values.appId.trim(),
+                appSecret: values.appSecret.trim(),
+                encryptKey: values.encryptKey ? values.encryptKey.trim() : '',
+                verificationToken: values.verificationToken ? values.verificationToken.trim() : ''
+            };
+            try {
+                await window.api.saveConfig(configData);
+                renderFeishuAccounts();
+                showToast('飞书账号编辑保存成功！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('保存编辑失败: ' + err.message);
+            }
+        });
+    });
+}
+
+
+// 渲染 QQ 机器人多用户绑定卡片
+function renderQqbotAccounts() {
+    const container = document.getElementById('qqbot-accounts-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!configData) return;
+    if (!configData.channels) configData.channels = {};
+    if (!configData.channels.qqbot) configData.channels.qqbot = { accounts: {} };
+    
+    // 自愈式升级：如果检测到旧格式的单账号配置，自动做一次平滑迁移
+    if (configData.channels.qqbot.appId && configData.channels.qqbot.clientSecret) {
+        const oldAppId = configData.channels.qqbot.appId;
+        const oldSecret = configData.channels.qqbot.clientSecret;
+        
+        configData.channels.qqbot.accounts = configData.channels.qqbot.accounts || {};
+        configData.channels.qqbot.accounts['default'] = {
+            appId: oldAppId,
+            clientSecret: oldSecret
+        };
+        configData.channels.qqbot.defaultAccount = 'default';
+        configData.channels.qqbot.enabled = true;
+        
+        delete configData.channels.qqbot.appId;
+        delete configData.channels.qqbot.clientSecret;
+        
+        window.api.saveConfig(configData).catch(() => {});
+    }
+
+    if (!configData.channels.qqbot.accounts) configData.channels.qqbot.accounts = {};
+
+    const accounts = configData.channels.qqbot.accounts;
+    const defaultAccount = configData.channels.qqbot.defaultAccount || '';
+
+    const accountIds = Object.keys(accounts);
+    if (accountIds.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 16px; text-align: center; color: var(--text-secondary); background: rgba(255,255,255,0.01); border: 1px dashed var(--border-color); border-radius: 8px; font-size: 12px;">
+                暂无绑定的 QQ 机器人。请点击下方“添加 QQ 机器人绑定账号”进行配置。
+            </div>
+        `;
+        return;
+    }
+
+    accountIds.forEach(id => {
+        const acc = accounts[id] || {};
+        const isDefault = id === defaultAccount;
+        const card = document.createElement('div');
+        card.style.cssText = `
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px; background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-color); border-radius: 10px;
+        `;
+        card.innerHTML = `
+            <div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                    👤 账号标识: <span style="color: var(--accent-color);">${id}</span>
+                    ${isDefault ? '<span style="font-size: 10px; background: rgba(0, 230, 118, 0.15); color: #00e676; border: 1px solid rgba(0, 230, 118, 0.3); padding: 1px 6px; border-radius: 4px;">默认账号</span>' : ''}
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; display: flex; flex-direction: column; gap: 2px;">
+                    <span>App ID: ${acc.appId || '--'}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                ${!isDefault ? `<button type="button" class="btn-primary btn-set-default-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer;">设为默认</button>` : ''}
+                <button type="button" class="btn-primary btn-edit-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(140, 82, 255, 0.1); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff; cursor: pointer;">编辑</button>
+                <button type="button" class="btn-primary btn-delete-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255, 82, 82, 0.1); border: 1px solid rgba(255, 82, 82, 0.3); color: #ff5252; cursor: pointer;">删除</button>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    // 绑定事件
+    container.querySelectorAll('.btn-set-default-qqbot').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            configData.channels.qqbot.defaultAccount = id;
+            try {
+                await window.api.saveConfig(configData);
+                renderQqbotAccounts();
+                showToast('已成功切换默认 QQ 机器人！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('保存切换失败: ' + err.message);
+            }
+        });
+    });
+
+    container.querySelectorAll('.btn-delete-qqbot').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            if (confirm(`确认要删除 QQ 机器人 [ ${id} ] 吗？`)) {
+                delete configData.channels.qqbot.accounts[id];
+                if (configData.channels.qqbot.defaultAccount === id) {
+                    const keys = Object.keys(configData.channels.qqbot.accounts);
+                    configData.channels.qqbot.defaultAccount = keys[0] || '';
+                }
+                try {
+                    await window.api.saveConfig(configData);
+                    renderQqbotAccounts();
+                    showToast('QQ 机器人已删除！');
+                    if (gatewayStatus === 'running') {
+                        window.api.gatewayAction('stop');
+                        setTimeout(() => window.api.gatewayAction('start'), 1200);
+                    }
+                } catch(err) {
+                    showToast('删除保存失败: ' + err.message);
+                }
+            }
+        });
+    });
+
+    container.querySelectorAll('.btn-edit-qqbot').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            const acc = configData.channels.qqbot.accounts[id] || {};
+            const values = await window.promptFields(`编辑 QQ 机器人 · ${id}`, [
+                { key: 'appId', label: 'App ID', placeholder: '请输入机器人 AppID', value: acc.appId || '' },
+                { key: 'clientSecret', label: 'Client Secret', placeholder: '请输入机器人 AppSecret', type: 'password', value: acc.clientSecret || '' }
+            ]);
+            if (!values) return;
+            if (!values.appId || !values.clientSecret) {
+                showToast('App ID 和 Client Secret 不能为空！');
+                return;
+            }
+            configData.channels.qqbot.accounts[id] = {
+                appId: values.appId.trim(),
+                clientSecret: values.clientSecret.trim()
+            };
+            try {
+                await window.api.saveConfig(configData);
+                renderQqbotAccounts();
+                showToast('QQ 机器人编辑保存成功！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('保存编辑失败: ' + err.message);
+            }
+        });
+    });
+}
+
 // 1. 全局状态
 let configData = null;
 let currentTab = 'console-view';
@@ -341,6 +621,7 @@ let gatewayFullyReady = false;
 const UI_PLUGIN_ORDER = [
     'dual-model-trainer',
     'openclaw-weixin',
+    'openclaw-qqbot',
     'voice-call',
     'telegram',
     'slack',
@@ -357,6 +638,7 @@ const UI_PLUGIN_ORDER = [
 const pluginMetadata = {
     'dual-model-trainer': { name: '🧠 双模型教学', desc: '利用主备模型对比，自动本地收集并训练属于你的专属模型', tier: 'zero' },
     'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将网关接入微信聊天，支持私聊、群聊和图片理解', tier: 'zero' },
+    'openclaw-qqbot': { name: '🐧 QQ机器人', desc: '将网关接入 QQ 开放平台机器人（QQ Bot）消息通道，实现 QQ 群聊及私聊交互。', tier: 'credentials' },
     'voice-call': { name: '📞 语音通话', desc: '开启实时语音对话服务，支持通过微信向 AI 拨打电话', tier: 'credentials' },
     'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI 网关对话', tier: 'credentials' },
     'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地网关作为应用机器人接入到您的团队 Slack 频道中', tier: 'credentials' },
@@ -605,6 +887,240 @@ async function init() {
         if (appUptimeEl) appUptimeEl.innerText = timeStr;
     }, 1000);
 
+    // 绑定添加飞书账号事件
+    const btnAddFeishu = document.getElementById('btn-add-feishu-account');
+    if (btnAddFeishu) {
+        btnAddFeishu.addEventListener('click', async () => {
+            if (btnAddFeishu.disabled) return;
+            const oldHtml = btnAddFeishu.innerHTML;
+            btnAddFeishu.disabled = true;
+            btnAddFeishu.style.opacity = '0.6';
+            btnAddFeishu.style.cursor = 'not-allowed';
+            btnAddFeishu.innerHTML = '⏳ 正在等待输入...';
+            
+            let values;
+            try {
+                values = await window.promptFields('添加飞书账号', [
+                    { key: 'accountId', label: '账号标识 (如: feishu-1, 飞书客服)', placeholder: '请输入唯一的英文/中文标识' },
+                    { key: 'appId', label: 'App ID', placeholder: 'cli_...' },
+                    { key: 'appSecret', label: 'App Secret', placeholder: 'App Secret 密匙', type: 'password' },
+                    { key: 'encryptKey', label: 'Encrypt Key (可选)', placeholder: '解密 Key' },
+                    { key: 'verificationToken', label: 'Verification Token (可选)', placeholder: '验证 Token' }
+                ]);
+            } finally {
+                btnAddFeishu.disabled = false;
+                btnAddFeishu.style.opacity = '1';
+                btnAddFeishu.style.cursor = 'pointer';
+                btnAddFeishu.innerHTML = oldHtml;
+            }
+            if (!values) return;
+            const accountId = values.accountId ? values.accountId.trim() : '';
+            if (!accountId) {
+                showToast('账号标识不能为空！');
+                return;
+            }
+            if (!values.appId || !values.appSecret) {
+                showToast('App ID 和 App Secret 不能为空！');
+                return;
+            }
+            
+            if (!configData.channels) configData.channels = {};
+            if (!configData.channels.feishu) configData.channels.feishu = { accounts: {} };
+            if (!configData.channels.feishu.accounts) configData.channels.feishu.accounts = {};
+            
+            if (configData.channels.feishu.accounts[accountId]) {
+                showToast('账号标识已存在，请使用其他名称！');
+                return;
+            }
+            
+            configData.channels.feishu.accounts[accountId] = {
+                appId: values.appId.trim(),
+                appSecret: values.appSecret.trim(),
+                encryptKey: values.encryptKey ? values.encryptKey.trim() : '',
+                verificationToken: values.verificationToken ? values.verificationToken.trim() : ''
+            };
+            
+            // 如果是第一个账号，自动设为 defaultAccount
+            if (!configData.channels.feishu.defaultAccount) {
+                configData.channels.feishu.defaultAccount = accountId;
+            }
+            
+            try {
+                await window.api.saveConfig(configData);
+                renderFeishuAccounts();
+                showToast('飞书绑定账号添加成功！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('添加配置失败: ' + err.message);
+            }
+        });
+    }
+
+    // 绑定添加 QQ 机器人账号事件
+    const btnAddQqbot = document.getElementById('btn-add-qqbot-account');
+    if (btnAddQqbot) {
+        btnAddQqbot.addEventListener('click', async () => {
+            if (btnAddQqbot.disabled) return;
+            const oldHtml = btnAddQqbot.innerHTML;
+            btnAddQqbot.disabled = true;
+            btnAddQqbot.style.opacity = '0.6';
+            btnAddQqbot.style.cursor = 'not-allowed';
+            btnAddQqbot.innerHTML = '⏳ 正在等待输入...';
+            
+            let values;
+            try {
+                values = await window.promptFields('添加 QQ 机器人', [
+                    { key: 'accountId', label: '账号标识 (如: qqbot-1, 客服QQ机器人)', placeholder: '请输入唯一的英文/中文标识' },
+                    { key: 'appId', label: 'App ID', placeholder: '请输入机器人 AppID' },
+                    { key: 'clientSecret', label: 'Client Secret', placeholder: '请输入机器人 AppSecret', type: 'password' }
+                ]);
+            } finally {
+                btnAddQqbot.disabled = false;
+                btnAddQqbot.style.opacity = '1';
+                btnAddQqbot.style.cursor = 'pointer';
+                btnAddQqbot.innerHTML = oldHtml;
+            }
+            if (!values) return;
+            const accountId = values.accountId ? values.accountId.trim() : '';
+            if (!accountId) {
+                showToast('账号标识不能为空！');
+                return;
+            }
+            if (!values.appId || !values.clientSecret) {
+                showToast('App ID 和 Client Secret 不能为空！');
+                return;
+            }
+            
+            if (!configData.channels) configData.channels = {};
+            if (!configData.channels.qqbot) configData.channels.qqbot = { accounts: {} };
+            if (!configData.channels.qqbot.accounts) configData.channels.qqbot.accounts = {};
+            
+            if (configData.channels.qqbot.accounts[accountId]) {
+                showToast('账号标识已存在，请使用其他名称！');
+                return;
+            }
+            
+            configData.channels.qqbot.accounts[accountId] = {
+                appId: values.appId.trim(),
+                clientSecret: values.clientSecret.trim()
+            };
+            
+            configData.channels.qqbot.enabled = true;
+            if (!configData.channels.qqbot.allowFrom) {
+                configData.channels.qqbot.allowFrom = ['*'];
+            }
+            
+            // 确保开通了对应的 QQ 插件
+            if (!configData.plugins) configData.plugins = {};
+            if (!configData.plugins.entries) configData.plugins.entries = {};
+            configData.plugins.entries['openclaw-qqbot'] = { enabled: true };
+            if (!configData.plugins.allow) configData.plugins.allow = [];
+            if (!configData.plugins.allow.includes('openclaw-qqbot')) {
+                configData.plugins.allow.push('openclaw-qqbot');
+            }
+            
+            // 如果是第一个账号，自动设为 defaultAccount
+            if (!configData.channels.qqbot.defaultAccount) {
+                configData.channels.qqbot.defaultAccount = accountId;
+            }
+            
+            try {
+                await window.api.saveConfig(configData);
+                renderQqbotAccounts();
+                showToast('QQ 机器人绑定账号添加成功！');
+                if (gatewayStatus === 'running') {
+                    window.api.gatewayAction('stop');
+                    setTimeout(() => window.api.gatewayAction('start'), 1200);
+                }
+            } catch(err) {
+                showToast('添加配置失败: ' + err.message);
+            }
+        });
+    }
+
+    // 绑定控制台多渠道绑定状态切换小药丸
+    const pills = document.querySelectorAll('.console-channel-pill');
+    pills.forEach(pill => {
+        pill.addEventListener('click', (e) => {
+            pills.forEach(p => {
+                p.classList.remove('active');
+                p.style.background = 'transparent';
+                p.style.color = 'var(--text-secondary)';
+                p.style.boxShadow = 'none';
+                p.style.fontWeight = 'normal';
+            });
+            
+            pill.classList.add('active');
+            pill.style.background = 'linear-gradient(135deg, var(--accent-color), #4f46e5)';
+            pill.style.color = 'white';
+            pill.style.fontWeight = 'bold';
+            pill.style.boxShadow = '0 2px 6px rgba(99, 102, 241, 0.2)';
+            
+            consoleSelectedChannel = pill.getAttribute('data-channel');
+            localStorage.setItem('console_pref_channel', consoleSelectedChannel);
+            updateConsoleChannelStatusUI();
+        });
+    });
+    
+    // 初始化时激活 localStorage 保存的通道小药丸
+    const savedCh = localStorage.getItem('console_pref_channel') || 'qqbot';
+    const activePill = document.querySelector(`.console-channel-pill[data-channel="${savedCh}"]`);
+    if (activePill) {
+        activePill.click();
+    }
+
+    // 绑定微信动态账户列表中的解绑事件（通讯管理页面）
+    const wechatContainer = document.getElementById('wechat-accounts-container');
+    if (wechatContainer) {
+        wechatContainer.addEventListener('click', async (e) => {
+            if (e.target && e.target.id === 'wechat-unbind-btn-dynamic') {
+                const btn = e.target;
+                if (btn.disabled) return;
+                
+                const confirmClear = confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的网关，并在下次启动网关时重新生成二维码供您扫码登录！');
+                if (!confirmClear) return;
+
+                const oldHtml = btn.innerHTML;
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'not-allowed';
+                btn.innerHTML = '⏳ 正在解绑...';
+
+                try {
+                    const result = await window.api.clearWeChatSession();
+                    if (result.success) {
+                        showToast('微信解绑成功！');
+                        updateWeChatStatusUI();
+                        if (gatewayStatus === 'running') {
+                            window.api.gatewayAction('stop');
+                            setTimeout(() => window.api.gatewayAction('start'), 1200);
+                        }
+                    } else {
+                        showToast('解绑失败: ' + result.message);
+                    }
+                } catch (err) {
+                    showToast('解绑异常: ' + err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                    btn.innerHTML = oldHtml;
+                }
+            }
+        });
+    }
+
+    // 绑定系统偏好设置中的加速通道跳转事件
+    const btnOpenAcc = document.getElementById('btn-open-acceleration');
+    if (btnOpenAcc) {
+        btnOpenAcc.addEventListener('click', () => {
+            window.api.openExternal('https://pin.dianping.men/auth/register?code=2k788U5v');
+        });
+    }
+
     // 初始化控制台科技感时钟
     initConsoleClock();
 
@@ -714,6 +1230,14 @@ async function init() {
         });
     }
 
+    // 打开沙箱终端按钮监听
+    const btnOpenTerminal = document.getElementById('btn-open-terminal');
+    if (btnOpenTerminal) {
+        btnOpenTerminal.addEventListener('click', () => {
+            window.api.openSandboxTerminal();
+        });
+    }
+
     // 视频生成密钥显隐切换
     const toggleVideoKeyBtn = document.getElementById('btn-toggle-video-key');
     if (toggleVideoKeyBtn) {
@@ -749,6 +1273,8 @@ async function init() {
         qrcodeOverlay.style.opacity = '0';
         qrcodeOverlay.style.display = 'none';
         window.api.cancelWeChatLogin();
+        // 解除通讯管理页面操作锁
+        if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
     });
 
     // 初始化主题切换
@@ -813,6 +1339,11 @@ async function init() {
     // 微信通道绑定状态初始化查询与每 10 秒定时监控轮询
     updateWeChatStatusUI();
     setInterval(updateWeChatStatusUI, 10000);
+
+    // 页面初始化时，主动向主进程拉齐一次当前网关的最真实运行状态
+    if (window.api && window.api.gatewayAction) {
+        window.api.gatewayAction('query-status');
+    }
 }
 
 // 4. IPC 消息监听与分发
@@ -983,6 +1514,11 @@ function setupIpcListeners() {
     window.__testTriggerLog = handleReceivedLog;
 
     window.api.onLogReceived(handleReceivedLog);
+    window.api.onSandboxUpdateProgress((data) => {
+        if (data && typeof data.progress === 'number') {
+            updateProgressUI(data.progress, data.text || '正在升级内置环境...');
+        }
+    });
 
     // 网关状态同步
     window.api.onStatusChanged((status) => {
@@ -1007,6 +1543,8 @@ function setupIpcListeners() {
         qrcodeOverlay.style.opacity = '0';
         document.getElementById('qrcode-raw-url').value = url;
         drawQrCode(url);
+        // 更新通讯管理操作锁提示文字
+        if (typeof showCommBindingOverlay === 'function') showCommBindingOverlay('⏳ 微信扫码绑定进行中...');
     });
 
     // 绑定一键复制授权链接
@@ -1141,6 +1679,12 @@ async function loadAndRenderConfig() {
 
     // 初始化 JSON 预览展示
     updateConfigJsonPreview();
+
+    // 渲染飞书绑定账号列表
+    renderFeishuAccounts();
+
+    // 渲染 QQ 机器人绑定账号列表
+    renderQqbotAccounts();
 }
 
 // 🌐 配置文件 JSON 右侧实时预览更新函数
@@ -2784,6 +3328,26 @@ function updateGatewayStatusUI(status) {
         if (progressContainer) {
             progressContainer.style.display = 'none';
         }
+    } else if (status === 'upgrading') {
+        statusLight.className = 'status-dot starting';
+        statusLabel.innerText = '沙箱升级中';
+        btnIconStart.style.display = 'block';
+        btnIconStop.style.display = 'none';
+        btnLabelText.innerText = '沙箱升级中';
+        gatewayToggleBtn.className = 'gateway-big-btn starting';
+
+        if (chatWelcomeText) {
+            chatWelcomeText.innerText = '正在自动升级内置 Node.js 沙箱环境，请稍候...';
+            chatWelcomeText.style.color = '#ffd54f';
+        }
+
+        if (progressContainer) progressContainer.style.display = 'flex';
+        updateProgressUI(0, '正在初始化环境自愈下载...');
+
+        if (progressInterval) {
+            clearInterval(progressInterval);
+            progressInterval = null;
+        }
     } else if (status === 'starting') {
         statusLight.className = 'status-dot starting';
         statusLabel.innerText = t('sidebar.status.starting');
@@ -2844,12 +3408,7 @@ function setupTabSwitching() {
                 triggerUpdateCheck(true);
                 return;
             }
-            if (tab.id === 'nav-acceleration-channel') {
-                e.preventDefault();
-                e.stopPropagation();
-                window.api.openExternal('https://pin.dianping.men/auth/register?code=2k788U5v');
-                return;
-            }
+            
 
             // 限制网关未完全就位时禁止点击内置面板Tab
             if (tab.getAttribute('data-tab') === 'openclaw-panel-view') {
@@ -2896,11 +3455,13 @@ function setupTabSwitching() {
                     } catch (err) {
                         webview.src = 'http://127.0.0.1:18789/acp/';
                     }
+                    // 注入脚本：拦截网关 WebUI 的更新横幅，由 Electron 主进程代理更新
+                    injectWebviewUpdateInterceptor(webview);
                 }
             }
 
-            // 切换到系统日志页拉取最新并展示完整本地历史日志文件
-            if (currentTab === 'system-logs-view') {
+            // 切换到系统设置页拉取最新并展示完整本地历史日志文件
+            if (currentTab === 'settings-view') {
                 loadAndRenderSystemLogs();
             }
 
@@ -3755,41 +4316,76 @@ function finishGuide() {
 window.addEventListener('DOMContentLoaded', init);
 
 // 13. 微信解绑与切换
-document.getElementById('wechat-unbind-btn').addEventListener('click', async () => {
-    const confirmClear = await confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的网关，并在下次启动网关时重新生成二维码供您扫码登录！');
-    if (!confirmClear) return;
+const originalUnbindBtn = document.getElementById('wechat-unbind-btn');
+if (originalUnbindBtn) {
+    originalUnbindBtn.addEventListener('click', async () => {
+        const confirmClear = confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的网关，并在下次启动网关时重新生成二维码供您扫码登录！');
+        if (!confirmClear) return;
 
-    try {
-        const result = await window.api.clearWeChatSession();
-        if (result.success) {
-            alert('微信解绑成功！微信登录缓存已彻底清除。\n\n您现在可以直接点击右下角“绑定微信”按钮生成全新的登录二维码。');
-            updateWeChatStatusUI();
-            if (gatewayStatus === 'running') {
-                gatewayStatus = 'stopped';
-                updateGatewayStatusUI('stopped');
+        try {
+            const result = await window.api.clearWeChatSession();
+            if (result.success) {
+                alert('微信解绑成功！微信登录缓存已彻底清除。');
+                updateWeChatStatusUI();
+                if (gatewayStatus === 'running') {
+                    gatewayStatus = 'stopped';
+                    updateGatewayStatusUI('stopped');
+                }
+            } else {
+                alert('解绑失败：' + result.error);
             }
-        } else {
-            alert('解绑失败：' + result.error);
+        } catch (err) {
+            alert('解绑操作异常：' + err.message);
         }
-    } catch (err) {
-        alert('解绑操作异常：' + err.message);
-    }
-});
+    });
+}
 
 // 14. 微信绑定 (手动登录)
-document.getElementById('wechat-bind-btn').addEventListener('click', async () => {
-    try {
-        logTerminal.innerText += '\n[WeChat Login] 正在唤醒微信手动绑定模块，请稍候...\n';
-        const result = await window.api.triggerWeChatLogin();
-        if (result.success) {
-            logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
-        } else {
-            showToast('拉起绑定失败：' + result.error);
-        }
-    } catch (err) {
-        showToast('拉起异常：' + err.message);
+// -- 通讯管理页面全局操作锁（微信扫码绑定期间禁用所有操作）
+function showCommBindingOverlay(msg) {
+    const overlay = document.getElementById('comm-binding-overlay');
+    if (overlay) {
+        const titleEl = document.getElementById('comm-binding-overlay-title');
+        if (titleEl && msg) titleEl.textContent = msg;
+        overlay.style.display = 'flex';
     }
-});
+}
+function hideCommBindingOverlay() {
+    const overlay = document.getElementById('comm-binding-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+const originalBindBtn = document.getElementById('wechat-bind-btn');
+if (originalBindBtn) {
+    originalBindBtn.addEventListener('click', async () => {
+        if (originalBindBtn.disabled) return;
+        const oldHtml = originalBindBtn.innerHTML;
+        originalBindBtn.disabled = true;
+        originalBindBtn.style.opacity = '0.6';
+        originalBindBtn.style.cursor = 'not-allowed';
+        originalBindBtn.innerHTML = '⏳ 正在唤醒微信手动绑定...';
+        showCommBindingOverlay('⏳ 正在唤醒微信绑定模块...');
+        
+        try {
+            logTerminal.innerText += '\n[WeChat Login] 正在唤醒微信手动绑定模块，请稍候...\n';
+            const result = await window.api.triggerWeChatLogin();
+            if (result.success) {
+                logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
+            } else {
+                showToast('拉起绑定失败：' + result.error);
+                hideCommBindingOverlay();
+            }
+        } catch (err) {
+            showToast('拉起异常：' + err.message);
+            hideCommBindingOverlay();
+        } finally {
+            originalBindBtn.disabled = false;
+            originalBindBtn.style.opacity = '1';
+            originalBindBtn.style.cursor = 'pointer';
+            originalBindBtn.innerHTML = oldHtml;
+        }
+    });
+}
 
 // 多语言界面动态重载渲染
 function applyLanguage(lang) {
@@ -5110,55 +5706,177 @@ function initConsoleClock() {
 }
 
 // 🔄 检测微信会话绑定状态并动态更新控制台 UI
+let consoleSelectedChannel = 'wechat';
+
+function setConsoleStatus(text, isGreen) {
+    const statusEl = document.getElementById('stat-channel-status');
+    const statusTextEl = document.getElementById('stat-channel-status-text');
+    const statusDotEl = document.getElementById('stat-channel-status-dot');
+    const color = isGreen ? '#00e676' : '#ff5252';
+    
+    if (statusTextEl) statusTextEl.innerText = text;
+    if (statusDotEl) statusDotEl.style.background = color;
+    if (statusEl) {
+        statusEl.style.color = color;
+        if (!statusTextEl) statusEl.innerText = text;
+    }
+}
+
+async function updateConsoleChannelStatusUI() {
+    const detailsEl = document.getElementById('console-channel-details-panel');
+    if (!detailsEl) return;
+
+    if (!configData) return;
+
+    if (consoleSelectedChannel === 'wechat') {
+        try {
+            const result = await window.api.checkWeChatStatus();
+            if (result.bound) {
+                setConsoleStatus('已启用', true);
+                const savedAtStr = result.details.savedAt ? new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false }) : '--';
+                detailsEl.innerHTML = `
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 微信绑定信息</div>
+                    <div><span style="color: var(--text-secondary);">账户标识: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${result.details.accountId || '--'}</span></div>
+                    <div><span style="color: var(--text-secondary);">绑定时间: </span><span style="color: var(--text-primary);">${savedAtStr}</span></div>
+                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理解绑/绑定</a></div>
+                `;
+            } else {
+                setConsoleStatus('未启用', false);
+                detailsEl.innerHTML = `
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 微信绑定信息</div>
+                    <div style="color: #ff5252; font-weight: bold;">当前未绑定微信</div>
+                    <div style="color: var(--text-secondary); margin-top: 4px;">扫码绑定微信后可作为助手收发微信消息。</div>
+                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理绑定</a></div>
+                `;
+            }
+        } catch(e) {
+            setConsoleStatus('获取失败', false);
+        }
+    } 
+    else if (consoleSelectedChannel === 'feishu') {
+        const feishu = (configData.channels && configData.channels.feishu) || {};
+        const accounts = feishu.accounts || {};
+        const defaultAccId = feishu.defaultAccount || '';
+        const isEnabled = feishu.enabled !== false && Object.keys(accounts).length > 0;
+
+        if (isEnabled) {
+            setConsoleStatus('已启用', true);
+            const defaultAcc = accounts[defaultAccId] || {};
+            detailsEl.innerHTML = `
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 飞书绑定信息</div>
+                <div><span style="color: var(--text-secondary);">默认账户: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
+                <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理管理飞书账号</a></div>
+            `;
+        } else {
+            setConsoleStatus('未启用', false);
+            detailsEl.innerHTML = `
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 飞书绑定信息</div>
+                <div style="color: #ff5252; font-weight: bold;">当前未配置飞书账号</div>
+                <div style="color: var(--text-secondary); margin-top: 4px;">请前往多渠道通讯管理配置飞书 App ID 和 Secret。</div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理配置</a></div>
+            `;
+        }
+    } 
+    else if (consoleSelectedChannel === 'qqbot') {
+        const qqbot = (configData.channels && configData.channels.qqbot) || {};
+        const accounts = qqbot.accounts || {};
+        const defaultAccId = qqbot.defaultAccount || '';
+        const isEnabled = qqbot.enabled === true && Object.keys(accounts).length > 0;
+
+        if (isEnabled) {
+            setConsoleStatus('已启用', true);
+            const defaultAcc = accounts[defaultAccId] || {};
+            detailsEl.innerHTML = `
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 QQ机器人绑定</div>
+                <div><span style="color: var(--text-secondary);">默认账户: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
+                <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理管理QQ机器人</a></div>
+            `;
+        } else {
+            setConsoleStatus('未启用', false);
+            detailsEl.innerHTML = `
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 QQ机器人绑定</div>
+                <div style="color: #ff5252; font-weight: bold;">当前未配置QQ机器人</div>
+                <div style="color: var(--text-secondary); margin-top: 4px;">请前往多渠道通讯管理配置 QQ 机器人凭证。</div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理配置</a></div>
+            `;
+        }
+    }
+
+    const goCommLnk = document.getElementById('lnk-go-communication');
+    if (goCommLnk) {
+        goCommLnk.addEventListener('click', (e) => {
+            e.preventDefault();
+            const commTab = document.getElementById('nav-communication-mgmt');
+            if (commTab) commTab.click();
+        });
+    }
+}
+
 async function updateWeChatStatusUI() {
     try {
         const result = await window.api.checkWeChatStatus();
-        const statusEl = document.getElementById('stat-wechat-status');
+        const accountsContainer = document.getElementById('wechat-accounts-container');
         const bindBtn = document.getElementById('wechat-bind-btn');
-        const unbindBtn = document.getElementById('wechat-unbind-btn');
-        const detailsPanel = document.getElementById('wechat-details-panel');
-        const detailId = document.getElementById('wechat-detail-id');
-        const detailTime = document.getElementById('wechat-detail-time');
         
-        if (statusEl) {
+        if (accountsContainer) {
             if (result.bound) {
-                statusEl.innerText = t('wechat.status.bound');
-                statusEl.style.color = '#00e676'; // 绿色高亮
                 if (bindBtn) bindBtn.style.display = 'none';
-                if (unbindBtn) unbindBtn.style.display = 'block';
-                if (detailsPanel) detailsPanel.style.display = 'block';
+                // 绑定成功：自动关闭二维码弹窗 + 解除通讯管理操作锁
+                if (qrcodeOverlay && qrcodeOverlay.style.display !== 'none') {
+                    qrcodeOverlay.style.opacity = '0';
+                    qrcodeOverlay.style.display = 'none';
+                }
+                if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
                 
-                // 填充详细信息
-                if (result.details) {
-                    if (detailId) {
-                        detailId.innerText = result.details.accountId || '--';
-                        detailId.style.color = 'var(--text-primary)';
-                    }
-                    if (detailTime && result.details.savedAt) {
-                        try {
-                            const date = new Date(result.details.savedAt);
-                            detailTime.innerText = date.toLocaleString('zh-CN', { hour12: false });
-                        } catch(err) {
-                            detailTime.innerText = result.details.savedAt;
-                        }
+                const accountId = result.details.accountId || '--';
+                let savedAtStr = '--';
+                if (result.details.savedAt) {
+                    try {
+                        savedAtStr = new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false });
+                    } catch(err) {
+                        savedAtStr = result.details.savedAt;
                     }
                 }
+                
+                accountsContainer.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; box-sizing: border-box; width: 100%;">
+                        <div>
+                            <div style="font-size: 13px; font-weight: bold; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 14px;">👤</span> 账号标识: <span style="font-family: var(--font-mono); color: var(--accent-color);">${accountId}</span>
+                                <span style="background: rgba(0, 230, 118, 0.1); color: #00e676; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">已绑定</span>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; display: flex; flex-direction: column; gap: 3px;">
+                                <div>绑定时间: <span style="color: var(--text-primary);">${savedAtStr}</span></div>
+                                <div>通道协议: <span style="color: var(--text-primary);">WeChat / WA (iLink)</span></div>
+                            </div>
+                        </div>
+                        <div>
+                            <button type="button" id="wechat-unbind-btn-dynamic" style="background: rgba(255, 82, 82, 0.1); border: 1px solid rgba(255, 82, 82, 0.3); color: #ff5252; padding: 6px 14px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+                                💬 解绑微信
+                            </button>
+                        </div>
+                    </div>
+                `;
             } else {
-                statusEl.innerText = t('wechat.status.unbound');
-                statusEl.style.color = '#ff5252'; // 红色高亮
                 if (bindBtn) bindBtn.style.display = 'block';
-                if (unbindBtn) unbindBtn.style.display = 'none';
-                if (detailsPanel) detailsPanel.style.display = 'block';
-                if (detailId) {
-                    detailId.innerText = t('wechat.status.unbound');
-                    detailId.style.color = '#ff5252';
-                }
-                if (detailTime) detailTime.innerText = '--';
+                
+                accountsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 24px; border: 1px dashed var(--border-color); border-radius: 8px; color: var(--text-secondary); font-size: 12px; background: rgba(255,255,255,0.01);">
+                        当前未绑定微信，点击下方“扫码绑定微信”生成登录二维码进行绑定。
+                    </div>
+                `;
             }
         }
     } catch (e) {
         console.error('Failed to update WeChat status UI:', e);
     }
+    
+    // 同时更新控制台渠道面板
+    try {
+        await updateConsoleChannelStatusUI();
+    } catch(err) {}
 }
 
 // 📂 异步拉取本地持久化系统运行日志并填充滚动
@@ -5176,6 +5894,310 @@ async function loadAndRenderSystemLogs() {
         }
     } catch(err) {
         console.error('Failed to load system logs:', err);
+    }
+}
+
+// ==========================================
+// 🔄 内置网关核心包热更新（拦截 OpenClaw WebUI 的更新横幅）
+// ==========================================
+let _webviewUpdateInjected = false;
+
+// ==========================================
+// 网关核心更新 - 进度 / 状态弹窗
+// ==========================================
+let _gwUpdateOverlay = null;
+let _gwUpdateBar = null;
+let _gwUpdateStatusEl = null;
+let _gwUpdatePctEl = null;
+let _gwUpdateLogEl = null;
+let _gwUpdateCloseBtn = null;
+let _gwUpdateSpinner = null;
+let _gwUpdateCreepTimer = null;
+let _gwUpdatePct = 0;
+
+// 关键日志 → 步骤映射（按出现顺序推进进度条）
+const GW_UPDATE_STEPS = [
+    { keys: ['查询 npm', '查询版本'], label: '查询最新版本', pct: 6 },
+    { keys: ['目标版本'], label: '确定目标版本', pct: 12 },
+    { keys: ['正在检查 Node', '版本兼容', '新版要求'], label: '检查运行时兼容性', pct: 20 },
+    { keys: ['停止网关'], label: '停止当前网关', pct: 30 },
+    { keys: ['正在下载 Node', 'Node 运行时已升级', '将自动升级', '匹配可用版本'], label: '升级 Node 运行时', pct: 38, creepTo: 50 },
+    { keys: ['正在安装'], label: '下载并安装核心包', pct: 55, creepTo: 74 },
+    { keys: ['install 完成', '已安装版本'], label: '核心包安装完成', pct: 80 },
+    { keys: ['package.json'], label: '锁定版本号', pct: 86 },
+    { keys: ['正在重启', '重启网关'], label: '重启网关', pct: 92 },
+    { keys: ['重启成功', '重启完成'], label: '网关重启成功', pct: 100 },
+];
+
+function _ensureGwUpdateKeyframes() {
+    if (document.getElementById('gw-update-keyframes')) return;
+    const style = document.createElement('style');
+    style.id = 'gw-update-keyframes';
+    style.textContent = `
+        @keyframes gwUpSpin { to { transform: rotate(360deg); } }
+        @keyframes gwUpShimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+    `;
+    document.head.appendChild(style);
+}
+
+function _setGwUpdatePct(pct) {
+    _gwUpdatePct = Math.max(_gwUpdatePct, Math.min(100, pct));
+    if (_gwUpdateBar) _gwUpdateBar.style.width = _gwUpdatePct + '%';
+    if (_gwUpdatePctEl) _gwUpdatePctEl.textContent = Math.round(_gwUpdatePct) + '%';
+}
+
+function _stopGwUpdateCreep() {
+    if (_gwUpdateCreepTimer) { clearInterval(_gwUpdateCreepTimer); _gwUpdateCreepTimer = null; }
+}
+
+function showGatewayUpdateProgress() {
+    _ensureGwUpdateKeyframes();
+    _stopGwUpdateCreep();
+    if (_gwUpdateOverlay) {
+        try { document.body.removeChild(_gwUpdateOverlay); } catch (e) {}
+        _gwUpdateOverlay = null;
+    }
+    _gwUpdatePct = 0;
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(10, 8, 20, 0.45); backdrop-filter: blur(8px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 100000; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px;
+        width: 520px; max-width: 92vw; padding: 24px;
+        box-shadow: 0 15px 50px rgba(0,0,0,0.4), var(--accent-glow);
+        color: var(--text-primary); font-family: system-ui, -apple-system, sans-serif;
+        transform: scale(0.9); transition: transform 0.2s ease;
+    `;
+
+    modal.innerHTML = `
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;">
+            <div id="gw-up-spinner" style="width:22px; height:22px; border:3px solid rgba(var(--accent-rgb),0.25); border-top-color: var(--accent-color); border-radius:50%; animation: gwUpSpin 0.8s linear infinite; flex-shrink:0;"></div>
+            <h3 style="margin:0; font-size:16px; font-weight:600; color: var(--accent-color);">网关核心更新</h3>
+        </div>
+        <div id="gw-up-status" style="font-size:13px; color: var(--text-primary); margin-bottom:10px; min-height:18px;">正在准备更新...</div>
+        <div style="position:relative; height:8px; border-radius:6px; background: var(--bg-input); overflow:hidden; margin-bottom:6px;">
+            <div id="gw-up-bar" style="height:100%; width:0%; border-radius:6px; background: linear-gradient(90deg, var(--accent-color), rgba(var(--accent-rgb),0.6)); transition: width 0.4s ease;"></div>
+        </div>
+        <div id="gw-up-pct" style="font-size:11px; color: var(--text-secondary); text-align:right; margin-bottom:12px;">0%</div>
+        <pre id="gw-up-log" style="margin:0; height:180px; overflow-y:auto; background: rgba(0,0,0,0.28); border:1px solid var(--border-color); border-radius:10px; padding:10px 12px; font-size:11px; line-height:1.55; color: var(--text-secondary); white-space:pre-wrap; word-break:break-all; font-family: ui-monospace, Consolas, monospace;"></pre>
+        <div style="display:flex; justify-content:flex-end; margin-top:18px;">
+            <button id="gw-up-close" disabled style="background: var(--bg-input); border:1px solid var(--border-color); color: var(--text-secondary); padding:8px 24px; font-size:13px; font-weight:600; border-radius:8px; cursor:not-allowed; opacity:0.6; outline:none; transition: all 0.15s;">更新中，请勿关闭…</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    _gwUpdateOverlay = overlay;
+    _gwUpdateBar = modal.querySelector('#gw-up-bar');
+    _gwUpdateStatusEl = modal.querySelector('#gw-up-status');
+    _gwUpdatePctEl = modal.querySelector('#gw-up-pct');
+    _gwUpdateLogEl = modal.querySelector('#gw-up-log');
+    _gwUpdateCloseBtn = modal.querySelector('#gw-up-close');
+    _gwUpdateSpinner = modal.querySelector('#gw-up-spinner');
+
+    setTimeout(() => {
+        overlay.style.opacity = '1';
+        overlay.style.pointerEvents = 'auto';
+        modal.style.transform = 'scale(1)';
+    }, 10);
+}
+
+function appendGatewayUpdateLog(msg) {
+    if (!_gwUpdateOverlay || !_gwUpdateLogEl) return;
+    const text = String(msg || '').trim();
+    if (!text) return;
+
+    // 追加日志行（限制最多 200 行，避免 DOM 无限膨胀）
+    const line = document.createElement('div');
+    line.textContent = text;
+    _gwUpdateLogEl.appendChild(line);
+    while (_gwUpdateLogEl.childElementCount > 200) {
+        _gwUpdateLogEl.removeChild(_gwUpdateLogEl.firstChild);
+    }
+    _gwUpdateLogEl.scrollTop = _gwUpdateLogEl.scrollHeight;
+
+    // 根据关键字推进步骤 / 进度条
+    for (const step of GW_UPDATE_STEPS) {
+        if (step.keys.some(k => text.includes(k))) {
+            if (_gwUpdateStatusEl) _gwUpdateStatusEl.textContent = step.label;
+            _stopGwUpdateCreep();
+            _setGwUpdatePct(step.pct);
+            // 对耗时较长的安装步骤，进度条缓慢自增，给用户“正在进行”的反馈
+            if (step.creepTo) {
+                _gwUpdateCreepTimer = setInterval(() => {
+                    if (_gwUpdatePct < step.creepTo) {
+                        _setGwUpdatePct(_gwUpdatePct + 0.5);
+                    } else {
+                        _stopGwUpdateCreep();
+                    }
+                }, 400);
+            }
+            break;
+        }
+    }
+}
+
+function finishGatewayUpdateProgress(success, message) {
+    _stopGwUpdateCreep();
+    if (!_gwUpdateOverlay) return;
+
+    if (success) _setGwUpdatePct(100);
+    if (_gwUpdateStatusEl) {
+        _gwUpdateStatusEl.textContent = (success ? '✅ ' : '❌ ') + (message || (success ? '更新完成' : '更新失败'));
+        _gwUpdateStatusEl.style.color = success ? '#34d399' : '#f87171';
+    }
+    if (_gwUpdateBar && !success) {
+        _gwUpdateBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+    }
+    if (_gwUpdateSpinner) {
+        _gwUpdateSpinner.style.animation = 'none';
+        _gwUpdateSpinner.style.border = success ? '3px solid #34d399' : '3px solid #f87171';
+        _gwUpdateSpinner.style.borderTopColor = success ? '#34d399' : '#f87171';
+    }
+    if (_gwUpdateCloseBtn) {
+        _gwUpdateCloseBtn.disabled = false;
+        _gwUpdateCloseBtn.textContent = '关闭';
+        _gwUpdateCloseBtn.style.cursor = 'pointer';
+        _gwUpdateCloseBtn.style.opacity = '1';
+        if (success) {
+            _gwUpdateCloseBtn.style.background = 'linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%)';
+            _gwUpdateCloseBtn.style.color = '#fff';
+            _gwUpdateCloseBtn.style.border = 'none';
+        }
+        _gwUpdateCloseBtn.onclick = () => {
+            const ov = _gwUpdateOverlay;
+            if (!ov) return;
+            ov.style.opacity = '0';
+            ov.style.pointerEvents = 'none';
+            setTimeout(() => { try { document.body.removeChild(ov); } catch (e) {} }, 200);
+            _gwUpdateOverlay = null;
+        };
+    }
+}
+
+function injectWebviewUpdateInterceptor(webview) {
+    if (!webview) return;
+
+    const MAGIC_PREFIX = '__CLAWAI_UPDATE__:';
+
+    // 每次 webview 加载完毕后注入拦截脚本
+    const onDomReady = () => {
+        webview.executeJavaScript(`
+            (function() {
+                if (window.__clawai_update_injected) return;
+                window.__clawai_update_injected = true;
+
+                const MAGIC = '${MAGIC_PREFIX}';
+
+                function processNodes() {
+                    // 1) 隐藏 "Update skipped: not-git-install" 红色告警条
+                    document.querySelectorAll('div, p, span, section, aside, [class*="alert"], [class*="notification"], [class*="banner"]').forEach(function(el) {
+                        var text = el.textContent || '';
+                        if ((text.includes('Update skipped') || text.includes('not-git-install') || text.includes('openclaw update'))
+                            && el.offsetHeight > 0 && el.offsetHeight < 200) {
+                            el.style.display = 'none';
+                        }
+                    });
+
+                    // 2) 拦截 "立即更新" / "Update Now" 按钮
+                    document.querySelectorAll('button, a, [role="button"], span').forEach(function(el) {
+                        var text = (el.textContent || '').trim();
+                        if ((text === '立即更新' || text === 'Update Now' || text === 'update now')
+                            && !el.__clawai_intercepted) {
+                            el.__clawai_intercepted = true;
+                            el.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                // 从附近上下文提取版本号
+                                var ver = '';
+                                var parent = el.parentElement;
+                                for (var i = 0; i < 5 && parent; i++) {
+                                    var m = parent.textContent.match(/v?(20\\d{2}\\.\\d+\\.\\d+)/);
+                                    if (m) { ver = m[1]; break; }
+                                    parent = parent.parentElement;
+                                }
+                                console.log(MAGIC + JSON.stringify({ action: 'update', version: ver }));
+                            }, true);
+                        }
+                    });
+                }
+
+                var observer = new MutationObserver(processNodes);
+                observer.observe(document.body, { childList: true, subtree: true });
+                processNodes();
+            })();
+        `).catch(() => {});
+    };
+
+    // 防止重复绑定 dom-ready
+    webview.removeEventListener('dom-ready', onDomReady);
+    webview.addEventListener('dom-ready', onDomReady);
+
+    // 监听来自 webview 的 console-message 事件（跨上下文通信桥梁）
+    if (!_webviewUpdateInjected) {
+        _webviewUpdateInjected = true;
+
+        webview.addEventListener('console-message', async (evt) => {
+            const msg = evt.message || '';
+            if (!msg.startsWith(MAGIC_PREFIX)) return;
+
+            let payload;
+            try { payload = JSON.parse(msg.slice(MAGIC_PREFIX.length)); }
+            catch (e) { return; }
+
+            if (payload.action !== 'update') return;
+            const targetVersion = payload.version || '';
+
+            const confirmed = await confirm(
+                `检测到网关核心有新版本${targetVersion ? ' v' + targetVersion : ''}。\n\n` +
+                '将为您执行以下操作：\n' +
+                '  1. 停止当前网关\n' +
+                '  2. 下载并安装新版本核心包\n' +
+                '  3. 自动重启网关\n\n' +
+                '是否立即更新？',
+                '网关核心更新'
+            );
+            if (!confirmed) return;
+
+            // 打开进度弹窗，实时展示每一步状态与日志
+            showGatewayUpdateProgress();
+
+            try {
+                const result = await window.api.updateOpenclawPackage({ targetVersion });
+                if (result.success) {
+                    // 安装成功但自动重启失败时，按“告警”状态呈现，提示用户手动启动
+                    const ok = result.restarted !== false;
+                    finishGatewayUpdateProgress(ok, result.message);
+                    setTimeout(() => {
+                        const wv = document.getElementById('openclaw-iframe');
+                        if (wv) wv.reload();
+                    }, 3000);
+                } else {
+                    finishGatewayUpdateProgress(false, result.message);
+                }
+            } catch (err) {
+                finishGatewayUpdateProgress(false, `网关更新失败: ${err.message}`);
+            }
+        });
+
+        // 监听主进程的更新进度推送 → 实时刷新进度弹窗
+        if (window.api && window.api.onGatewayUpdateProgress) {
+            window.api.onGatewayUpdateProgress((data) => {
+                if (data && data.message) {
+                    console.log('[GatewayUpdate]', data.message);
+                    appendGatewayUpdateLog(data.message);
+                }
+            });
+        }
     }
 }
 

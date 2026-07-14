@@ -37,10 +37,13 @@
     "app:pack": "electron-packager . \"ClawAI\" --platform=win32 --arch=x64 --out=dist --overwrite"
   },
   "dependencies": {
-    "@tencent-weixin/openclaw-weixin": "^2.4.6",
-    "jsdom": "^29.1.1",
-    "open-computer-use": "^0.1.54",
-    "openclaw": "^2026.6.11"
+    "@openclaw/feishu": "2026.6.11",
+    "@openclaw/qqbot": "2026.5.22",
+    "@openclaw/voice-call": "2026.6.11",
+    "@tencent-weixin/openclaw-weixin": "2.4.6",
+    "jsdom": "29.1.1",
+    "open-computer-use": "0.1.54",
+    "openclaw": "2026.7.1"
   },
   "devDependencies": {
     "electron": "^31.0.0",
