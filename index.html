@@ -865,14 +865,7 @@
 
         <!-- Tab 5.8: 通讯管理 -->
         <section class="tab-pane" id="communication-view" style="overflow-y: auto; height: 100%; box-sizing: border-box; padding: 20px; position: relative;">
-          <!-- 微信扫码绑定期间全局操作锁遮罩 -->
-          <div id="comm-binding-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px); z-index: 90; border-radius: 8px; justify-content: center; align-items: center; flex-direction: column; gap: 16px;">
-            <div style="width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-            <div style="color: rgba(255,255,255,0.85); font-size: 14px; font-weight: 600; text-align: center; line-height: 1.6;">
-              <div id="comm-binding-overlay-title">⏳ 微信扫码绑定进行中...</div>
-              <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">请在手机微信扫描二维码完成授权，期间请勿操作其他通道</div>
-            </div>
-          </div>
+          <!-- 渠道扫码绑定遮罩已提升为全局 #plugin-async-overlay（见页面底部），此处不再嵌套局部遮罩 -->
           <div class="view-header" style="margin-bottom: 20px;">
             <h2 data-i18n="comm.title">💬 多渠道通讯管理</h2>
             <p data-i18n="comm.desc">集中配置和管理微信、飞书、QQ 机器人等外部即时通讯渠道的接入与多账户绑定</p>
@@ -1057,6 +1050,16 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- 内置插件 / 渠道异步操作全局遮罩：通讯管理、插件页、以后新增扫码插件必须共用，禁止无超时卡死 -->
+  <div id="plugin-async-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px); z-index: 9600; justify-content: center; align-items: center; flex-direction: column; gap: 16px;">
+    <div style="width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+    <div style="color: rgba(255,255,255,0.85); font-size: 14px; font-weight: 600; text-align: center; line-height: 1.6; max-width: 340px; padding: 0 16px;">
+      <div id="plugin-async-overlay-title">⏳ 插件操作进行中...</div>
+      <div id="plugin-async-overlay-tip" style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; font-weight: 400;">请稍候。若长时间无响应可点取消。</div>
+    </div>
+    <button type="button" id="plugin-async-overlay-cancel" style="margin-top: 4px; padding: 8px 20px; font-size: 12px; font-weight: 600; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); cursor: pointer;">取消</button>
   </div>
 
   <script src="node_modules/xterm/lib/xterm.js"></script>

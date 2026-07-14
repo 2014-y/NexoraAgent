@@ -52,6 +52,24 @@ const CREDENTIAL_PLUGINS = ['slack', 'matrix', 'telegram', 'whatsapp', 'voice-ca
 /** C：需本机安装软件 */
 const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
 
+/**
+ * 异步扫码/登录类内置渠道（OpenClaw `channels login`）。
+ * 新增内置扫码插件时在此登记一眼即可继承：信任预同步、自动跳过 Install?、出码超时、可取消、失败事件。
+ * feishu 走独立 OAuth device-code，不在此表，但仍必须走前端 beginCommBinding 闭环。
+ *
+ * @type {Record<string, { openclawChannel: string, label: string, uiChannel: string, wakeTimeoutMs?: number }>}
+ */
+const ASYNC_CHANNEL_LOGIN = {
+  'openclaw-weixin': {
+    openclawChannel: 'openclaw-weixin',
+    label: '微信',
+    uiChannel: 'wechat',
+    wakeTimeoutMs: 120000
+  }
+  // 以后例如 WhatsApp 扫码：取消下行注释并补齐 BUNDLED_NPM_CHANNEL_PLUGINS + UI
+  // 'whatsapp': { openclawChannel: 'whatsapp', label: 'WhatsApp', uiChannel: 'whatsapp', wakeTimeoutMs: 120000 }
+};
+
 /** UI 插件页展示的完整列表（顺序即卡片顺序） */
 const UI_PLUGIN_IDS = [
   'dual-model-trainer',
@@ -626,6 +644,7 @@ module.exports = {
   ZERO_CONFIG_DEFAULT_ON,
   CREDENTIAL_PLUGINS,
   LOCAL_SOFTWARE_PLUGINS,
+  ASYNC_CHANNEL_LOGIN,
   UI_PLUGIN_IDS,
   PLUGIN_TIER,
   LONG_TERM_MEMORY_STACK,

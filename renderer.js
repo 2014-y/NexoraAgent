@@ -1000,19 +1000,17 @@ async function init() {
             btnFeishuQr.style.opacity = '0.6';
             btnFeishuQr.style.cursor = 'not-allowed';
             btnFeishuQr.innerHTML = '⏳ 正在生成二维码...';
-            showCommBindingOverlay('⏳ 正在发起飞书扫码绑定...');
+            beginCommBinding('feishu', '⏳ 正在发起飞书扫码绑定...');
             try {
                 if (logTerminal) logTerminal.innerText += '\n[Feishu QR] 正在发起扫码创建机器人...\n';
                 const result = await window.api.triggerFeishuQrLogin({ domain: 'feishu' });
                 if (result && result.success) {
                     if (logTerminal) logTerminal.innerText += '[Feishu QR] 二维码已生成，请用飞书 App 扫码...\n';
                 } else {
-                    hideCommBindingOverlay();
-                    showToast('拉起飞书扫码失败：' + ((result && (result.error || (result.cancelled && '已取消'))) || '未知错误'));
+                    failCommBinding('拉起飞书扫码失败：' + ((result && (result.error || (result.cancelled && '已取消'))) || '未知错误'));
                 }
             } catch (err) {
-                hideCommBindingOverlay();
-                showToast('拉起飞书扫码异常：' + err.message);
+                failCommBinding('拉起飞书扫码异常：' + err.message);
             } finally {
                 btnFeishuQr.disabled = false;
                 btnFeishuQr.style.opacity = '1';
@@ -1441,17 +1439,9 @@ async function init() {
         });
     }
 
-    // 微信 / 飞书二维码弹窗关闭
+    // 微信 / 飞书二维码弹窗关闭 → 统一取消绑定闭环
     qrcodeCloseBtn.addEventListener('click', () => {
-        qrcodeOverlay.style.opacity = '0';
-        qrcodeOverlay.style.display = 'none';
-        window.api.cancelWeChatLogin();
-        if (window.api.cancelFeishuQrLogin) window.api.cancelFeishuQrLogin();
-        window.__activeQrChannel = null;
-        // 停止扫码期间的高频轮询兜底
-        if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
-        // 解除通讯管理页面操作锁
-        if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
+        endCommBinding({ cancelBackend: true, toast: '已关闭扫码窗口' });
     });
 
     // 初始化主题切换
@@ -1750,24 +1740,46 @@ function setupIpcListeners() {
         qrcodeOverlay.style.opacity = '0';
         document.getElementById('qrcode-raw-url').value = url;
         drawQrCode(url);
-        if (typeof showCommBindingOverlay === 'function') {
-            showCommBindingOverlay(channel === 'feishu' ? '⏳ 飞书扫码绑定进行中...' : '⏳ 微信扫码绑定进行中...');
-        }
-        if (channel === 'wechat') startWeChatBindingFastPoll();
+        markCommBindingQrReady(
+            channel,
+            channel === 'feishu' ? '⏳ 飞书扫码绑定进行中...' : '⏳ 微信扫码绑定进行中...'
+        );
+        if (channel === 'wechat' || channel === 'openclaw-weixin') startWeChatBindingFastPoll();
     });
 
     // 主进程探测到微信扫码绑定成功后的即时刷新
     window.api.onWeChatLoginSuccess(() => {
-        stopWeChatBindingFastPoll();
         if (typeof showToast === 'function') showToast('✅ 微信绑定成功！');
         updateWeChatStatusUI();
-        window.__activeQrChannel = null;
-        if (qrcodeOverlay) {
-            qrcodeOverlay.style.opacity = '0';
-            qrcodeOverlay.style.display = 'none';
-        }
-        if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
+        completeCommBinding();
     });
+
+    if (window.api.onWeChatLoginFailed) {
+        window.api.onWeChatLoginFailed((status) => {
+            failCommBinding('微信绑定失败：' + ((status && status.error) || '未知错误'));
+        });
+    }
+
+    // 通用内置渠道失败（以后新增 ASYNC_CHANNEL_LOGIN / channel-login-start 都会走这里）
+    if (window.api.onChannelLoginFailed) {
+        window.api.onChannelLoginFailed((status) => {
+            const ch = (status && (status.channel || status.pluginId)) || '';
+            // 微信已有专用失败事件，避免双 Toast
+            if (ch === 'wechat' || ch === 'openclaw-weixin') return;
+            const label = labelForBindChannel(ch);
+            failCommBinding(`${label}绑定失败：` + ((status && status.error) || '未知错误'));
+        });
+    }
+    if (window.api.onChannelLoginSuccess) {
+        window.api.onChannelLoginSuccess((status) => {
+            const ch = (status && (status.channel || status.pluginId)) || '';
+            if (ch === 'wechat' || ch === 'openclaw-weixin') return; // 由 onWeChatLoginSuccess 处理
+            if (typeof showToast === 'function') {
+                showToast(`✅ ${labelForBindChannel(ch)}绑定成功`);
+            }
+            completeCommBinding();
+        });
+    }
 
     // 飞书扫码绑定成功：重载配置、刷新账号列表、关弹窗
     if (window.api.onFeishuLoginSuccess) {
@@ -1779,12 +1791,7 @@ function setupIpcListeners() {
             if (typeof showToast === 'function') {
                 showToast(`✅ 飞书扫码绑定成功！账号：${(status && status.accountId) || 'feishu-scan'}`);
             }
-            window.__activeQrChannel = null;
-            if (qrcodeOverlay) {
-                qrcodeOverlay.style.opacity = '0';
-                qrcodeOverlay.style.display = 'none';
-            }
-            if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
+            completeCommBinding();
             if (gatewayStatus === 'running') {
                 window.api.gatewayAction('stop');
                 setTimeout(() => window.api.gatewayAction('start'), 1200);
@@ -1793,15 +1800,7 @@ function setupIpcListeners() {
     }
     if (window.api.onFeishuLoginFailed) {
         window.api.onFeishuLoginFailed((status) => {
-            if (typeof showToast === 'function') {
-                showToast('❌ 飞书扫码绑定失败：' + ((status && status.error) || '未知错误'));
-            }
-            window.__activeQrChannel = null;
-            if (qrcodeOverlay) {
-                qrcodeOverlay.style.opacity = '0';
-                qrcodeOverlay.style.display = 'none';
-            }
-            if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
+            failCommBinding('飞书扫码绑定失败：' + ((status && status.error) || '未知错误'));
         });
     }
 
@@ -3780,7 +3779,15 @@ function setupTabSwitching() {
             if (targetPane) {
                 targetPane.classList.add('active');
             }
+            const prevTab = currentTab;
             currentTab = tab.getAttribute('data-tab');
+
+            // 全局遮罩激活时离开当前页 → 取消（插件页/通讯管理共用）
+            if (prevTab !== currentTab
+                && typeof __commBindingSession !== 'undefined' && __commBindingSession.active
+                && typeof endCommBinding === 'function') {
+                endCommBinding({ cancelBackend: true, toast: '已离开当前页，绑定已取消' });
+            }
 
             // 切换到用量页重画图表防自适应显示错误
             if (currentTab === 'dashboard-view') {
@@ -4709,20 +4716,205 @@ if (originalUnbindBtn) {
     });
 }
 
-// 14. 微信绑定 (手动登录)
-// -- 通讯管理页面全局操作锁（微信扫码绑定期间禁用所有操作）
-function showCommBindingOverlay(msg) {
-    const overlay = document.getElementById('comm-binding-overlay');
+// 14. 内置插件异步操作闭环（通讯扫码 / 插件页 / 以后任意内置扫码插件共用）
+// 保证：全局遮罩、可取消、唤醒超时、扫码超时、成功/失败都能解除，绝不无限卡死。
+const COMM_BINDING_WAKE_MS = 120000; // 慢机器冷启动也够用；扫码阶段另有 5 分钟
+const COMM_BINDING_SCAN_MS = 5 * 60 * 1000;
+let __commBindingSession = {
+    active: false,
+    channel: null,
+    phase: null, // waking | scanning
+    wakeTimer: null,
+    scanTimer: null,
+    failHandled: false
+};
+
+function resolvePluginAsyncOverlay() {
+    return document.getElementById('plugin-async-overlay')
+        || document.getElementById('comm-binding-overlay');
+}
+
+function showCommBindingOverlay(msg, tip) {
+    const overlay = resolvePluginAsyncOverlay();
     if (overlay) {
-        const titleEl = document.getElementById('comm-binding-overlay-title');
+        const titleEl = document.getElementById('plugin-async-overlay-title')
+            || document.getElementById('comm-binding-overlay-title');
+        const tipEl = document.getElementById('plugin-async-overlay-tip')
+            || document.getElementById('comm-binding-overlay-tip');
         if (titleEl && msg) titleEl.textContent = msg;
+        if (tipEl && tip) tipEl.textContent = tip;
         overlay.style.display = 'flex';
     }
 }
 function hideCommBindingOverlay() {
-    const overlay = document.getElementById('comm-binding-overlay');
+    const overlay = resolvePluginAsyncOverlay();
     if (overlay) overlay.style.display = 'none';
 }
+
+function clearCommBindingTimers() {
+    if (__commBindingSession.wakeTimer) {
+        clearTimeout(__commBindingSession.wakeTimer);
+        __commBindingSession.wakeTimer = null;
+    }
+    if (__commBindingSession.scanTimer) {
+        clearTimeout(__commBindingSession.scanTimer);
+        __commBindingSession.scanTimer = null;
+    }
+}
+
+function hideQrCodeOverlay() {
+    if (typeof qrcodeOverlay !== 'undefined' && qrcodeOverlay) {
+        qrcodeOverlay.style.opacity = '0';
+        qrcodeOverlay.style.display = 'none';
+    }
+}
+
+function labelForBindChannel(channel) {
+    const ch = String(channel || '');
+    if (ch === 'feishu' || ch === 'lark') return '飞书';
+    if (ch === 'wechat' || ch === 'openclaw-weixin') return '微信';
+    if (ch === 'whatsapp') return 'WhatsApp';
+    if (ch === 'telegram') return 'Telegram';
+    if (ch === 'slack') return 'Slack';
+    if (ch === 'matrix') return 'Matrix';
+    if (ch === 'qqbot' || ch === 'qq') return 'QQ';
+    return ch || '内置插件';
+}
+
+function cancelBackendChannelBinding(channel) {
+    // 一律 cancel-all：覆盖微信 / 飞书 / 以后任意 channel-login-start 启动的内置插件
+    try {
+        if (window.api && window.api.cancelAllChannelLogins) {
+            window.api.cancelAllChannelLogins();
+            return;
+        }
+    } catch (e) {}
+    const ch = channel || __commBindingSession.channel || window.__activeQrChannel;
+    try {
+        if ((!ch || ch === 'wechat' || ch === 'openclaw-weixin') && window.api && window.api.cancelWeChatLogin) {
+            window.api.cancelWeChatLogin();
+        }
+    } catch (e) {}
+    try {
+        if ((!ch || ch === 'feishu' || ch === 'lark') && window.api && window.api.cancelFeishuQrLogin) {
+            window.api.cancelFeishuQrLogin();
+        }
+    } catch (e) {}
+    try {
+        if (window.api && window.api.cancelChannelLogin) window.api.cancelChannelLogin(ch);
+    } catch (e) {}
+}
+
+/** 开始一次内置插件/渠道异步绑定（遮罩 + 唤醒超时）。以后新增内置扫码插件也应调用此函数。 */
+function beginCommBinding(channel, wakeMsg, tip) {
+    endCommBinding({ silent: true, cancelBackend: true });
+    __commBindingSession = {
+        active: true,
+        channel: channel || 'channel',
+        phase: 'waking',
+        wakeTimer: null,
+        scanTimer: null,
+        failHandled: false
+    };
+    window.__activeQrChannel = channel;
+    const label = labelForBindChannel(channel);
+    showCommBindingOverlay(
+        wakeMsg || `⏳ 正在唤醒${label}绑定模块...`,
+        tip || `正在准备${label}（内置插件）。最多等待约 ${Math.round(COMM_BINDING_WAKE_MS / 1000)} 秒；可随时点「取消」。`
+    );
+    __commBindingSession.wakeTimer = setTimeout(() => {
+        failCommBinding(`${label}绑定模块无响应（超时）。请确认插件已内置后重试。`);
+    }, COMM_BINDING_WAKE_MS);
+}
+
+/** 已拿到二维码：结束唤醒超时，进入扫码等待超时。 */
+function markCommBindingQrReady(channel, scanningMsg) {
+    if (channel) {
+        __commBindingSession.channel = channel;
+        window.__activeQrChannel = channel;
+    }
+    if (!__commBindingSession.active) {
+        __commBindingSession.active = true;
+        __commBindingSession.failHandled = false;
+    }
+    if (__commBindingSession.wakeTimer) {
+        clearTimeout(__commBindingSession.wakeTimer);
+        __commBindingSession.wakeTimer = null;
+    }
+    __commBindingSession.phase = 'scanning';
+    const ch = __commBindingSession.channel || channel || 'channel';
+    const label = labelForBindChannel(ch);
+    showCommBindingOverlay(
+        scanningMsg || `⏳ ${label}扫码绑定进行中...`,
+        `请用手机完成扫码授权。扫码窗口可关闭取消；最多等待约 ${Math.round(COMM_BINDING_SCAN_MS / 60000)} 分钟。`
+    );
+    if (__commBindingSession.scanTimer) clearTimeout(__commBindingSession.scanTimer);
+    __commBindingSession.scanTimer = setTimeout(() => {
+        failCommBinding(`${label}扫码超时，请重新发起绑定。`);
+    }, COMM_BINDING_SCAN_MS);
+}
+
+function failCommBinding(message) {
+    // 已结束且刚失败过：吞掉主进程重复的 failed 事件，避免双 Toast
+    if (__commBindingSession.failHandled || !__commBindingSession.active) {
+        clearCommBindingTimers();
+        cancelBackendChannelBinding(__commBindingSession.channel || window.__activeQrChannel);
+        hideQrCodeOverlay();
+        hideCommBindingOverlay();
+        return;
+    }
+    __commBindingSession.failHandled = true;
+    if (typeof showToast === 'function') showToast('❌ ' + (message || '渠道绑定失败'));
+    const channel = __commBindingSession.channel || window.__activeQrChannel;
+    clearCommBindingTimers();
+    cancelBackendChannelBinding(channel);
+    if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
+    hideQrCodeOverlay();
+    hideCommBindingOverlay();
+    __commBindingSession.active = false;
+    __commBindingSession.phase = null;
+    __commBindingSession.channel = null;
+    window.__activeQrChannel = null;
+}
+
+function completeCommBinding() {
+    clearCommBindingTimers();
+    __commBindingSession.active = false;
+    __commBindingSession.phase = null;
+    __commBindingSession.channel = null;
+    __commBindingSession.failHandled = false;
+    window.__activeQrChannel = null;
+    if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
+    hideQrCodeOverlay();
+    hideCommBindingOverlay();
+}
+
+/** @param {{ silent?: boolean, cancelBackend?: boolean, toast?: string }} opts */
+function endCommBinding(opts = {}) {
+    const channel = __commBindingSession.channel || window.__activeQrChannel;
+    const wasActive = __commBindingSession.active;
+    clearCommBindingTimers();
+    if (opts.cancelBackend !== false) cancelBackendChannelBinding(channel);
+    if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
+    hideQrCodeOverlay();
+    hideCommBindingOverlay();
+    __commBindingSession.active = false;
+    __commBindingSession.phase = null;
+    __commBindingSession.channel = null;
+    if (!__commBindingSession.failHandled) __commBindingSession.failHandled = false;
+    window.__activeQrChannel = null;
+    if (opts.toast && wasActive && typeof showToast === 'function') showToast(opts.toast);
+}
+
+// 全局遮罩「取消」
+(function wireCommBindingCancelBtn() {
+    const btn = document.getElementById('plugin-async-overlay-cancel')
+        || document.getElementById('comm-binding-overlay-cancel');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        endCommBinding({ cancelBackend: true, toast: '已取消插件绑定' });
+    });
+})();
 
 const originalBindBtn = document.getElementById('wechat-bind-btn');
 if (originalBindBtn) {
@@ -4733,20 +4925,18 @@ if (originalBindBtn) {
         originalBindBtn.style.opacity = '0.6';
         originalBindBtn.style.cursor = 'not-allowed';
         originalBindBtn.innerHTML = '⏳ 正在唤醒微信手动绑定...';
-        showCommBindingOverlay('⏳ 正在唤醒微信绑定模块...');
+        beginCommBinding('wechat', '⏳ 正在唤醒微信绑定模块...');
         
         try {
-            logTerminal.innerText += '\n[WeChat Login] 正在唤醒微信手动绑定模块，请稍候...\n';
+            if (logTerminal) logTerminal.innerText += '\n[WeChat Login] 正在唤醒微信手动绑定模块，请稍候...\n';
             const result = await window.api.triggerWeChatLogin();
             if (result.success) {
-                logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
+                if (logTerminal) logTerminal.innerText += '[WeChat Login] 手动绑定服务拉起中，等待抓取登录二维码...\n';
             } else {
-                showToast('拉起绑定失败：' + result.error);
-                hideCommBindingOverlay();
+                failCommBinding('拉起绑定失败：' + (result.error || '未知错误'));
             }
         } catch (err) {
-            showToast('拉起异常：' + err.message);
-            hideCommBindingOverlay();
+            failCommBinding('拉起异常：' + err.message);
         } finally {
             originalBindBtn.disabled = false;
             originalBindBtn.style.opacity = '1';
@@ -6232,12 +6422,16 @@ async function updateWeChatStatusUI() {
             if (result.bound && result.details) {
                 if (bindBtn) bindBtn.style.display = 'none';
                 // 绑定成功：停止扫码高频轮询 + 自动关闭二维码弹窗 + 解除通讯管理操作锁
-                if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
-                if (qrcodeOverlay && qrcodeOverlay.style.display !== 'none') {
-                    qrcodeOverlay.style.opacity = '0';
-                    qrcodeOverlay.style.display = 'none';
+                if (typeof completeCommBinding === 'function') {
+                    completeCommBinding();
+                } else {
+                    if (typeof stopWeChatBindingFastPoll === 'function') stopWeChatBindingFastPoll();
+                    if (qrcodeOverlay && qrcodeOverlay.style.display !== 'none') {
+                        qrcodeOverlay.style.opacity = '0';
+                        qrcodeOverlay.style.display = 'none';
+                    }
+                    if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
                 }
-                if (typeof hideCommBindingOverlay === 'function') hideCommBindingOverlay();
                 
                 const accountId = result.details.accountId || '--';
                 let savedAtStr = '--';

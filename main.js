@@ -20,7 +20,8 @@ const {
     probePlugin,
     applyPluginCredentials,
     LONG_TERM_MEMORY_UI_ID,
-    LONG_TERM_MEMORY_STACK
+    LONG_TERM_MEMORY_STACK,
+    ASYNC_CHANNEL_LOGIN
 } = require('./plugin-catalog');
 process.on('uncaughtException', (err) => {
     try {
@@ -470,9 +471,22 @@ const BUNDLED_NPM_CHANNEL_PLUGINS = [
 ];
 
 function resolveBundledNpmPluginPath(entry) {
-    for (const rel of entry.candidates || []) {
+    const candidates = entry.candidates || [];
+    for (const rel of candidates) {
         const abs = path.isAbsolute(rel) ? rel : path.join(__dirname, rel);
         if (fs.existsSync(abs)) return abs;
+    }
+    // 开发树缺包时，回退到已安装产品目录（用户当前卡在 Install Weixin? 的常见原因）
+    const fallbackRoots = [
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ClawAI', 'resources', 'app'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'ClawAI', 'resources', 'app')
+    ];
+    for (const root of fallbackRoots) {
+        for (const rel of candidates) {
+            if (path.isAbsolute(rel)) continue;
+            const abs = path.join(root, rel);
+            if (fs.existsSync(abs)) return abs;
+        }
     }
     return null;
 }
@@ -507,8 +521,10 @@ function encodeOpenClawNpmProjectDirName(packageName) {
 function ensureOfficialExternalNpmPluginSeeded(params) {
     const packageName = params.packageName;
     const pluginId = params.pluginId;
+    const packagedRel = path.join('node_modules', ...String(packageName).split('/'));
     const bundledSrc = params.bundledSrc
-        || path.join(__dirname, 'node_modules', ...packageName.split('/'));
+        || resolveBundledNpmPluginPath({ id: pluginId, candidates: [packagedRel] })
+        || path.join(__dirname, packagedRel);
     if (!fs.existsSync(bundledSrc)) {
         return { seeded: false, reason: `bundled package missing: ${bundledSrc}` };
     }
@@ -884,6 +900,126 @@ function seedBundledPlugins() {
     }
 }
 
+/** Gateway 启动前：把内置渠道插件登记进 installs / load.paths，避免交互式 Install? 卡死。 */
+function prepareChannelPluginsBeforeGateway() {
+    if (!fs.existsSync(CONFIG_PATH)) return;
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
+    const config = JSON.parse(raw);
+    let needsSave = false;
+
+    if (!config.plugins) { config.plugins = {}; needsSave = true; }
+    if (!config.plugins.entries) { config.plugins.entries = {}; needsSave = true; }
+    if (!config.plugins.allow) { config.plugins.allow = []; needsSave = true; }
+    if (!config.plugins.load) { config.plugins.load = {}; needsSave = true; }
+    if (!Array.isArray(config.plugins.load.paths)) { config.plugins.load.paths = []; needsSave = true; }
+    if (!config.plugins.installs) { config.plugins.installs = {}; needsSave = true; }
+
+    const wantById = {};
+    for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
+        const abs = resolveBundledNpmPluginPath(entry);
+        if (abs) wantById[entry.id] = path.resolve(abs);
+    }
+
+    const channelPathMatchers = [
+        { id: 'openclaw-weixin', re: /(?:^|[\\/])openclaw-weixin(?:[\\/]|$)/i },
+        { id: 'feishu', re: /[\\/]@openclaw[\\/]feishu(?:[\\/]|$)/i },
+        { id: 'qqbot', re: /[\\/]@openclaw[\\/]qqbot(?:[\\/]|$)/i },
+        { id: 'slack', re: /[\\/]@openclaw[\\/]slack(?:[\\/]|$)/i },
+        { id: 'whatsapp', re: /[\\/]@openclaw[\\/]whatsapp(?:[\\/]|$)/i },
+        { id: 'matrix', re: /[\\/]@openclaw[\\/]matrix(?:[\\/]|$)/i }
+    ];
+
+    const filteredPaths = [];
+    for (const p of config.plugins.load.paths) {
+        if (typeof p !== 'string') { needsSave = true; continue; }
+        let drop = false;
+        for (const m of channelPathMatchers) {
+            if (!m.re.test(p)) continue;
+            const want = wantById[m.id];
+            if (!want || path.resolve(p) !== want) {
+                drop = true;
+                needsSave = true;
+            }
+            break;
+        }
+        if (drop) continue;
+        try {
+            if (!fs.existsSync(p)) {
+                needsSave = true;
+                continue;
+            }
+        } catch (e) {
+            needsSave = true;
+            continue;
+        }
+        filteredPaths.push(p);
+    }
+
+    for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
+        const abs = resolveBundledNpmPluginPath(entry);
+        if (!abs) {
+            console.warn(`[PluginSeed] Pre-gateway missing bundled: ${entry.id}`);
+            continue;
+        }
+        const resolvedPath = path.resolve(abs);
+        if (!filteredPaths.some((p) => path.resolve(p) === resolvedPath)) {
+            filteredPaths.push(abs);
+            needsSave = true;
+        }
+        if (!config.plugins.entries[entry.id]) {
+            config.plugins.entries[entry.id] = { enabled: true };
+            needsSave = true;
+        }
+        if (config.plugins.entries[entry.id].enabled === true && !config.plugins.allow.includes(entry.id)) {
+            config.plugins.allow.push(entry.id);
+            needsSave = true;
+        }
+    }
+
+    if (JSON.stringify(config.plugins.load.paths) !== JSON.stringify(filteredPaths)) {
+        config.plugins.load.paths = filteredPaths;
+        needsSave = true;
+    }
+
+    for (const item of [
+        { pluginId: 'openclaw-weixin', packageName: '@tencent-weixin/openclaw-weixin' },
+        { pluginId: 'feishu', packageName: '@openclaw/feishu' },
+        { pluginId: 'qqbot', packageName: '@openclaw/qqbot' },
+    ]) {
+        try {
+            const seed = ensureOfficialExternalNpmPluginSeeded(item);
+            if (!seed.seeded) {
+                console.warn(`[PluginSeed] Pre-gateway ${item.pluginId}:`, seed.reason);
+                continue;
+            }
+            const prev = config.plugins.installs[item.pluginId] || {};
+            const ver = seed.version || prev.resolvedVersion || '0.0.0';
+            const next = {
+                ...prev,
+                source: 'npm',
+                spec: `${item.packageName}@${ver}`,
+                installPath: seed.installPath,
+                resolvedName: item.packageName,
+                resolvedVersion: ver,
+                resolvedSpec: `${item.packageName}@${ver}`,
+                version: ver,
+                installedAt: prev.installedAt || new Date().toISOString()
+            };
+            if (JSON.stringify(prev) !== JSON.stringify(next)) {
+                config.plugins.installs[item.pluginId] = next;
+                needsSave = true;
+            }
+        } catch (e) {
+            console.warn(`[PluginSeed] Pre-gateway ${item.pluginId} failed:`, e.message);
+        }
+    }
+
+    if (needsSave) {
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+        console.log('[PluginSeed] Pre-gateway channel trust records synced');
+    }
+}
+
 // 忽略证书错误以兼容 Clash 等代理软件的 HTTPS 劫持/解密校验
 app.commandLine.appendSwitch('ignore-certificate-errors');
 
@@ -1202,6 +1338,14 @@ async function startGatewayProcess() {
             // 部署内置自定义插件到用户状态目录, 确保打包后在别人电脑上插件也能被 openclaw 发现并加载
             seedBundledPlugins();
 
+            // 每次启动 Gateway 前强制同步渠道插件信任记录（load.paths + plugins.installs），
+            // 避免仅打开状态页不读配置时仍卡在「* Install Weixin plugin?」
+            try {
+                prepareChannelPluginsBeforeGateway();
+            } catch (e) {
+                console.warn('[PluginSeed] pre-gateway prepare skipped:', e.message);
+            }
+
             // 启动ClawAI前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
             try {
                 if (fs.existsSync(CONFIG_PATH)) {
@@ -1289,6 +1433,10 @@ async function startGatewayProcess() {
                     text = text.split(/\r?\n/).filter(line => !line.includes('NODE_TLS_REJECT_UNAUTHORIZED') && !line.includes('disabling certificate verification')).join('\n');
                 }
                 if (!text.trim()) return;
+
+                // OpenClaw 偶发弹出「* Install xxx plugin?」交互问答；stdin 已 pipe，无人应答会永久卡死。
+                // 插件随 ClawAI 内置，统一自动选 Skip。
+                tryAutoSkipInstallPluginPrompt(gatewayProcess, text, 'Gateway');
                 
                 // 实时保存流日志用于诊断
                 try {
@@ -1729,8 +1877,9 @@ ipcMain.handle('config-read', async () => {
             needsSave = true;
         }
 
-        // 飞书 / QQ：同步写入官方 npm installs 记录，避免仅靠 load.paths 时ClawAI发现不了渠道插件
+        // 微信 / 飞书 / QQ：同步官方 npm installs，避免网关启动时卡在「Install xxx plugin?」交互问答
         for (const item of [
+            { pluginId: 'openclaw-weixin', packageName: '@tencent-weixin/openclaw-weixin' },
             { pluginId: 'feishu', packageName: '@openclaw/feishu' },
             { pluginId: 'qqbot', packageName: '@openclaw/qqbot' },
         ]) {
@@ -2021,138 +2170,377 @@ ipcMain.handle('clear-system-logs', async () => {
 
 let wechatLoginProcess = null;
 let wechatLoginSuccessWatcher = null;
+let wechatQrWaitTimer = null;
+let wechatQrEmitted = false;
+let wechatFailEmitted = false;
 
-// 取消并强制杀死挂起的微信扫码登录进程
-ipcMain.handle('wechat-login-cancel', async () => {
+function clearWeChatQrWaitTimer() {
+    if (wechatQrWaitTimer) {
+        clearTimeout(wechatQrWaitTimer);
+        wechatQrWaitTimer = null;
+    }
+}
+
+function forceKillChildProcess(proc) {
+    if (!proc) return;
+    try {
+        if (process.platform === 'win32' && proc.pid) {
+            const { execSync } = require('child_process');
+            execSync(`taskkill /pid ${proc.pid} /T /F`, { stdio: 'ignore' });
+        } else {
+            proc.kill('SIGKILL');
+        }
+    } catch (e) {}
+}
+
+function forceKillWeChatLoginProcess() {
+    forceKillChildProcess(wechatLoginProcess);
+    wechatLoginProcess = null;
+}
+
+function emitWeChatLoginFailed(error) {
+    if (wechatFailEmitted) return;
+    wechatFailEmitted = true;
+    clearWeChatQrWaitTimer();
     if (wechatLoginSuccessWatcher) {
         clearInterval(wechatLoginSuccessWatcher);
         wechatLoginSuccessWatcher = null;
     }
-    if (wechatLoginProcess) {
-        try {
-            if (process.platform === 'win32') {
-                const { execSync } = require('child_process');
-                execSync(`taskkill /pid ${wechatLoginProcess.pid} /T /F`);
-            } else {
-                wechatLoginProcess.kill();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('wechat-login-failed', { error: error || '微信绑定失败' });
+        mainWindow.webContents.send('channel-login-failed', {
+            pluginId: 'openclaw-weixin',
+            channel: 'wechat',
+            error: error || '微信绑定失败'
+        });
+        mainWindow.webContents.send('gateway-log', `[WeChat Login] ❌ ${error || '微信绑定失败'}\n`);
+    }
+}
+
+/** 给管道 stdin 的子进程自动跳过「* Install xxx plugin?」，避免登录/网关永久卡住。 */
+function tryAutoSkipInstallPluginPrompt(child, text, label) {
+    if (!child || !child.__installPromptSkipped) child.__installPromptSkipped = false;
+    if (child.__installPromptSkipped) return false;
+    if (!/\*\s*Install\s+.+\s+plugin\?/i.test(String(text || ''))) return false;
+    child.__installPromptSkipped = true;
+    try {
+        if (child.stdin && child.stdin.writable) {
+            for (let i = 0; i < 5; i++) child.stdin.write('\x1b[B');
+            child.stdin.write('\r');
+        }
+    } catch (e) {}
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('gateway-log',
+            `[System] ${label || '子进程'}：检测到插件安装询问，已自动跳过（插件已内置）\n`);
+    }
+    return true;
+}
+
+/** 当前通用渠道 login 会话（微信 + 以后 ASYNC_CHANNEL_LOGIN / IPC 传入的任意内置扫码插件） */
+let activeChannelLogin = null;
+
+function resolveAsyncChannelLoginSpec(pluginIdOrOpts) {
+    const opts = (typeof pluginIdOrOpts === 'string')
+        ? { pluginId: pluginIdOrOpts }
+        : (pluginIdOrOpts || {});
+    const pluginId = String(opts.pluginId || opts.channel || '').trim();
+    const fromCatalog = (ASYNC_CHANNEL_LOGIN && ASYNC_CHANNEL_LOGIN[pluginId]) || null;
+    const openclawChannel = opts.openclawChannel
+        || (fromCatalog && fromCatalog.openclawChannel)
+        || pluginId;
+    const label = opts.label || (fromCatalog && fromCatalog.label) || pluginId || '渠道';
+    const uiChannel = opts.uiChannel || (fromCatalog && fromCatalog.uiChannel) || pluginId;
+    const wakeTimeoutMs = Number(opts.wakeTimeoutMs)
+        || (fromCatalog && fromCatalog.wakeTimeoutMs)
+        || 120000;
+    if (!openclawChannel) return null;
+    return { pluginId: pluginId || openclawChannel, openclawChannel, label, uiChannel, wakeTimeoutMs };
+}
+
+function stopActiveChannelLogin(opts = {}) {
+    const sess = activeChannelLogin;
+    if (!sess) return;
+    if (sess.wakeTimer) {
+        clearTimeout(sess.wakeTimer);
+        sess.wakeTimer = null;
+    }
+    if (sess.successWatcher) {
+        clearInterval(sess.successWatcher);
+        if (wechatLoginSuccessWatcher === sess.successWatcher) wechatLoginSuccessWatcher = null;
+        sess.successWatcher = null;
+    }
+    if (opts.suppressFail) sess.failEmitted = true;
+    forceKillChildProcess(sess.process);
+    if (wechatLoginProcess === sess.process) wechatLoginProcess = null;
+    activeChannelLogin = null;
+}
+
+function emitChannelLoginFailed(sess, error) {
+    if (!sess || sess.failEmitted) return;
+    sess.failEmitted = true;
+    if (sess.wakeTimer) {
+        clearTimeout(sess.wakeTimer);
+        sess.wakeTimer = null;
+    }
+    if (sess.successWatcher) {
+        clearInterval(sess.successWatcher);
+        if (wechatLoginSuccessWatcher === sess.successWatcher) wechatLoginSuccessWatcher = null;
+        sess.successWatcher = null;
+    }
+    const payload = {
+        pluginId: sess.pluginId,
+        channel: sess.uiChannel,
+        error: error || `${sess.label}绑定失败`
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('channel-login-failed', payload);
+        mainWindow.webContents.send('gateway-log', `[Channel Login/${sess.label}] ❌ ${payload.error}\n`);
+        if (sess.pluginId === 'openclaw-weixin' || sess.openclawChannel === 'openclaw-weixin') {
+            wechatFailEmitted = true;
+            mainWindow.webContents.send('wechat-login-failed', { error: payload.error });
+        }
+    }
+}
+
+/**
+ * 通用内置渠道 login。新增扫码插件：在 ASYNC_CHANNEL_LOGIN 登记，或 IPC 传 openclawChannel/label。
+ * 统一：信任预同步、跳过 Install?、出码超时、失败事件、可取消。
+ */
+async function startBundledChannelLogin(pluginIdOrOpts) {
+    const spec = resolveAsyncChannelLoginSpec(pluginIdOrOpts);
+    if (!spec) return { success: false, error: '无效的渠道插件 ID' };
+
+    stopActiveChannelLogin({ suppressFail: true });
+    clearWeChatQrWaitTimer();
+    wechatQrEmitted = false;
+    wechatFailEmitted = false;
+    forceKillWeChatLoginProcess();
+    if (wechatLoginSuccessWatcher) {
+        clearInterval(wechatLoginSuccessWatcher);
+        wechatLoginSuccessWatcher = null;
+    }
+
+    try { prepareChannelPluginsBeforeGateway(); } catch (e) {
+        console.warn('[Channel Login] prepareChannelPluginsBeforeGateway:', e.message);
+    }
+
+    const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
+    if (!fs.existsSync(openclawEntry)) {
+        return { success: false, error: '内置 OpenClaw 模块缺失，无法唤醒绑定' };
+    }
+
+    const nodeExePath = getAvailableNodePath();
+    const patchPath = path.join(__dirname, 'patch_gateway.js');
+    const cleanEnv = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
+    for (const key of Object.keys(cleanEnv)) {
+        if (key.toLowerCase().includes('proxy')) delete cleanEnv[key];
+    }
+    cleanEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
+    const forkOptions = {
+        cwd: CONFIG_DIR,
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+        execArgv: ['--require', patchPath, '--dns-result-order=ipv4first'],
+        env: cleanEnv
+    };
+    if (nodeExePath) {
+        forkOptions.execPath = nodeExePath;
+        const sandboxDir = path.dirname(nodeExePath);
+        const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+        forkOptions.env[pathKey] = `${sandboxDir}${path.delimiter}${process.env[pathKey] || ''}`;
+    }
+
+    const child = fork(openclawEntry, ['channels', 'login', '--channel', spec.openclawChannel], forkOptions);
+    const sess = {
+        pluginId: spec.pluginId,
+        openclawChannel: spec.openclawChannel,
+        label: spec.label,
+        uiChannel: spec.uiChannel,
+        process: child,
+        qrEmitted: false,
+        failEmitted: false,
+        wakeTimer: null,
+        successWatcher: null
+    };
+    activeChannelLogin = sess;
+    if (spec.openclawChannel === 'openclaw-weixin') wechatLoginProcess = child;
+
+    if (spec.openclawChannel === 'openclaw-weixin') {
+        const watcherStartedAt = Date.now();
+        sess.successWatcher = setInterval(() => {
+            try {
+                const status = getWeChatStatus();
+                if (status.bound && status.details) {
+                    if (sess.successWatcher) {
+                        clearInterval(sess.successWatcher);
+                        if (wechatLoginSuccessWatcher === sess.successWatcher) wechatLoginSuccessWatcher = null;
+                        sess.successWatcher = null;
+                    }
+                    if (sess.wakeTimer) {
+                        clearTimeout(sess.wakeTimer);
+                        sess.wakeTimer = null;
+                    }
+                    clearWeChatQrWaitTimer();
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('wechat-login-success', status);
+                        mainWindow.webContents.send('channel-login-success', {
+                            pluginId: sess.pluginId,
+                            channel: sess.uiChannel,
+                            ...status
+                        });
+                    }
+                }
+            } catch (err) {}
+            if (Date.now() - watcherStartedAt > 5 * 60 * 1000 && sess.successWatcher) {
+                clearInterval(sess.successWatcher);
+                if (wechatLoginSuccessWatcher === sess.successWatcher) wechatLoginSuccessWatcher = null;
+                sess.successWatcher = null;
             }
-        } catch (e) {}
-        wechatLoginProcess = null;
+        }, 1500);
+        wechatLoginSuccessWatcher = sess.successWatcher;
+    }
+
+    sess.wakeTimer = setTimeout(() => {
+        if (!sess.qrEmitted) {
+            forceKillChildProcess(sess.process);
+            if (wechatLoginProcess === sess.process) wechatLoginProcess = null;
+            sess.process = null;
+            emitChannelLoginFailed(sess, `等待${sess.label}二维码超时（绑定模块未响应）。请重试一次。`);
+            if (activeChannelLogin === sess) activeChannelLogin = null;
+        }
+    }, spec.wakeTimeoutMs);
+    if (spec.openclawChannel === 'openclaw-weixin') wechatQrWaitTimer = sess.wakeTimer;
+
+    const handleLoginLog = (data) => {
+        let text = data.toString();
+        if (text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+            text = text.split(/\r?\n/).filter(line =>
+                !line.includes('NODE_TLS_REJECT_UNAUTHORIZED') && !line.includes('disabling certificate verification')
+            ).join('\n');
+        }
+        if (!text.trim()) return;
+        tryAutoSkipInstallPluginPrompt(child, text, `${sess.label}绑定`);
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.send('gateway-log', text);
+        const cleanText = text.replace(/\x1B\[[0-9;]*m/g, '');
+        let qrUrl = null;
+        const weixinMatch = cleanText.match(/https?:\/\/[^\s"'\n]*weixin\.qq\.com\/[^\s"'\n]+/)
+            || cleanText.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
+        if (weixinMatch) qrUrl = weixinMatch[0];
+        if (!qrUrl && sess.openclawChannel !== 'openclaw-weixin') {
+            const generic = cleanText.match(/https?:\/\/[^\s"'\n]{12,}/);
+            if (generic && /qr|login|auth|oauth|scan|bind/i.test(generic[0])) qrUrl = generic[0];
+        }
+        if (qrUrl) {
+            sess.qrEmitted = true;
+            if (sess.openclawChannel === 'openclaw-weixin') wechatQrEmitted = true;
+            if (sess.wakeTimer) {
+                clearTimeout(sess.wakeTimer);
+                sess.wakeTimer = null;
+            }
+            clearWeChatQrWaitTimer();
+            mainWindow.webContents.send('gateway-qrcode', {
+                url: qrUrl,
+                channel: sess.uiChannel,
+                pluginId: sess.pluginId,
+                title: `${sess.label}扫码登录`,
+                tip: `请使用手机扫描下方二维码完成${sess.label}授权。`
+            });
+        }
+    };
+
+    child.stdout.on('data', handleLoginLog);
+    child.stderr.on('data', handleLoginLog);
+    child.on('exit', (code) => {
+        console.log(`[Channel Login] ${sess.label} exited code=${code}`);
+        if (wechatLoginProcess === child) wechatLoginProcess = null;
+        sess.process = null;
+        let succeeded = false;
+        if (sess.openclawChannel === 'openclaw-weixin') {
+            try {
+                const status = getWeChatStatus();
+                if (status.bound && status.details && mainWindow && !mainWindow.isDestroyed()) {
+                    succeeded = true;
+                    clearWeChatQrWaitTimer();
+                    mainWindow.webContents.send('wechat-login-success', status);
+                    mainWindow.webContents.send('channel-login-success', {
+                        pluginId: sess.pluginId,
+                        channel: sess.uiChannel,
+                        ...status
+                    });
+                }
+            } catch (err) {}
+        }
+        if (sess.successWatcher) {
+            clearInterval(sess.successWatcher);
+            if (wechatLoginSuccessWatcher === sess.successWatcher) wechatLoginSuccessWatcher = null;
+            sess.successWatcher = null;
+        }
+        if (!succeeded && !sess.qrEmitted) {
+            emitChannelLoginFailed(sess, `${sess.label}绑定进程已退出（code ${code == null ? '?' : code}），未能生成二维码`);
+        }
+        if (activeChannelLogin === sess) activeChannelLogin = null;
+    });
+
+    return { success: true, pluginId: spec.pluginId, channel: spec.uiChannel };
+}
+
+ipcMain.handle('wechat-login-cancel', async () => {
+    stopActiveChannelLogin({ suppressFail: true });
+    clearWeChatQrWaitTimer();
+    wechatQrEmitted = false;
+    wechatFailEmitted = true;
+    if (wechatLoginSuccessWatcher) {
+        clearInterval(wechatLoginSuccessWatcher);
+        wechatLoginSuccessWatcher = null;
+    }
+    forceKillWeChatLoginProcess();
+    return { success: true };
+});
+
+ipcMain.handle('channel-login-start', async (_event, opts) => {
+    try {
+        return await startBundledChannelLogin(opts);
+    } catch (e) {
+        console.error('channel-login-start failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('channel-login-cancel', async (_event, pluginId) => {
+    if (activeChannelLogin) {
+        if (!pluginId
+            || activeChannelLogin.pluginId === pluginId
+            || activeChannelLogin.openclawChannel === pluginId
+            || activeChannelLogin.uiChannel === pluginId) {
+            stopActiveChannelLogin({ suppressFail: true });
+            wechatFailEmitted = true;
+        }
     }
     return { success: true };
 });
 
-// 在后台启动独立的微信扫码登录进程
+ipcMain.handle('channel-login-cancel-all', async () => {
+    stopActiveChannelLogin({ suppressFail: true });
+    clearWeChatQrWaitTimer();
+    wechatFailEmitted = true;
+    forceKillWeChatLoginProcess();
+    if (wechatLoginSuccessWatcher) {
+        clearInterval(wechatLoginSuccessWatcher);
+        wechatLoginSuccessWatcher = null;
+    }
+    try {
+        if (typeof feishuQrAbortController !== 'undefined' && feishuQrAbortController) {
+            try { feishuQrAbortController.abort(); } catch (e) {}
+            feishuQrAbortController = null;
+        }
+        if (typeof feishuQrBusy !== 'undefined') feishuQrBusy = false;
+    } catch (e) {}
+    return { success: true };
+});
+
 ipcMain.handle('wechat-login', async () => {
     try {
-        if (wechatLoginProcess) {
-            try {
-                if (process.platform === 'win32') {
-                    const { execSync } = require('child_process');
-                    execSync(`taskkill /pid ${wechatLoginProcess.pid} /T /F`);
-                } else {
-                    wechatLoginProcess.kill();
-                }
-            } catch (err) {}
-            wechatLoginProcess = null;
-        }
-
-        const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
-        const nodeExePath = getAvailableNodePath();
-        const patchPath = path.join(__dirname, 'patch_gateway.js');
-        const cleanEnv = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
-        for (const key of Object.keys(cleanEnv)) {
-            if (key.toLowerCase().includes('proxy')) {
-                delete cleanEnv[key];
-            }
-        }
-        // 补丁传播到登录进程派生的所有子进程 (HTTPDNS 绕过 Fake-IP + mkdir 加固)
-        cleanEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
-        const forkOptions = {
-            cwd: CONFIG_DIR,
-            stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-            execArgv: ['--require', patchPath, '--dns-result-order=ipv4first'],
-            env: cleanEnv
-        };
-        if (nodeExePath) {
-            forkOptions.execPath = nodeExePath;
-            const sandboxDir = path.dirname(nodeExePath);
-            const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
-            const originalPath = process.env[pathKey] || '';
-            forkOptions.env[pathKey] = `${sandboxDir}${path.delimiter}${originalPath}`;
-        }
-
-        // 启动 login 指令进程以触发扫码
-        wechatLoginProcess = fork(openclawEntry, ['channels', 'login', '--channel', 'openclaw-weixin'], forkOptions);
-
-        // 扫码成功探测器：登录期间以 1.5s 的节奏轮询绑定状态，一旦检测到 accounts.json 已写入有效账号，
-        // 立即向渲染进程推送成功事件，让前端秒级刷新“已绑定”状态并自动关闭二维码弹窗，
-        // 无需再等待前端 10s 的常规轮询。最长探测 5 分钟后自动停止，避免僵尸定时器。
-        if (wechatLoginSuccessWatcher) {
-            clearInterval(wechatLoginSuccessWatcher);
-            wechatLoginSuccessWatcher = null;
-        }
-        const watcherStartedAt = Date.now();
-        wechatLoginSuccessWatcher = setInterval(() => {
-            try {
-                const status = getWeChatStatus();
-                if (status.bound && status.details) {
-                    clearInterval(wechatLoginSuccessWatcher);
-                    wechatLoginSuccessWatcher = null;
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('wechat-login-success', status);
-                    }
-                    return;
-                }
-            } catch (err) {}
-            // 超时保护（5 分钟）
-            if (Date.now() - watcherStartedAt > 5 * 60 * 1000) {
-                clearInterval(wechatLoginSuccessWatcher);
-                wechatLoginSuccessWatcher = null;
-            }
-        }, 1500);
-
-        const handleLoginLog = (data) => {
-            let text = data.toString();
-            if (text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
-                text = text.split(/\r?\n/).filter(line => !line.includes('NODE_TLS_REJECT_UNAUTHORIZED') && !line.includes('disabling certificate verification')).join('\n');
-            }
-            if (!text.trim()) return;
-            if (mainWindow) {
-                // 直接发送原始文本以保证控制台字符画二维码排版不受破坏
-                mainWindow.webContents.send('gateway-log', text);
-                
-                // 自动匹配微信扫码登录 URL (支持 weixin.qq.com 各种子路径二级域(如 liteapp/login) 或者是 wechaty.js.org 专属二维码链接)
-                const cleanText = text.replace(/\x1B\[[0-9;]*m/g, '');
-                const qrMatch = cleanText.match(/https?:\/\/[^\s"'\n]*weixin\.qq\.com\/[^\s"'\n]+/) || 
-                                cleanText.match(/https?:\/\/wechaty\.js\.org\/qrcode\/[^\s"'\n]+/);
-                if (qrMatch) {
-                    mainWindow.webContents.send('gateway-qrcode', qrMatch[0]);
-                }
-            }
-        };
-
-        wechatLoginProcess.stdout.on('data', handleLoginLog);
-        wechatLoginProcess.stderr.on('data', handleLoginLog);
-
-        wechatLoginProcess.on('exit', (code) => {
-            console.log(`WeChat Login process exited with code ${code}`);
-            wechatLoginProcess = null;
-            // 进程退出时兜底再探测一次绑定状态：若已成功写入账号则立即推送成功事件，
-            // 覆盖“扫码成功后登录进程立刻退出、轮询定时器尚未命中”的边缘时序。
-            try {
-                const status = getWeChatStatus();
-                if (status.bound && status.details && mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('wechat-login-success', status);
-                }
-            } catch (err) {}
-            if (wechatLoginSuccessWatcher) {
-                clearInterval(wechatLoginSuccessWatcher);
-                wechatLoginSuccessWatcher = null;
-            }
-        });
-
-        return { success: true };
+        return await startBundledChannelLogin('openclaw-weixin');
     } catch (e) {
         console.error('Failed to start WeChat login process:', e);
         return { success: false, error: e.message };
