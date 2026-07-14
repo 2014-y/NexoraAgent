@@ -263,32 +263,30 @@ body.maximized .app-container {
 
 /* State Styling: Stopped (Ready to Start) */
 .status-badge-container.stopped {
-  border-color: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--border-color);
 }
 .status-badge-container.stopped:hover {
-  border-color: var(--accent-color);
-  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.35);
+  border-color: var(--border-color);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
 /* State Styling: Running (Active) */
 .status-badge-container.running {
-  border-color: rgba(0, 230, 118, 0.3);
-  background: rgba(0, 230, 118, 0.02);
+  border-color: var(--border-color);
 }
 .status-badge-container.running:hover {
-  border-color: #00e676;
-  box-shadow: 0 0 15px rgba(0, 230, 118, 0.3);
+  border-color: var(--border-color);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
 /* State Styling: Starting (Working) */
 .status-badge-container.starting {
-  border-color: rgba(255, 189, 46, 0.3);
-  background: rgba(255, 189, 46, 0.02);
+  border-color: var(--border-color);
   cursor: wait;
 }
 .status-badge-container.starting:hover {
-  border-color: #ffbd2e;
-  box-shadow: 0 0 15px rgba(255, 189, 46, 0.3);
+  border-color: var(--border-color);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
 /* 侧边栏网关开关状态对应图标颜色 */

@@ -3218,6 +3218,15 @@ function updateProgressUI(val, textLabel = '') {
 
 // 6. UI 状态刷新
 function updateGatewayStatusUI(status) {
+    const pulseVisualizer = document.getElementById('pulse-visualizer');
+    if (pulseVisualizer) {
+        if (status === 'running' || status === 'starting' || status === 'upgrading') {
+            pulseVisualizer.classList.add('active');
+        } else {
+            pulseVisualizer.classList.remove('active');
+        }
+    }
+
     if (status !== 'running') {
         gatewayFullyReady = false;
     }
