@@ -122,6 +122,7 @@ body.maximized .app-container {
   align-items: center;
   padding: 0 20px;
   -webkit-app-region: drag; /* 允许拖拽 */
+  position: relative; /* 允许子元素绝对定位居中 */
 }
 
 .title-logo-zone {
@@ -237,27 +238,68 @@ body.maximized .app-container {
 }
 
 .status-badge-container {
-  background: var(--bg-card);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   position: relative;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .status-badge-container:hover {
-  transform: translateY(-1px);
-  border-color: rgba(140, 82, 255, 0.4);
-  box-shadow: 0 4px 15px rgba(140, 82, 255, 0.15);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .status-badge-container:active {
-  transform: translateY(1px);
+  transform: translateY(0px);
+}
+
+/* State Styling: Stopped (Ready to Start) */
+.status-badge-container.stopped {
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+.status-badge-container.stopped:hover {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.35);
+}
+
+/* State Styling: Running (Active) */
+.status-badge-container.running {
+  border-color: rgba(0, 230, 118, 0.3);
+  background: rgba(0, 230, 118, 0.02);
+}
+.status-badge-container.running:hover {
+  border-color: #00e676;
+  box-shadow: 0 0 15px rgba(0, 230, 118, 0.3);
+}
+
+/* State Styling: Starting (Working) */
+.status-badge-container.starting {
+  border-color: rgba(255, 189, 46, 0.3);
+  background: rgba(255, 189, 46, 0.02);
+  cursor: wait;
+}
+.status-badge-container.starting:hover {
+  border-color: #ffbd2e;
+  box-shadow: 0 0 15px rgba(255, 189, 46, 0.3);
+}
+
+/* 侧边栏网关开关状态对应图标颜色 */
+.status-badge-container.stopped #gateway-mini-icon-container {
+  color: var(--accent-color);
+}
+.status-badge-container.running #gateway-mini-icon-container {
+  color: #00e676;
+}
+.status-badge-container.starting #gateway-mini-icon-container {
+  color: #ffbd2e;
 }
 
 .status-dot {
@@ -586,10 +628,17 @@ body.maximized .app-container {
 }
 
 .console-right {
-  width: 180px;
+  width: 192px; /* 增加到 192px 宽度，配合 padding 确保内部元素（如运行时间、载入插件）不折行 */
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px; /* 统一设为 6px 间隙，与内部卡片间隙完美对齐 */
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .gateway-big-btn {
@@ -629,7 +678,7 @@ body.maximized .app-container {
   flex-direction: column;
   gap: 6px;
   width: 100%;
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .stat-card-mini {
@@ -1545,14 +1594,14 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.status-dot.starting ~ .status-percentage {
+.status-badge-container.starting .status-percentage {
   color: var(--accent-color);
   border-color: rgba(var(--accent-rgb), 0.25);
   background: rgba(var(--accent-rgb), 0.08);
   animation: pulse-sidebar 1.5s infinite ease-in-out;
 }
 
-.status-dot.running ~ .status-percentage {
+.status-badge-container.running .status-percentage {
   color: #00e676;
   border-color: rgba(0, 230, 118, 0.2);
   background: rgba(0, 230, 118, 0.08);
@@ -1566,8 +1615,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 .app-uptime-zone {
-  margin-top: auto;
-  padding-top: 10px;
+  margin-top: auto; /* 恢复 margin-top: auto，作为卡片页脚稳固沉到底部对齐 */
+  padding-top: 6px; /* 统一设为 6px 间隙 */
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
   display: flex;
   justify-content: space-between;
@@ -1674,4 +1723,59 @@ input:focus, select:focus, textarea:focus {
 
 .terminal-open-btn:active {
   transform: translateY(0);
+}
+
+/* AI Pulse Visualizer */
+.pulse-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffffff; /* 纯白高对比度文字 */
+  background: rgba(255, 255, 255, 0.08); /* 提高背景明度 */
+  padding: 4px 10px; /* 稍微增宽 */
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15); /* 强化边框线，增加质感 */
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+.badge-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+}
+.badge-dot.green { background: #00e676; box-shadow: 0 0 6px #00e676; }
+.badge-dot.purple { background: var(--accent-color); box-shadow: 0 0 6px var(--accent-color); }
+.badge-dot.red { background: #ff4d4f; box-shadow: 0 0 6px #ff4d4f; }
+.badge-dot.gray { background: #555; }
+
+.pulse-visualizer {
+  display: flex;
+  align-items: center; /* 居中对齐，形成完美的水平对称声波，确保与左侧文字的中心线完全吻合 */
+  gap: 4px;
+  height: 24px;
+}
+.pulse-visualizer .bar {
+  width: 5px; /* 稍微加粗，防止过于纤细看不清 */
+  background: var(--accent-color);
+  border-radius: 2.5px;
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+  opacity: 0.55; /* 提高静置时的可见度 */
+  height: 6px; /* 提高底线高度 */
+  transition: height 0.1s ease, opacity 0.1s ease;
+}
+.pulse-visualizer.active .bar {
+  animation: pulse-bar 1s infinite alternate ease-in-out;
+  opacity: 0.9;
+}
+/* Generate random delays and heights for a cool effect using modulo selectors */
+.pulse-visualizer.active .bar:nth-child(3n+1) { animation-delay: -0.2s; animation-duration: 0.8s; }
+.pulse-visualizer.active .bar:nth-child(3n+2) { animation-delay: -0.5s; animation-duration: 0.6s; }
+.pulse-visualizer.active .bar:nth-child(3n) { animation-delay: -0.8s; animation-duration: 1.1s; }
+.pulse-visualizer.active .bar:nth-child(4n+1) { animation-delay: -0.3s; animation-duration: 0.9s; }
+.pulse-visualizer.active .bar:nth-child(5n+2) { animation-delay: -0.6s; animation-duration: 1.2s; }
+.pulse-visualizer.active .bar:nth-child(5n+4) { animation-delay: -0.4s; animation-duration: 0.7s; }
+.pulse-visualizer.active .bar:nth-child(7n+1) { animation-delay: -0.1s; animation-duration: 1.0s; }
+.pulse-visualizer.active .bar:nth-child(7n+3) { animation-delay: -0.9s; animation-duration: 1.3s; }
+
+@keyframes pulse-bar {
+  0% { height: 4px; }
+  100% { height: 100%; }
 }

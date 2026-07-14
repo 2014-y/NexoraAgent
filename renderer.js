@@ -3258,7 +3258,7 @@ function updateGatewayStatusUI(status) {
         btnIconStart.style.display = 'none';
         btnIconStop.style.display = 'block';
         btnLabelText.innerText = t('console.btn.stop');
-        gatewayToggleBtn.className = 'gateway-big-btn running';
+        gatewayToggleBtn.className = 'status-badge-container running';
 
         if (chatWelcomeText) {
             chatWelcomeText.innerText = isEn ? 'I have successfully connected to your local OpenClaw gateway!' : '我已经与您本地的 OpenClaw 网关成功对接！';
@@ -3307,7 +3307,7 @@ function updateGatewayStatusUI(status) {
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
         btnLabelText.innerText = t('console.btn.start');
-        gatewayToggleBtn.className = 'gateway-big-btn stopped';
+        gatewayToggleBtn.className = 'status-badge-container stopped';
 
         if (chatWelcomeText) {
             chatWelcomeText.innerText = t('status.stopped');
@@ -3334,7 +3334,7 @@ function updateGatewayStatusUI(status) {
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
         btnLabelText.innerText = '沙箱升级中';
-        gatewayToggleBtn.className = 'gateway-big-btn starting';
+        gatewayToggleBtn.className = 'status-badge-container starting';
 
         if (chatWelcomeText) {
             chatWelcomeText.innerText = '正在自动升级内置 Node.js 沙箱环境，请稍候...';
@@ -3354,7 +3354,7 @@ function updateGatewayStatusUI(status) {
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
         btnLabelText.innerText = t('sidebar.status.starting');
-        gatewayToggleBtn.className = 'gateway-big-btn starting';
+        gatewayToggleBtn.className = 'status-badge-container starting';
 
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
@@ -3437,6 +3437,13 @@ function setupTabSwitching() {
             // 切换到用量页重画图表防自适应显示错误
             if (currentTab === 'dashboard-view') {
                 renderUsageCharts();
+            }
+
+            // 切换到内置终端时，初始化终端并适应大小
+            if (currentTab === 'terminal-view') {
+                if (typeof initBuiltinTerminal === 'function') {
+                    initBuiltinTerminal();
+                }
             }
 
             // 切到插件页必须重绘（避免 flex 布局下初次隐藏时网格高度为 0）
@@ -4563,6 +4570,8 @@ function initChatView() {
         quickPanel.style.pointerEvents = 'none';
         if (toggleText) toggleText.innerText = t('展开帮助', 'Show Help', '展開幫助');
         if (toggleIcon) toggleIcon.style.transform = 'rotate(-180deg)';
+    } else {
+        if (toggleText) toggleText.innerText = t('收起帮助', 'Hide Help', '收起幫助');
     }
 
     if (toggleBtn) {
@@ -4637,7 +4646,8 @@ function initChatView() {
     // 绑定系统常见帮助疑难问答一键咨询气泡事件
     document.querySelectorAll('.help-tag-pill').forEach(pill => {
         pill.addEventListener('click', (e) => {
-            const question = e.currentTarget.getAttribute('data-question');
+            const questionKey = e.currentTarget.getAttribute('data-i18n-question');
+            const question = questionKey ? t(questionKey) : e.currentTarget.getAttribute('data-question');
             if (question && inputArea) {
                 inputArea.value = question;
                 handleSendMessage();
@@ -4660,11 +4670,11 @@ async function loadChatModels() {
     const useBuiltIn = localStorage.getItem('setting_use_built_in_models') !== 'false';
     if (useBuiltIn) {
         const builtInOpts = [
-            { id: 'agnes-2.0-flash', label: 'agnes-ai / agnes-2.0-flash (内置默认)' },
-            { id: 'agnes-1.5-flash', label: 'agnes-ai / agnes-1.5-flash (内置备用)' },
-            { id: 'agnes-video-v2.0', label: 'agnes-ai / agnes-video-v2.0 (内置视频)' },
-            { id: 'agnes-image-2.1-flash', label: 'agnes-ai / agnes-image-2.1-flash (内置图像)' },
-            { id: 'agnes-image-2.0-flash', label: 'agnes-ai / agnes-image-2.0-flash (内置图像默认)' }
+            { id: 'agnes-2.0-flash', label: `agnes-ai / agnes-2.0-flash${t(' (内置默认)', ' (Built-in Default)', ' (內置默認)')}` },
+            { id: 'agnes-1.5-flash', label: `agnes-ai / agnes-1.5-flash${t(' (内置备用)', ' (Built-in Standby)', ' (內置備用)')}` },
+            { id: 'agnes-video-v2.0', label: `agnes-ai / agnes-video-v2.0${t(' (内置视频)', ' (Built-in Video)', ' (內置視頻)')}` },
+            { id: 'agnes-image-2.1-flash', label: `agnes-ai / agnes-image-2.1-flash${t(' (内置图像)', ' (Built-in Image)', ' (內置圖像)')}` },
+            { id: 'agnes-image-2.0-flash', label: `agnes-ai / agnes-image-2.0-flash${t(' (内置图像默认)', ' (Built-in Image Default)', ' (內置圖像默認)')}` }
         ];
         builtInOpts.forEach(optData => {
             const opt = document.createElement('option');
@@ -4698,11 +4708,11 @@ async function loadChatModels() {
 
     if (!hasModels) {
         select.innerHTML = `
-            <option value="agnes-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-2.0-flash (内置默认)</option>
-            <option value="agnes-1.5-flash" data-provider="agnes-ai">agnes-ai / agnes-1.5-flash (内置备用)</option>
-            <option value="agnes-video-v2.0" data-provider="agnes-ai">agnes-ai / agnes-video-v2.0 (内置视频)</option>
-            <option value="agnes-image-2.1-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.1-flash (内置图像)</option>
-            <option value="agnes-image-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.0-flash (内置图像默认)</option>
+            <option value="agnes-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-2.0-flash${t(' (内置默认)', ' (Built-in Default)', ' (內置默認)')}</option>
+            <option value="agnes-1.5-flash" data-provider="agnes-ai">agnes-ai / agnes-1.5-flash${t(' (内置备用)', ' (Built-in Standby)', ' (內置備用)')}</option>
+            <option value="agnes-video-v2.0" data-provider="agnes-ai">agnes-ai / agnes-video-v2.0${t(' (内置视频)', ' (Built-in Video)', ' (內置視頻)')}</option>
+            <option value="agnes-image-2.1-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.1-flash${t(' (内置图像)', ' (Built-in Image)', ' (內置圖像)')}</option>
+            <option value="agnes-image-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.0-flash${t(' (内置图像默认)', ' (Built-in Image Default)', ' (內置圖像默認)')}</option>
         `;
     }
 
@@ -5732,25 +5742,25 @@ async function updateConsoleChannelStatusUI() {
         try {
             const result = await window.api.checkWeChatStatus();
             if (result.bound) {
-                setConsoleStatus('已启用', true);
+                setConsoleStatus(t('已启用', 'Enabled', '已啟用'), true);
                 const savedAtStr = result.details.savedAt ? new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false }) : '--';
                 detailsEl.innerHTML = `
-                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 微信绑定信息</div>
-                    <div><span style="color: var(--text-secondary);">账户标识: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${result.details.accountId || '--'}</span></div>
-                    <div><span style="color: var(--text-secondary);">绑定时间: </span><span style="color: var(--text-primary);">${savedAtStr}</span></div>
-                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理解绑/绑定</a></div>
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
+                    <div><span style="color: var(--text-secondary);">${t('账户标识', 'Account ID', '帳號標識')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${result.details.accountId || '--'}</span></div>
+                    <div><span style="color: var(--text-secondary);">${t('绑定时间', 'Bind Time', '綁定時間')}: </span><span style="color: var(--text-primary);">${savedAtStr}</span></div>
+                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理解绑/绑定', '⚙️ Go to Channels to bind/unbind', '⚙️ 去通訊管理解綁/綁定')}</a></div>
                 `;
             } else {
-                setConsoleStatus('未启用', false);
+                setConsoleStatus(t('未启用', 'Disabled', '未啟用'), false);
                 detailsEl.innerHTML = `
-                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 微信绑定信息</div>
-                    <div style="color: #ff5252; font-weight: bold;">当前未绑定微信</div>
-                    <div style="color: var(--text-secondary); margin-top: 4px;">扫码绑定微信后可作为助手收发微信消息。</div>
-                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理绑定</a></div>
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
+                    <div style="color: #ff5252; font-weight: bold;">${t('当前未绑定微信', 'WeChat is not bound', '當前未綁定微信')}</div>
+                    <div style="color: var(--text-secondary); margin-top: 4px;">${t('扫码绑定微信后可作为助手收发微信消息。', 'Bind WeChat to send and receive messages.', '掃碼綁定微信後可作為助手收發微信消息。')}</div>
+                    <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理绑定', '⚙️ Go to Channels to bind', '⚙️ 去通訊管理綁定')}</a></div>
                 `;
             }
         } catch(e) {
-            setConsoleStatus('获取失败', false);
+            setConsoleStatus(t('获取失败', 'Failed', '獲取失敗'), false);
         }
     } 
     else if (consoleSelectedChannel === 'feishu') {
@@ -5760,21 +5770,21 @@ async function updateConsoleChannelStatusUI() {
         const isEnabled = feishu.enabled !== false && Object.keys(accounts).length > 0;
 
         if (isEnabled) {
-            setConsoleStatus('已启用', true);
+            setConsoleStatus(t('已启用', 'Enabled', '已啟用'), true);
             const defaultAcc = accounts[defaultAccId] || {};
             detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 飞书绑定信息</div>
-                <div><span style="color: var(--text-secondary);">默认账户: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
+                <div><span style="color: var(--text-secondary);">${t('默认账户', 'Default Account', '默認帳戶')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
                 <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
-                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理管理飞书账号</a></div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理管理飞书账号', '⚙️ Go to Channels to manage Feishu', '⚙️ 去通訊管理管理飛書帳號')}</a></div>
             `;
         } else {
-            setConsoleStatus('未启用', false);
+            setConsoleStatus(t('未启用', 'Disabled', '未啟用'), false);
             detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 飞书绑定信息</div>
-                <div style="color: #ff5252; font-weight: bold;">当前未配置飞书账号</div>
-                <div style="color: var(--text-secondary); margin-top: 4px;">请前往多渠道通讯管理配置飞书 App ID 和 Secret。</div>
-                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理配置</a></div>
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
+                <div style="color: #ff5252; font-weight: bold;">${t('当前未配置飞书账号', 'Feishu account not configured', '當前未配置飛書帳號')}</div>
+                <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置飞书 App ID 和 Secret。', 'Please go to Channels to configure Feishu App ID & Secret.', '請前往多渠道通訊管理配置飛書 App ID 和 Secret。')}</div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
             `;
         }
     } 
@@ -5785,21 +5795,21 @@ async function updateConsoleChannelStatusUI() {
         const isEnabled = qqbot.enabled === true && Object.keys(accounts).length > 0;
 
         if (isEnabled) {
-            setConsoleStatus('已启用', true);
+            setConsoleStatus(t('已启用', 'Enabled', '已啟用'), true);
             const defaultAcc = accounts[defaultAccId] || {};
             detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 QQ机器人绑定</div>
-                <div><span style="color: var(--text-secondary);">默认账户: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
+                <div><span style="color: var(--text-secondary);">${t('默认账户', 'Default Account', '默認帳戶')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
                 <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
-                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理管理QQ机器人</a></div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理管理QQ机器人', '⚙️ Go to Channels to manage QQ Bot', '⚙️ 去通訊管理管理QQ機器人')}</a></div>
             `;
         } else {
-            setConsoleStatus('未启用', false);
+            setConsoleStatus(t('未启用', 'Disabled', '未啟用'), false);
             detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">👤 QQ机器人绑定</div>
-                <div style="color: #ff5252; font-weight: bold;">当前未配置QQ机器人</div>
-                <div style="color: var(--text-secondary); margin-top: 4px;">请前往多渠道通讯管理配置 QQ 机器人凭证。</div>
-                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">⚙️ 去通讯管理配置</a></div>
+                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
+                <div style="color: #ff5252; font-weight: bold;">${t('当前未配置QQ机器人', 'QQ Bot not configured', '當前未配置QQ機器人')}</div>
+                <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置 QQ 机器人凭证。', 'Please go to Channels to configure QQ Bot credentials.', '請前往多渠道通訊管理配置 QQ 機器人憑證。')}</div>
+                <div style="text-align: left; margin-top: 8px;"><a href="#" id="lnk-go-communication" style="color: var(--accent-color); text-decoration: none; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 6px; transition: all 0.2s;">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
             `;
         }
     }
@@ -6346,4 +6356,81 @@ function setupUpdateModal() {
         if (progressPercent) progressPercent.innerText = `${percent}%`;
         if (progressStatus) progressStatus.innerText = `正在下载更新包...`;
     });
+}
+
+// --- 内置终端逻辑 ---
+let builtinTerminal = null;
+let builtinTerminalFitAddon = null;
+let isTerminalInitialized = false;
+
+function initBuiltinTerminal() {
+    if (isTerminalInitialized) {
+        if (builtinTerminalFitAddon) {
+            setTimeout(() => builtinTerminalFitAddon.fit(), 100);
+        }
+        return;
+    }
+    
+    const container = document.getElementById('xterm-container');
+    if (!container || !window.Terminal) return;
+    
+    // 初始化 Terminal 实例
+    builtinTerminal = new window.Terminal({
+        cursorBlink: true,
+        theme: {
+            background: '#0c0c0c',
+            foreground: '#cccccc',
+            cursor: '#00e676',
+            selection: 'rgba(0, 230, 118, 0.3)'
+        },
+        fontFamily: 'Consolas, "Courier New", monospace',
+        fontSize: 14
+    });
+    
+    // 使用 FitAddon
+    if (window.FitAddon && window.FitAddon.FitAddon) {
+        builtinTerminalFitAddon = new window.FitAddon.FitAddon();
+        builtinTerminal.loadAddon(builtinTerminalFitAddon);
+    }
+    
+    builtinTerminal.open(container);
+    if (builtinTerminalFitAddon) {
+        builtinTerminalFitAddon.fit();
+    }
+    
+    // 监听前端输入，发送给后台
+    builtinTerminal.onData(data => {
+        window.api.writeBuiltinTerminal(data);
+    });
+    
+    // 监听窗口缩放，同步调整 pty 大小
+    window.addEventListener('resize', () => {
+        if (currentTab === 'terminal-view' && builtinTerminalFitAddon) {
+            builtinTerminalFitAddon.fit();
+            if (builtinTerminal) {
+                window.api.resizeBuiltinTerminal(builtinTerminal.cols, builtinTerminal.rows);
+            }
+        }
+    });
+    
+    // 接收后台 pty 吐出的数据
+    window.api.onBuiltinTerminalData((data) => {
+        if (builtinTerminal) {
+            builtinTerminal.write(data);
+        }
+    });
+    
+    // 请求主进程启动后端 node-pty
+    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+    window.api.startBuiltinTerminal(currentLang).then(() => {
+        // 启动后第一次手动调整尺寸以同步
+        setTimeout(() => {
+            if (builtinTerminalFitAddon) builtinTerminalFitAddon.fit();
+            if (builtinTerminal) {
+                window.api.resizeBuiltinTerminal(builtinTerminal.cols, builtinTerminal.rows);
+            }
+        }, 300);
+    });
+    
+    isTerminalInitialized = true;
 }

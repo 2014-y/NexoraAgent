@@ -42,8 +42,11 @@
     "@openclaw/voice-call": "2026.6.11",
     "@tencent-weixin/openclaw-weixin": "2.4.6",
     "jsdom": "29.1.1",
+    "node-pty": "^1.1.0",
     "open-computer-use": "0.1.54",
-    "openclaw": "2026.7.1"
+    "openclaw": "2026.7.1",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
     "electron": "^31.0.0",

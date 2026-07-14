@@ -48,5 +48,13 @@ contextBridge.exposeInMainWorld('api', {
     onMaximizedStatus: (callback) => ipcRenderer.on('window-maximized-status', (event, isMaximized) => callback(isMaximized)),
     getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-    openSandboxTerminal: () => ipcRenderer.send('open-sandbox-terminal')
+    openSandboxTerminal: () => ipcRenderer.send('open-sandbox-terminal'),
+
+    // 内置沙箱终端交互
+    startBuiltinTerminal: (lang) => ipcRenderer.invoke('builtin-terminal-start', lang),
+    resizeBuiltinTerminal: (cols, rows) => ipcRenderer.send('builtin-terminal-resize', { cols, rows }),
+    writeBuiltinTerminal: (data) => ipcRenderer.send('builtin-terminal-write', data),
+    onBuiltinTerminalData: (callback) => {
+        ipcRenderer.on('builtin-terminal-data', (event, data) => callback(data));
+    }
 });

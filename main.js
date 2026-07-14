@@ -726,6 +726,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1120,
         height: 760,
+        minWidth: 1120,
+        minHeight: 760,
         frame: false,
         resizable: true,
         maximizable: true,
@@ -1193,6 +1195,82 @@ ipcMain.on('open-sandbox-terminal', () => {
         detached: true,
         stdio: 'ignore'
     }).unref();
+});
+
+let ptyProcess = null;
+
+ipcMain.handle('builtin-terminal-start', (event, lang) => {
+    if (ptyProcess) return; // 已经存在则不重复创建
+    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const pty = require('node-pty');
+    
+    const isEn = lang === 'en-US';
+    const isTw = lang === 'zh-TW';
+    
+    const bannerTitle = isEn 
+        ? "         ClawAI Built-in Sandbox Terminal (node-pty)      " 
+        : (isTw ? "         ClawAI 內置沙箱開發終端 (node-pty)               " : "         ClawAI 内置沙箱开发终端 (node-pty)               ");
+        
+    const bannerCmds = isEn 
+        ? "  * You can execute the following commands directly here:" 
+        : (isTw ? "  * 您可以直接在此處執行以下命令：" : "  * 您可以直接在此处执行以下命令：");
+        
+    const cmdNode = isEn 
+        ? "      - node -v            (Show sandbox Node version)" 
+        : (isTw ? "      - node -v            (查看內置沙箱 Node 版本)" : "      - node -v            (查看内置沙箱 Node 版本)");
+        
+    const cmdNpm = isEn 
+        ? "      - npm -v             (Show sandbox npm version)" 
+        : (isTw ? "      - npm -v             (查看內置沙箱 npm 版本)" : "      - npm -v             (查看内置沙箱 npm 版本)");
+    
+    const initScript = [
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
+        `$env:Path = "${sandboxDir.replace(/\\/g, '\\\\')};" + $env:Path`,
+        `Clear-Host`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host "${bannerTitle}" -ForegroundColor Green`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host "${bannerCmds}" -ForegroundColor Cyan`,
+        `Write-Host "${cmdNode}" -ForegroundColor White`,
+        `Write-Host "${cmdNpm}" -ForegroundColor White`,
+        `Write-Host "==========================================================" -ForegroundColor Green`,
+        `Write-Host ""`
+    ].join('\r\n');
+    
+    const encodedCmd = Buffer.from(initScript, 'utf16le').toString('base64');
+    
+    ptyProcess = pty.spawn('powershell.exe', ['-NoExit', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCmd], {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 30,
+        cwd: __dirname,
+        env: process.env
+    });
+    
+    ptyProcess.on('data', function(data) {
+        if (mainWindow) {
+            mainWindow.webContents.send('builtin-terminal-data', data);
+        }
+    });
+    
+    ptyProcess.on('exit', () => {
+        ptyProcess = null;
+    });
+    return true;
+});
+
+ipcMain.on('builtin-terminal-write', (event, data) => {
+    if (ptyProcess) {
+        ptyProcess.write(data);
+    }
+});
+
+ipcMain.on('builtin-terminal-resize', (event, size) => {
+    if (ptyProcess && size.cols && size.rows) {
+        try {
+            ptyProcess.resize(size.cols, size.rows);
+        } catch (e) {}
+    }
 });
 
 // 配置文件的读写 IPC

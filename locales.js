@@ -13,10 +13,31 @@ window.LOCALES = {
     'nav.update': '检查更新',
     'nav.acceleration_channel': '加速通道',
     'nav.openclaw_panel': 'OpenClaw',
+    'nav.communication': '通讯管理',
+    'nav.terminal': '内置终端',
 
     // 控制台 (Console)
-    'console.title': '网关控制台',
+    'console.title': '网关信息',
     'console.desc': '实时监控本地 ClawAI 的消息处理流与日志输出',
+    
+    // 通讯管理 (Communication)
+    'comm.title': '多渠道通讯管理',
+    'comm.desc': '集中配置和管理微信、飞书、QQ 机器人等外部即时通讯渠道的接入与多账户绑定',
+    'comm.wechat.title': '微信渠道绑定管理',
+    'comm.wechat.desc': '通过扫码方式绑定个人微信号，作为智能助手的专属通道入口。',
+    'comm.wechat.bind': '🔑 扫码绑定微信',
+    'comm.wechat.bind_title': '点击手动生成登录二维码，以绑定微信',
+    'comm.feishu.title': '飞书多用户绑定管理',
+    'comm.feishu.desc': '配置和管理多个飞书机器人的接入凭证，实现多用户/多群组的飞书通道绑定。',
+    'comm.feishu.add': '➕ 添加飞书绑定账号',
+    'comm.qq.title': 'QQ机器人多用户绑定管理',
+    'comm.qq.desc': '配置和管理多个 QQ 开放平台机器人（QQ Bot）的接入凭证，实现多渠道绑定。',
+    'comm.qq.add': '➕ 添加 QQ机器人绑定账号',
+    
+    // 内置终端 (Sandbox Terminal)
+    'terminal.title': '内置沙箱终端',
+    'terminal.desc': '直接管理底层环境依赖与网关运行时的命令行沙盒环境',
+    
     'console.status.stopped': '核心进程检测完成，当前处于【已停止】闲置状态。',
     'console.status.guide': '请点击右侧“启动网关”按钮，拉起本地 AI 服务总线...',
     'console.btn.start': '启动网关',
@@ -25,6 +46,14 @@ window.LOCALES = {
     'console.mem': '运行内存占用',
     'console.uptime': '网关运行时间',
     'console.today_requests': '今日请求次数',
+    'console.btn.clear_logs': '🗑️ 清空日志',
+    'console.channel.wechat': '微信',
+    'console.channel.feishu': '飞书',
+    'console.engine.title': '引擎服务配置',
+    'console.engine.sandbox': '沙箱环境:',
+    'console.engine.db': '内置数据库:',
+    'console.engine.plugins': '载入插件:',
+    
     'console.wechat_status_title': '微信通道状态',
     'console.wechat_status.unbound': '未绑定',
     'console.wechat_status.loading': '初始化...',
@@ -37,8 +66,22 @@ window.LOCALES = {
     'console.wechat_label.protocol': '通道协议: ',
     'console.app_uptime': '应用已运行时间:',
 
+    // 专属网络加速通道
+    'settings.acc.title': '⚡ 专属网络加速通道',
+    'settings.acc.desc': '优化网关在海外模型网络下的连通性能，大幅度缩短启动插件与请求模型的握手延迟。',
+    'settings.acc.btn': '去配置',
+
     // 模型会话 (Chat Room)
     'chat.title': '模型对话',
+    'chat.label.current_model': '当前模型:',
+    'chat.help.wechat': '💬 微信掉线/连接失败',
+    'chat.help.wechat.q': '微信机器人经常掉线或无法连接怎么解决？',
+    'chat.help.crash': '⚡ 网关启动闪退排查',
+    'chat.help.crash.q': '网关启动闪退、EADDRINUSE 端口冲突该如何解决和排查？',
+    'chat.help.multikey': '🔑 配置多 Key 轮询',
+    'chat.help.multikey.q': '如何配置多个 API Key 轮询（多密钥负载均衡）？',
+    'chat.help.404': '🎨 生图/视频404解答',
+    'chat.help.404.q': '图片与视频生成接口检测时提示连接失败 (Status: 404) 怎么排查？',
     'chat.desc': '选择一个已配置的模型进行多轮对话',
     'chat.placeholder.select_model': '-- 请选择对话模型 --',
     'chat.placeholder.input_prompt': '输入消息，按下 Ctrl + Enter 发送...',
@@ -332,7 +375,7 @@ window.LOCALES = {
   
   'en-US': {
     // Navigation
-    'nav.console': 'Console',
+    'nav.console': 'Gateway Info',
     'nav.chat': 'Chat Room',
     'nav.config': 'Model Config',
     'nav.plugins': 'Plugins',
@@ -343,10 +386,31 @@ window.LOCALES = {
     'nav.update': 'Check Update',
     'nav.acceleration_channel': 'Acceleration Channel',
     'nav.openclaw_panel': 'OpenClaw',
+    'nav.communication': 'Channels',
+    'nav.terminal': 'Terminal',
 
     // Console
-    'console.title': 'Gateway Console',
+    'console.title': 'Gateway Info',
     'console.desc': 'Monitor the message processing stream and log outputs of your local ClawAI in real-time',
+    
+    // Communication
+    'comm.title': 'Multi-channel Communication',
+    'comm.desc': 'Configure and manage external instant messaging channels like WeChat, Feishu, and QQ Bots for multi-account binding',
+    'comm.wechat.title': 'WeChat Channel Binding',
+    'comm.wechat.desc': 'Scan a QR code to bind your WeChat account as a dedicated entry point for your smart assistant.',
+    'comm.wechat.bind': '🔑 Scan to Bind WeChat',
+    'comm.wechat.bind_title': 'Click to manually generate a login QR code for WeChat binding',
+    'comm.feishu.title': 'Feishu Multi-user Binding',
+    'comm.feishu.desc': 'Configure and manage access credentials for multiple Feishu bots to bind channels for different users/groups.',
+    'comm.feishu.add': '➕ Add Feishu Account',
+    'comm.qq.title': 'QQ Bot Multi-user Binding',
+    'comm.qq.desc': 'Configure and manage access credentials for multiple QQ Open Platform bots to enable multi-channel binding.',
+    'comm.qq.add': '➕ Add QQ Bot Account',
+    
+    // Sandbox Terminal
+    'terminal.title': 'Sandbox Terminal',
+    'terminal.desc': 'A command-line sandbox environment to manage underlying dependencies and gateway runtimes directly',
+    
     'console.status.stopped': 'Core process detection completed. Currently in [Stopped] idle state.',
     'console.status.guide': 'Please click "Start Gateway" on the right to launch the local AI service bus...',
     'console.btn.start': 'Start Gateway',
@@ -355,6 +419,14 @@ window.LOCALES = {
     'console.mem': 'Memory Usage',
     'console.uptime': 'Uptime',
     'console.today_requests': 'Requests Today',
+    'console.btn.clear_logs': '🗑️ Clear Logs',
+    'console.channel.wechat': 'WeChat',
+    'console.channel.feishu': 'Feishu',
+    'console.engine.title': 'Engine Config',
+    'console.engine.sandbox': 'Sandbox:',
+    'console.engine.db': 'Database:',
+    'console.engine.plugins': 'Plugins:',
+    
     'console.wechat_status_title': 'WeChat Channel Status',
     'console.wechat_status.unbound': 'Unbound',
     'console.wechat_status.loading': 'Initializing...',
@@ -367,8 +439,22 @@ window.LOCALES = {
     'console.wechat_label.protocol': 'Protocol: ',
     'console.app_uptime': 'App Running Uptime:',
 
+    // 专属网络加速通道
+    'settings.acc.title': '⚡ Exclusive Network Acceleration Channel',
+    'settings.acc.desc': 'Optimize the gateway connectivity performance under overseas model networks, significantly reducing handshake latency for starting plugins and requesting models.',
+    'settings.acc.btn': 'Configure',
+
     // Chat Room
     'chat.title': 'Model Chat',
+    'chat.label.current_model': 'Model:',
+    'chat.help.wechat': '💬 WeChat Connection Fix',
+    'chat.help.wechat.q': 'How to solve WeChat bot disconnecting or failing to connect?',
+    'chat.help.crash': '⚡ Gateway Crash Debug',
+    'chat.help.crash.q': 'How to debug gateway crash or EADDRINUSE port conflict?',
+    'chat.help.multikey': '🔑 Multi-Key Rotation',
+    'chat.help.multikey.q': 'How to configure multiple API Key rotations (load balancing)?',
+    'chat.help.404': '🎨 Image/Video 404 Fix',
+    'chat.help.404.q': 'How to fix image/video generation connection failure (Status: 404)?',
     'chat.desc': 'Select a configured model for multi-turn conversations',
     'chat.placeholder.select_model': '-- Select a Model --',
     'chat.placeholder.input_prompt': 'Type messages, press Ctrl + Enter to send...',
@@ -662,7 +748,7 @@ window.LOCALES = {
 
   'zh-TW': {
     // 導航
-    'nav.console': '控制台',
+    'nav.console': '網關信息',
     'nav.chat': '模型對話',
     'nav.config': '模型配置',
     'nav.plugins': '內置插件',
@@ -673,10 +759,31 @@ window.LOCALES = {
     'nav.update': '檢查更新',
     'nav.acceleration_channel': '加速通道',
     'nav.openclaw_panel': 'OpenClaw',
+    'nav.communication': '通訊管理',
+    'nav.terminal': '內置終端',
 
     // 控制台 (Console)
-    'console.title': '網關控制台',
-    'console.desc': '實時監控本地 ClawAI 的消息處理流與日誌輸出',
+    'console.title': '網關信息',
+    'console.desc': '實時監控本地 ClawAI 的消息处理流與日誌輸出',
+    
+    // 通訊管理 (Communication)
+    'comm.title': '多渠道通訊管理',
+    'comm.desc': '集中配置和管理微信、飛書、QQ 機器人等外部即時通訊渠道的接入與多帳戶綁定',
+    'comm.wechat.title': '微信渠道綁定管理',
+    'comm.wechat.desc': '通過掃碼方式綁定個人微訊號，作為智能助手的專屬通道入口。',
+    'comm.wechat.bind': '🔑 掃碼綁定微信',
+    'comm.wechat.bind_title': '點擊手動生成登錄二維碼，以綁定微信',
+    'comm.feishu.title': '飛書多用戶綁定管理',
+    'comm.feishu.desc': '配置和管理多個飛書機器人的接入憑證，實現多用戶/多群組的飛書通道綁定。',
+    'comm.feishu.add': '➕ 添加飛書綁定帳號',
+    'comm.qq.title': 'QQ機器人多用戶綁定管理',
+    'comm.qq.desc': '配置和管理多個 QQ 開放平台機器人（QQ Bot）的接入憑證，實現多渠道綁定。',
+    'comm.qq.add': '➕ 添加 QQ機器人綁定帳號',
+    
+    // 內置終端 (Sandbox Terminal)
+    'terminal.title': '內置沙箱終端',
+    'terminal.desc': '直接管理底層環境依賴與網關運行時的命令行沙盒環境',
+    
     'console.status.stopped': '核心進程檢測完成，當前處於【已停止】閒置狀態。',
     'console.status.guide': '請點擊右側“啟動網關”按鈕，拉起本地 AI 服務總線...',
     'console.btn.start': '啟動網關',
@@ -685,6 +792,14 @@ window.LOCALES = {
     'console.mem': '運行內存佔用',
     'console.uptime': '網關運行時間',
     'console.today_requests': '今日請求次數',
+    'console.btn.clear_logs': '🗑️ 清空日誌',
+    'console.channel.wechat': '微信',
+    'console.channel.feishu': '飛書',
+    'console.engine.title': '引擎服務配置',
+    'console.engine.sandbox': '沙箱環境:',
+    'console.engine.db': '內置數據庫:',
+    'console.engine.plugins': '載入插件:',
+    
     'console.wechat_status_title': '微信通道狀態',
     'console.wechat_status.unbound': '未綁定',
     'console.wechat_status.loading': '初始化...',
@@ -697,8 +812,22 @@ window.LOCALES = {
     'console.wechat_label.protocol': '通道協定: ',
     'console.app_uptime': '應用已運行時間:',
 
+    // 专属网络加速通道
+    'settings.acc.title': '⚡ 專屬網路加速通道',
+    'settings.acc.desc': '優化網關在海外模型網絡下的連通性能，大幅度縮短啟動插件與請求模型的握手延遲。',
+    'settings.acc.btn': '去配置',
+
     // 模型會話 (Chat Room)
     'chat.title': '模型對話',
+    'chat.label.current_model': '當前模型:',
+    'chat.help.wechat': '💬 微信掉線/連接失敗',
+    'chat.help.wechat.q': '微信機器人經常掉線或無法連接怎麼解決？',
+    'chat.help.crash': '⚡ 網關啟動閃退排查',
+    'chat.help.crash.q': '網關啟动閃退、EADDRINUSE 端口衝突該如何解決和排查？',
+    'chat.help.multikey': '🔑 配置多 Key 輪詢',
+    'chat.help.multikey.q': '如何配置多個 API Key 輪詢（多金鑰負載均衡）？',
+    'chat.help.404': '🎨 生圖/視頻404解答',
+    'chat.help.404.q': '圖片與視頻生成接口檢測時提示連接失敗 (Status: 404) 怎麼排查？',
     'chat.desc': '選擇一個已配置的模型進行多輪對話',
     'chat.placeholder.select_model': '-- 請選擇對話模型 --',
     'chat.placeholder.input_prompt': '輸入消息，按下 Ctrl + Enter 發送...',
