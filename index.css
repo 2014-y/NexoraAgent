@@ -292,34 +292,32 @@ body.maximized .app-container {
 }
 
 /* 侧边栏网关开关状态对应图标颜色 */
-.status-badge-container.stopped #gateway-mini-icon-container {
-  color: var(--accent-color);
-}
-.status-badge-container.running #gateway-mini-icon-container {
-  color: #00e676;
-}
-.status-badge-container.starting #gateway-mini-icon-container {
-  color: #ffbd2e;
-}
-
-.status-dot {
-  width: 12px;
-  height: 12px;
+/* 侧边栏网关一键启停指示灯与控制按钮容器 */
+.status-light-btn-container {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: #ff5f56;
-  box-shadow: 0 0 10px rgba(255, 95, 86, 0.5);
-  transition: background 0.3s ease, box-shadow 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 95, 86, 0.1);
+  color: #ff5f56;
+  box-shadow: 0 0 10px rgba(255, 95, 86, 0.2);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
-.status-dot.running {
-  background: #00e676;
-  box-shadow: 0 0 12px rgba(0, 230, 118, 0.8);
+.status-light-btn-container.running {
+  background: rgba(0, 230, 118, 0.15);
+  color: #00e676;
+  box-shadow: 0 0 12px rgba(0, 230, 118, 0.4);
   animation: pulse 1.8s infinite;
 }
 
-.status-dot.starting {
-  background: #ffbd2e;
-  box-shadow: 0 0 10px rgba(255, 189, 46, 0.8);
+.status-light-btn-container.starting {
+  background: rgba(255, 189, 46, 0.15);
+  color: #ffbd2e;
+  box-shadow: 0 0 10px rgba(255, 189, 46, 0.4);
 }
 
 .status-text-zone h4 {

@@ -3168,7 +3168,7 @@ function updateProgressUI(val, textLabel = '') {
     if (sidebarPercent) {
         const roundedVal = val.toFixed(0);
         if (roundedVal === '100') {
-            sidebarPercent.innerText = '正常';
+            sidebarPercent.innerText = t('正常', 'Active', '正常');
         } else {
             sidebarPercent.innerText = `${roundedVal}%`;
         }
@@ -3186,7 +3186,11 @@ function updateProgressUI(val, textLabel = '') {
     // 🌟 启动就绪成功提示弹窗
     if (gatewayStatus === 'starting' && oldProgress < 100 && val === 100) {
         setTimeout(() => {
-            alert('🎉 网关核心服务已成功启用并就绪！\n\n本地 AI 消息路由总线已在后台进入 stable 运行状态。');
+            alert(t(
+                '🎉 网关核心服务已成功启用并就绪！\n\n本地 AI 消息路由总线已在后台进入 stable 运行状态。',
+                '🎉 Gateway core service successfully started and ready!\n\nLocal AI message routing bus has entered stable running state in the background.',
+                '🎉 網關核心服務已成功啟用並就緒！\n\n本地 AI 消息路由總線已在後台進入 stable 運行狀態。'
+            ));
         }, 100);
     }
 
@@ -3253,7 +3257,7 @@ function updateGatewayStatusUI(status) {
     const chatWelcomeText = document.getElementById('gateway-connection-status-text');
 
     if (status === 'running') {
-        statusLight.className = 'status-dot running';
+        statusLight.className = 'status-light-btn-container running';
         statusLabel.innerText = t('sidebar.status.running');
         btnIconStart.style.display = 'none';
         btnIconStop.style.display = 'block';
@@ -3302,7 +3306,7 @@ function updateGatewayStatusUI(status) {
             }, 12000);
         }
     } else if (status === 'stopped') {
-        statusLight.className = 'status-dot';
+        statusLight.className = 'status-light-btn-container';
         statusLabel.innerText = t('sidebar.status.stopped');
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
@@ -3329,7 +3333,7 @@ function updateGatewayStatusUI(status) {
             progressContainer.style.display = 'none';
         }
     } else if (status === 'upgrading') {
-        statusLight.className = 'status-dot starting';
+        statusLight.className = 'status-light-btn-container starting';
         statusLabel.innerText = '沙箱升级中';
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
@@ -3349,7 +3353,7 @@ function updateGatewayStatusUI(status) {
             progressInterval = null;
         }
     } else if (status === 'starting') {
-        statusLight.className = 'status-dot starting';
+        statusLight.className = 'status-light-btn-container starting';
         statusLabel.innerText = t('sidebar.status.starting');
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';

@@ -37,27 +37,22 @@
         <div class="sidebar-top">
           <!-- 一键启停网关与状态监控 -->
           <div class="status-badge-container stopped" id="gateway-toggle-btn" style="user-select: none;">
-            <div class="status-dot" id="status-light"></div>
+            <div class="status-light-btn-container" id="status-light">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-start">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+              </svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-stop" style="display: none;">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+              </svg>
+            </div>
             <div class="status-text-zone">
               <h4 id="btn-label-text" data-i18n="console.btn.start" style="margin: 0; font-size: 13px; font-weight: 600;">启动网关</h4>
               <p id="status-label" style="margin: 2px 0 0 0; font-size: 11px; color: var(--text-secondary);" data-i18n="sidebar.status.stopped">已停止</p>
             </div>
-            <!-- 右侧控制与状态组合区 -->
-            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-              <!-- 启动中百分比 -->
-              <div class="status-percentage" id="sidebar-status-percentage" style="display: none; font-size: 11px; font-weight: bold; color: var(--accent-color);">0%</div>
-              <!-- 迷你控制图标 -->
-              <div style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--accent-color);" id="gateway-mini-icon-container">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-start">
-                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
-                  <line x1="12" y1="2" x2="12" y2="12"></line>
-                </svg>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="btn-icon-stop" style="display: none;">
-                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
-                  <line x1="12" y1="2" x2="12" y2="12"></line>
-                </svg>
-              </div>
-            </div>
+            <!-- 右侧仅保留百分比进度（仅在启动中显示） -->
+            <div class="status-percentage" id="sidebar-status-percentage" style="margin-left: auto; display: none; font-size: 11px; font-weight: bold; color: var(--accent-color);">0%</div>
           </div>
           
           <!-- Tab 导航 -->
