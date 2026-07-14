@@ -1520,6 +1520,18 @@ async function init() {
 function setupIpcListeners() {
     // 实时日志接收处理函数
     const handleReceivedLog = (text) => {
+        // 解析 http server listening 中的运行插件数量，动态更新右侧侧边栏统计
+        if (text && text.includes('http server listening')) {
+            const match = text.match(/http server listening\s*\((\d+)\s*plugins/i);
+            if (match) {
+                const count = match[1];
+                const rightPluginsCountEl = document.getElementById('right-plugins-count');
+                if (rightPluginsCountEl) {
+                    rightPluginsCountEl.innerText = `${count} 个`;
+                }
+            }
+        }
+
         // 将所有原生日志（无视过滤规则）无条件完整地投递进系统的“系统日志”专用面板展示
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
@@ -1789,8 +1801,9 @@ function setupIpcListeners() {
     if (window.api.onChannelLoginFailed) {
         window.api.onChannelLoginFailed((status) => {
             const ch = (status && (status.channel || status.pluginId)) || '';
-            // 微信已有专用失败事件，避免双 Toast
+            // 微信、飞书已有专用失败事件（onWeChatLoginFailed / onFeishuLoginFailed），跳过避免双 Toast
             if (ch === 'wechat' || ch === 'openclaw-weixin') return;
+            if (ch === 'feishu' || ch === 'lark') return;
             const label = labelForBindChannel(ch);
             failCommBinding(`${label}绑定失败：` + ((status && status.error) || '未知错误'));
         });
@@ -1799,6 +1812,7 @@ function setupIpcListeners() {
         window.api.onChannelLoginSuccess((status) => {
             const ch = (status && (status.channel || status.pluginId)) || '';
             if (ch === 'wechat' || ch === 'openclaw-weixin') return; // 由 onWeChatLoginSuccess 处理
+            if (ch === 'feishu' || ch === 'lark') return; // 由 onFeishuLoginSuccess 处理
             if (typeof showToast === 'function') {
                 showToast(`✅ ${labelForBindChannel(ch)}绑定成功`);
             }
@@ -1982,6 +1996,9 @@ async function loadAndRenderConfig() {
 
     // 渲染 QQ 机器人绑定账号列表
     renderQqbotAccounts();
+
+    // 更新右侧载入插件数
+    updateRightPluginsCountUI();
 }
 
 // 🌐 配置文件 JSON 右侧实时预览更新函数
@@ -3202,6 +3219,17 @@ if (topSaveBtn) {
     topSaveBtn.addEventListener('click', handleSaveConfigAction);
 }
 
+// 动态更新右侧侧边栏“载入插件”统计数量
+function updateRightPluginsCountUI() {
+    const rightPluginsCountEl = document.getElementById('right-plugins-count');
+    if (!rightPluginsCountEl) return;
+    if (configData && configData.plugins && Array.isArray(configData.plugins.allow)) {
+        rightPluginsCountEl.innerText = `${configData.plugins.allow.length} 个`;
+    } else {
+        rightPluginsCountEl.innerText = '0 个';
+    }
+}
+
 // 渲染插件卡片网格
 async function renderPluginsGrid() {
     const grid = document.getElementById('cfg-plugins-grid');
@@ -3211,6 +3239,9 @@ async function renderPluginsGrid() {
     if (!configData.plugins) configData.plugins = {};
     if (!configData.plugins.entries) configData.plugins.entries = {};
     if (!Array.isArray(configData.plugins.allow)) configData.plugins.allow = [];
+
+    // 同步刷新右侧载入插件数显示
+    updateRightPluginsCountUI();
 
     const entries = configData.plugins.entries;
 
@@ -4705,30 +4736,7 @@ function finishGuide() {
 // 12. 运行初始化
 window.addEventListener('DOMContentLoaded', init);
 
-// 13. 微信解绑与切换
-const originalUnbindBtn = document.getElementById('wechat-unbind-btn');
-if (originalUnbindBtn) {
-    originalUnbindBtn.addEventListener('click', async () => {
-        const confirmClear = confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的ClawAI，并在下次启动ClawAI时重新生成二维码供您扫码登录！');
-        if (!confirmClear) return;
-
-        try {
-            const result = await window.api.clearWeChatSession();
-            if (result.success) {
-                alert('微信解绑成功！微信登录缓存已彻底清除。');
-                updateWeChatStatusUI();
-                if (gatewayStatus === 'running') {
-                    gatewayStatus = 'stopped';
-                    updateGatewayStatusUI('stopped');
-                }
-            } else {
-                alert('解绑失败：' + result.error);
-            }
-        } catch (err) {
-            alert('解绑操作异常：' + err.message);
-        }
-    });
-}
+// 13. 微信解绑已由动态委托处理（wechat-accounts-container → wechat-unbind-btn-dynamic），此处不再需要静态绑定
 
 // 14. 内置插件异步操作闭环（通讯扫码 / 插件页 / 以后任意内置扫码插件共用）
 // 保证：全局遮罩、可取消、唤醒超时、扫码超时、成功/失败都能解除，绝不无限卡死。
@@ -6284,7 +6292,7 @@ function initConsoleClock() {
 }
 
 // 🔄 检测微信会话绑定状态并动态更新控制台 UI
-let consoleSelectedChannel = 'wechat';
+let consoleSelectedChannel = 'qqbot';
 
 function setConsoleStatus(text, isGreen) {
     const statusEl = document.getElementById('stat-channel-status');

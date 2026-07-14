@@ -32,7 +32,12 @@ function detectRestrictedDesktop(env = process.env) {
     const sessionName = String(env.SESSIONNAME || '');
     if (/^rdp-/i.test(sessionName) || /rdp/i.test(sessionName)) hints.push('rdp-session');
     if (env.CLIENTNAME) hints.push('thin-client');
-    if (isTempLikePath(env.TEMP) || isTempLikePath(env.TMP)) hints.push('session-temp');
+    // session-temp：仅当 TEMP 含会话编号后缀（\Temp\1、\Temp\2）时才计入。
+    // 标准 Windows TEMP（%USERPROFILE%\AppData\Local\Temp）几乎所有电脑都有，
+    // 不应触发 restricted，否则会导致 HOME 被错误重定向到 AppData\Local\ClawAI，
+    // 进而引发 token 不同步、EPERM、渠道插件全不加载等连锁故障。
+    const tempVal = String(env.TEMP || env.TMP || '').toLowerCase().replace(/\//g, '\\');
+    if (/\\temp\\\d+(\\|$)/.test(tempVal)) hints.push('session-temp');
 
     const user = String(env.USERNAME || env.USER || '').toLowerCase();
     // 无影/云电脑常见默认用户名 + 会话特征

@@ -807,52 +807,11 @@ function ensureOfficialExternalNpmPluginSeeded(params) {
         srcVersion = JSON.parse(fs.readFileSync(path.join(bundledSrc, 'package.json'), 'utf8')).version || '';
     } catch (e) {}
 
-    const projectDir = path.join(
-        CONFIG_DIR,
-        'npm',
-        'projects',
-        encodeOpenClawNpmProjectDirName(packageName)
-    );
-    const installPath = path.join(projectDir, 'node_modules', ...packageName.split('/'));
-    const destPkgPath = path.join(installPath, 'package.json');
+    // 不再拷贝到 ~/.openclaw/npm/projects/ 导致丢失 hoisted node_modules
+    // 而是直接使用自带的绝对路径，并在 openclaw.json 中使用绝对路径的 installs
+    const installPath = bundledSrc;
 
-    let needCopy = !fs.existsSync(destPkgPath);
-    if (!needCopy && srcVersion) {
-        try {
-            const destVersion = JSON.parse(fs.readFileSync(destPkgPath, 'utf8')).version || '';
-            if (destVersion && destVersion !== srcVersion) needCopy = true;
-        } catch (e) {
-            needCopy = true;
-        }
-    }
-
-    if (needCopy) {
-        fs.mkdirSync(path.dirname(installPath), { recursive: true });
-        fs.cpSync(bundledSrc, installPath, { recursive: true, force: true });
-        console.log(`[PluginSeed] Official npm seed: ${pluginId} → ${installPath}`);
-    }
-
-    // 目标安装目录再修一遍（含历史坏副本）
-    try { repairOpenClawPluginPackageEntry(installPath); } catch (e) {}
-
-    // 项目级 package.json，供 OpenClaw buildRecoveredManagedNpmInstallRecords 扫描
-    const projectPkgPath = path.join(projectDir, 'package.json');
-    const depSpec = srcVersion || '2026.7.1';
-    let projectPkg = { private: true, dependencies: {} };
-    try {
-        if (fs.existsSync(projectPkgPath)) {
-            projectPkg = JSON.parse(fs.readFileSync(projectPkgPath, 'utf8')) || projectPkg;
-        }
-    } catch (e) {}
-    if (!projectPkg.dependencies) projectPkg.dependencies = {};
-    if (projectPkg.dependencies[packageName] !== depSpec) {
-        projectPkg.private = true;
-        projectPkg.dependencies[packageName] = depSpec;
-        fs.mkdirSync(projectDir, { recursive: true });
-        fs.writeFileSync(projectPkgPath, JSON.stringify(projectPkg, null, 2) + '\n', 'utf8');
-    }
-
-    return { seeded: true, installPath, version: srcVersion || depSpec };
+    return { seeded: true, installPath, version: srcVersion || '2026.7.1' };
 }
 
 // 飞书渠道配置自愈与规范化：返回是否发生了变更。
@@ -1742,6 +1701,9 @@ async function startGatewayProcess() {
             // 部署内置自定义插件到用户状态目录, 确保打包后在别人电脑上插件也能被 openclaw 发现并加载
             seedBundledPlugins();
 
+            // 确保在网关启动前，openclaw.json 已经初始化了必需的插件 allow 列表
+            ensureOpenClawConfigInitialized();
+
             // 每次启动 Gateway 前强制同步渠道插件信任记录（load.paths + plugins.installs），
             // 避免仅打开状态页不读配置时仍卡在「* Install Weixin plugin?」
             try {
@@ -2006,8 +1968,8 @@ ipcMain.on('builtin-terminal-resize', (event, size) => {
     }
 });
 
-// 配置文件的读写 IPC
-ipcMain.handle('config-read', async () => {
+// 提取的配置初始化逻辑：确保在 Gateway 启动前就把默认插件（如 health-check 等）写入 allow 列表
+function ensureOpenClawConfigInitialized() {
     try {
         if (!fs.existsSync(CONFIG_PATH)) {
             // 从模板初始化
@@ -2016,11 +1978,11 @@ ipcMain.handle('config-read', async () => {
                 if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
                 fs.copyFileSync(examplePath, CONFIG_PATH);
             } else {
-                return null;
+                return;
             }
         }
         let content = fs.readFileSync(CONFIG_PATH, 'utf8');
-        content = content.replace(/^\uFEFF/, '');
+        content = content.replace(/^﻿/, '');
         const config = JSON.parse(content);
         // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
         let needsSave = false;
@@ -2049,7 +2011,6 @@ ipcMain.handle('config-read', async () => {
         if (!config.plugins.allow) { config.plugins.allow = []; needsSave = true; }
 
         // 默认启用全部内置自定义插件 (含别人电脑首次安装 / 升级迁移)
-        // 用独立戳文件保证每个版本只强制开启一次, 之后用户在 UI 里关闭会被尊重
         let appVersion = '0.0.0';
         try { appVersion = app.getVersion(); } catch (e) {}
         const stampPath = path.join(CONFIG_DIR, '.claw-bundled-enable-stamp');
@@ -2171,7 +2132,7 @@ ipcMain.handle('config-read', async () => {
         const originalPaths = config.plugins.load.paths || [];
         const filteredPaths = originalPaths.filter(p => {
             if (typeof p !== 'string') return false;
-            // 无影/换机：别人的 Users\xxx 路径一律丢掉
+            // 无影/换机：别人的 Users\xxx 路径一律丢弃
             if (isForeignUserPath(p) || pathLooksLikeOfficialOpenClawChannel(p)) {
                 needsSave = true;
                 return false;
@@ -2236,7 +2197,7 @@ ipcMain.handle('config-read', async () => {
             }
         }
 
-        // 官方渠道：离线种进本机 npm/projects（纠正无影上残留的本机 Yuan 路径）
+        // 官方渠道：直接使用打包目录，不再拷贝到 ~/.openclaw/npm/projects/ 导致丢失 hoisted node_modules
         for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
             const packageName = entry.packageName
                 || (entry.id === 'openclaw-weixin' ? '@tencent-weixin/openclaw-weixin' : null);
@@ -2306,7 +2267,25 @@ ipcMain.handle('config-read', async () => {
         if (needsSave) {
             try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8'); } catch(e) {}
         }
+        
+        // Return initialized config for callers if needed
         return config;
+    } catch (e) {
+        console.error('[PluginSeed] ensureOpenClawConfigInitialized failed:', e);
+        return null;
+    }
+}
+
+// 配置文件的读写 IPC
+ipcMain.handle('config-read', async () => {
+    try {
+        const config = ensureOpenClawConfigInitialized();
+        if (config) return config;
+        
+        if (!fs.existsSync(CONFIG_PATH)) return null;
+        let content = fs.readFileSync(CONFIG_PATH, 'utf8');
+        content = content.replace(/^\uFEFF/, '');
+        return JSON.parse(content);
     } catch (e) {
         console.error('Failed to read config:', e);
         return null;
