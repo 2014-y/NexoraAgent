@@ -107,6 +107,9 @@
       "auto-summary": {
         "enabled": true
       },
+      "long-term-memory": {
+        "enabled": true
+      },
       "dual-model-trainer": {
         "enabled": true,
         "config": {

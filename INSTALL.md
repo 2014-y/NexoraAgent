@@ -50,7 +50,8 @@ npm install -g open-computer-use@0.1.54
 ### 第四步：安装 Ollama（可选，用于本地模型）
 
 1. 下载: https://ollama.com/download/windows
-2. 安装后运行: `ollama pull gemma4:latest`
+2. 安装后按需拉取你要用的本地模型，例如: `ollama pull <你的模型名>`
+   然后在 ClawAI「模型配置」中添加该模型并填写到老师/学生字段
 
 ### 第五步：配置 API Key
 

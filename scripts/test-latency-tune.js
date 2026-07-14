@@ -28,7 +28,7 @@ const slow = {
         baseUrl: 'http://localhost:11434/v1',
         models: [
           {
-            id: 'jarvis-learned',
+            id: 'local-test',
             contextWindow: 4718592,
             maxTokens: 4096
           }

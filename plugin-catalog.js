@@ -8,6 +8,19 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
+/**
+ * 长期记忆真实插件栈（OpenClaw 加载的是这些 ID，不是 UI 伞形卡）。
+ * UI 用 `long-term-memory` 统一开关这三者，开箱强制开启以保证人人可用。
+ */
+const LONG_TERM_MEMORY_STACK = [
+  'auto-summary',
+  'memory-rotate',
+  'compaction-memory-guard'
+];
+
+/** UI 伞形卡 ID（仅用于 ClawAI 插件菜单，不写入 OpenClaw plugins.allow） */
+const LONG_TERM_MEMORY_UI_ID = 'long-term-memory';
+
 /** A：零配置（随 OpenClaw 或我们 seed） */
 const ZERO_CONFIG_PLUGINS = [
   'dual-model-trainer',
@@ -17,11 +30,21 @@ const ZERO_CONFIG_PLUGINS = [
   'bonjour',
   'llm-task',
   'auto-summary',
+  'memory-rotate',
+  'compaction-memory-guard',
   'openclaw-weixin'
 ];
 
 /** 新机首次 stamp：推荐默认开启 */
-const ZERO_CONFIG_DEFAULT_ON = ['dual-model-trainer', 'duckduckgo', 'auto-summary', 'openclaw-weixin'];
+const ZERO_CONFIG_DEFAULT_ON = [
+  'dual-model-trainer',
+  'duckduckgo',
+  'auto-summary',
+  'memory-rotate',
+  'compaction-memory-guard',
+  'openclaw-weixin',
+  LONG_TERM_MEMORY_UI_ID
+];
 
 /** B：需外部平台凭证 / 渠道配置 */
 const CREDENTIAL_PLUGINS = ['slack', 'matrix', 'telegram', 'whatsapp', 'voice-call', 'qqbot'];
@@ -33,12 +56,12 @@ const LOCAL_SOFTWARE_PLUGINS = ['auto-start-codex'];
 const UI_PLUGIN_IDS = [
   'dual-model-trainer',
   'openclaw-weixin',
+  LONG_TERM_MEMORY_UI_ID,
   'qqbot',
   'voice-call',
   'telegram',
   'slack',
   'whatsapp',
-  'auto-summary',
   'matrix',
   'duckduckgo',
   'webhooks',
@@ -51,6 +74,7 @@ const PLUGIN_TIER = {};
 for (const id of ZERO_CONFIG_PLUGINS) PLUGIN_TIER[id] = 'zero';
 for (const id of CREDENTIAL_PLUGINS) PLUGIN_TIER[id] = 'credentials';
 for (const id of LOCAL_SOFTWARE_PLUGINS) PLUGIN_TIER[id] = 'software';
+PLUGIN_TIER[LONG_TERM_MEMORY_UI_ID] = 'zero';
 
 function ensureAllow(config, id) {
   if (!config.plugins) config.plugins = {};
@@ -81,6 +105,57 @@ function ensureEntry(config, id, enabled) {
  * @param {object} config
  * @param {{ forceDefaultOn?: boolean }} opts  forceDefaultOn=true 表示版本 stamp 首次
  */
+function ensureLongTermMemoryStack(config) {
+  if (!config || typeof config !== 'object') return { changed: false, changes: [] };
+  const changes = [];
+  for (const id of LONG_TERM_MEMORY_STACK) {
+    if (ensureEntry(config, id, true)) changes.push(`${id}: entry created`);
+    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
+      config.plugins.entries[id].enabled = true;
+      changes.push(`${id}: enabled -> true (long-term-memory oobe)`);
+    }
+    if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
+  }
+  // UI 伞形状态（仅 ClawAI 使用，OpenClaw 忽略未知条目也无害，但不进 allow）
+  if (!config.plugins) config.plugins = {};
+  if (!config.plugins.entries) config.plugins.entries = {};
+  if (!config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {
+    config.plugins.entries[LONG_TERM_MEMORY_UI_ID] = { enabled: true };
+    changes.push('long-term-memory: ui entry created');
+  } else if (config.plugins.entries[LONG_TERM_MEMORY_UI_ID].enabled !== true) {
+    config.plugins.entries[LONG_TERM_MEMORY_UI_ID].enabled = true;
+    changes.push('long-term-memory: ui enabled -> true');
+  }
+  if (Array.isArray(config.plugins.allow)) {
+    const before = config.plugins.allow.length;
+    config.plugins.allow = config.plugins.allow.filter((x) => x !== LONG_TERM_MEMORY_UI_ID);
+    if (config.plugins.allow.length !== before) changes.push('long-term-memory: stripped from allow (ui-only)');
+  }
+  return { changed: changes.length > 0, changes };
+}
+
+function isLongTermMemoryEnabled(config) {
+  const entries = (config && config.plugins && config.plugins.entries) || {};
+  return LONG_TERM_MEMORY_STACK.every((id) => entries[id] && entries[id].enabled === true);
+}
+
+function setLongTermMemoryEnabled(config, enabled) {
+  if (!config.plugins) config.plugins = {};
+  if (!config.plugins.entries) config.plugins.entries = {};
+  if (!Array.isArray(config.plugins.allow)) config.plugins.allow = [];
+  const on = Boolean(enabled);
+  for (const id of LONG_TERM_MEMORY_STACK) {
+    if (!config.plugins.entries[id]) config.plugins.entries[id] = {};
+    config.plugins.entries[id].enabled = on;
+    if (on) ensureAllow(config, id);
+  }
+  config.plugins.entries[LONG_TERM_MEMORY_UI_ID] = { enabled: on };
+  if (Array.isArray(config.plugins.allow)) {
+    config.plugins.allow = config.plugins.allow.filter((x) => x !== LONG_TERM_MEMORY_UI_ID);
+  }
+  return { ok: true };
+}
+
 function ensureUiPluginCatalog(config, opts = {}) {
   if (!config || typeof config !== 'object') return { changed: false, changes: [] };
   const changes = [];
@@ -134,7 +209,11 @@ function ensureUiPluginCatalog(config, opts = {}) {
   }
   if (ensureAllow(config, 'feishu')) changes.push('feishu: +allow');
 
-  // llm-task 作为摘要能力补充始终允许（即使 UI 主卡是 auto-summary）
+  // 长期记忆开箱：强制启用真实插件栈 + UI 伞形卡
+  const ltm = ensureLongTermMemoryStack(config);
+  if (ltm.changed) changes.push(...ltm.changes);
+
+  // llm-task 作为摘要能力补充始终允许（即使 UI 主卡是 long-term-memory）
   if (ensureAllow(config, 'llm-task')) changes.push('llm-task: +allow');
 
   // Codex 是 hook，不是 plugins.entries 必需，但允许记录
@@ -171,7 +250,7 @@ function pluginLooksPresent(pluginId, opts = {}) {
   const appRoot = opts.appRoot || '';
   const stateDir = opts.stateDir || '';
 
-  // 自研 seed
+  // 自研 seed（随应用 plugins/ 复制到 ~/.openclaw/extensions）
   if (stateDir) {
     const local = path.join(stateDir, 'extensions', pluginId);
     if (fs.existsSync(path.join(local, 'index.js')) || fs.existsSync(path.join(local, 'openclaw.plugin.json'))) {
@@ -187,24 +266,46 @@ function pluginLooksPresent(pluginId, opts = {}) {
     }
   }
 
-  // 检查直接安装在 node_modules 中的独立包（如 @openclaw/qqbot, @openclaw/feishu, @openclaw/voice-call 等）
+  // 随安装包交付的 npm 插件（必须存在于应用 node_modules，不能只看用户缓存）
   if (appRoot) {
-    const names = [pluginId, `@openclaw/${pluginId.replace('openclaw-', '')}`];
+    const scoped = {
+      'openclaw-weixin': ['@tencent-weixin/openclaw-weixin'],
+      qqbot: ['@openclaw/qqbot'],
+      feishu: ['@openclaw/feishu'],
+      'voice-call': ['@openclaw/voice-call'],
+      slack: ['@openclaw/slack'],
+      whatsapp: ['@openclaw/whatsapp'],
+      matrix: ['@openclaw/matrix'],
+      telegram: ['@openclaw/telegram']
+    };
+    const names = [
+      pluginId,
+      `@openclaw/${pluginId.replace(/^openclaw-/, '')}`,
+      ...(scoped[pluginId] || [])
+    ];
     for (const name of names) {
       const p = path.join(appRoot, 'node_modules', name);
       if (fs.existsSync(p)) {
         return { present: true, source: 'node_modules' };
       }
+      // scoped 包在 node_modules/@scope/name
+      if (name.startsWith('@')) {
+        const parts = name.split('/');
+        const scopedPath = path.join(appRoot, 'node_modules', parts[0], parts[1]);
+        if (fs.existsSync(scopedPath)) {
+          return { present: true, source: 'node_modules' };
+        }
+      }
     }
   }
 
-  // OpenClaw 内置 / 已安装
+  // OpenClaw 核心发行包内置 extensions（telegram / duckduckgo / webhooks 等）
   for (const root of listOpenClawExtensionDirs(appRoot)) {
     const d = path.join(root, pluginId);
     if (fs.existsSync(d)) return { present: true, source: 'openclaw' };
   }
 
-  // npm 项目缓存（别人旧机可能有）
+  // 用户本机历史 npm 缓存：仅作 soft 提示，不能当作“已随安装包内置”
   const home = process.env.USERPROFILE || process.env.HOME || '';
   if (home) {
     const npmProjects = path.join(home, '.openclaw', 'npm', 'projects');
@@ -212,15 +313,15 @@ function pluginLooksPresent(pluginId, opts = {}) {
       if (fs.existsSync(npmProjects)) {
         for (const name of fs.readdirSync(npmProjects)) {
           if (String(name).includes(pluginId)) {
-            return { present: true, source: 'npm-cache' };
+            return { present: true, source: 'npm-cache', soft: true };
           }
         }
       }
     } catch (e) {}
   }
 
-  // 这些 id 多数版本打进 gateway 核心插件表，即使找不到目录也视为「可能可用」
-  const coreish = new Set(['bonjour', 'webhooks', 'workboard', 'llm-task', 'slack', 'matrix', 'duckduckgo']);
+  // 仅真正打进 openclaw dist 的核心扩展可假定可用
+  const coreish = new Set(['bonjour', 'webhooks', 'workboard', 'llm-task', 'duckduckgo', 'telegram']);
   if (coreish.has(pluginId)) {
     return { present: true, source: 'core-assumed', soft: true };
   }
@@ -393,14 +494,15 @@ function probePlugin(pluginId, opts = {}) {
     }
     if (!presence.present) {
       // 核心渠道插件多数随 gateway 分发
-      const softChannels = new Set(['telegram', 'whatsapp', 'voice-call', 'slack', 'matrix', 'qqbot']);
+      // 只有真正打进 openclaw dist 的可 soft 假定；npm 外挂必须随包存在
+      const softChannels = new Set(['telegram']);
       if (softChannels.has(pluginId)) {
         base.available = true;
         base.soft = true;
         if (!base.hint) base.hint = '随网关渠道插件分发';
       } else {
         base.badge = 'missing-runtime';
-        base.hint = (base.hint ? base.hint + '；' : '') + '运行时未发现插件包，首次开启可能需联网安装';
+        base.hint = (base.hint ? base.hint + '；' : '') + '运行时未发现插件包，请使用完整安装包（已内置渠道插件，无需再联网下载）';
       }
     }
     return base;
@@ -411,6 +513,22 @@ function probePlugin(pluginId, opts = {}) {
     base.badge = 'ready';
     base.hint = '微信渠道（建议保持开启）';
     base.available = true;
+    return base;
+  }
+
+  if (pluginId === LONG_TERM_MEMORY_UI_ID) {
+    // 伞形卡：只要三者中至少一个包在就认为可用；栈启用状态在主进程强制对齐
+    let presentCount = 0;
+    for (const id of LONG_TERM_MEMORY_STACK) {
+      if (pluginLooksPresent(id, opts).present) presentCount += 1;
+    }
+    base.available = true; // 随应用内置 seed，开箱视为可用
+    base.badge = 'ready';
+    base.hint = presentCount >= LONG_TERM_MEMORY_STACK.length
+      ? 'plugin.long-term-memory.hint.ready'
+      : 'plugin.long-term-memory.hint.seeding';
+    base.hintKey = base.hint;
+    base.stack = LONG_TERM_MEMORY_STACK.slice();
     return base;
   }
 
@@ -493,7 +611,12 @@ module.exports = {
   LOCAL_SOFTWARE_PLUGINS,
   UI_PLUGIN_IDS,
   PLUGIN_TIER,
+  LONG_TERM_MEMORY_STACK,
+  LONG_TERM_MEMORY_UI_ID,
   ensureUiPluginCatalog,
+  ensureLongTermMemoryStack,
+  isLongTermMemoryEnabled,
+  setLongTermMemoryEnabled,
   ensureAllow,
   probePlugin,
   probeAllUiPlugins,

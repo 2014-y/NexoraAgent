@@ -14,10 +14,13 @@ const {
 const { ensureLatencySafeConfig } = require('./latency-tune');
 const {
     ensureUiPluginCatalog,
+    ensureLongTermMemoryStack,
     ensureAllow,
     probeAllUiPlugins,
     probePlugin,
-    applyPluginCredentials
+    applyPluginCredentials,
+    LONG_TERM_MEMORY_UI_ID,
+    LONG_TERM_MEMORY_STACK
 } = require('./plugin-catalog');
 process.on('uncaughtException', (err) => {
     try {
@@ -453,6 +456,25 @@ const BUNDLED_CUSTOM_PLUGINS = [
     'remote-policy'
 ];
 
+// 随安装包一起交付的 npm 渠道插件（写进 plugins.load.paths，别人电脑无需再 npm install）
+const BUNDLED_NPM_CHANNEL_PLUGINS = [
+    { id: 'openclaw-weixin', candidates: [path.join('node_modules', '@tencent-weixin', 'openclaw-weixin')] },
+    { id: 'qqbot', candidates: [path.join('node_modules', '@openclaw', 'qqbot')] },
+    { id: 'feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
+    { id: 'voice-call', candidates: [path.join('node_modules', '@openclaw', 'voice-call')] },
+    { id: 'slack', candidates: [path.join('node_modules', '@openclaw', 'slack')] },
+    { id: 'whatsapp', candidates: [path.join('node_modules', '@openclaw', 'whatsapp')] },
+    { id: 'matrix', candidates: [path.join('node_modules', '@openclaw', 'matrix')] }
+];
+
+function resolveBundledNpmPluginPath(entry) {
+    for (const rel of entry.candidates || []) {
+        const abs = path.isAbsolute(rel) ? rel : path.join(__dirname, rel);
+        if (fs.existsSync(abs)) return abs;
+    }
+    return null;
+}
+
 // 飞书渠道配置自愈与规范化：返回是否发生了变更。
 function sanitizeFeishuConfig(config) {
     if (!config || !config.channels || !config.channels.feishu) return false;
@@ -663,6 +685,47 @@ function copyPluginDir(srcDir, destDir, pluginId, appVersion) {
     ensurePluginManifestJson(destDir, pluginId);
 }
 
+const DEFAULT_MEMORY_MD_TEMPLATE = `# MEMORY.md
+
+## 核心身份
+- （在此填写助手人设 / 名字）
+
+## 用户偏好
+- 称呼用户为：（待补充）
+- 时区：GMT+8
+
+## 工具使用规范
+- （常用工具与注意事项）
+
+## 重要约定
+- 本文件是长期记忆；对话压缩后仍会优先读取这里的信息。
+- 由 ClawAI「长期记忆」插件栈自动维护（摘要 / 旋转归档 / 压缩护栏）。
+`;
+
+function seedDefaultMemoryFile(memFile) {
+    try {
+        const dir = path.dirname(memFile);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        if (!fs.existsSync(memFile)) {
+            fs.writeFileSync(memFile, DEFAULT_MEMORY_MD_TEMPLATE, 'utf8');
+            console.log('[PluginSeed] Seeded default MEMORY.md');
+            return true;
+        }
+        // 空文件也补齐模板，避免“有文件但无内容”导致看起来长期记忆无效
+        try {
+            const cur = fs.readFileSync(memFile, 'utf8').replace(/^\uFEFF/, '').trim();
+            if (!cur) {
+                fs.writeFileSync(memFile, DEFAULT_MEMORY_MD_TEMPLATE, 'utf8');
+                console.log('[PluginSeed] Replaced empty MEMORY.md with template');
+                return true;
+            }
+        } catch (e) {}
+    } catch (e) {
+        console.warn('[PluginSeed] seedDefaultMemoryFile failed:', e.message);
+    }
+    return false;
+}
+
 function seedBundledPlugins() {
     try {
         const destRoot = path.join(CONFIG_DIR, 'extensions');
@@ -670,7 +733,7 @@ function seedBundledPlugins() {
         try {
             fs.mkdirSync(path.join(CONFIG_DIR, 'workspace', 'memory'), { recursive: true });
             const memFile = path.join(CONFIG_DIR, 'workspace', 'MEMORY.md');
-            if (!fs.existsSync(memFile)) fs.writeFileSync(memFile, '', 'utf8');
+            seedDefaultMemoryFile(memFile);
         } catch (e) {}
 
         let appVersion = '0.0.0';
@@ -1422,6 +1485,8 @@ ipcMain.handle('config-read', async () => {
         } catch (e) {}
         
         Object.keys(config.plugins.entries).forEach(pluginName => {
+            // UI 伞形卡不能进 OpenClaw allow 列表
+            if (pluginName === LONG_TERM_MEMORY_UI_ID) return;
             if (config.plugins.entries[pluginName].enabled === true) {
                 if (!config.plugins.allow.includes(pluginName)) {
                     config.plugins.allow.push(pluginName);
@@ -1429,6 +1494,16 @@ ipcMain.handle('config-read', async () => {
                 }
             }
         });
+
+        // 长期记忆开箱强保：即使用户旧配置关掉过，也强制写回真实插件栈
+        try {
+            const ltm = ensureLongTermMemoryStack(config);
+            if (ltm.changed) {
+                needsSave = true;
+                console.log('[LongTermMemory] Ensured:', ltm.changes.join(' | '));
+            }
+            seedDefaultMemoryFile(path.join(CONFIG_DIR, 'workspace', 'MEMORY.md'));
+        } catch (e) {}
 
         // 把已部署到 ~/.openclaw/extensions 的自定义插件也加入 allow (仅启用态的 entries)
         // 同时把该目录注入 load.paths, 双保险确保 openclaw 能发现
@@ -1460,12 +1535,26 @@ ipcMain.handle('config-read', async () => {
             }
             return true;
         });
-        
-        if (fs.existsSync(weixinPluginPath)) {
-            const resolvedPath = path.resolve(weixinPluginPath);
+
+        // 把随包 npm 渠道插件（微信 / QQ / 飞书 / Slack / WhatsApp / Matrix / 语音）注入 load.paths，
+        // 保证别人电脑开箱即用，不依赖 openclaw plugins install / 联网下载。
+        for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
+            const abs = resolveBundledNpmPluginPath(entry);
+            if (!abs) {
+                console.warn(`[PluginSeed] Bundled npm plugin missing: ${entry.id}`);
+                continue;
+            }
+            const resolvedPath = path.resolve(abs);
             const hasPath = filteredPaths.some(p => typeof p === 'string' && path.resolve(p) === resolvedPath);
-            if (!hasPath) {
-                filteredPaths.push(weixinPluginPath);
+            if (!hasPath) filteredPaths.push(abs);
+            // 确保配置里有 entry + allow（凭证类不强行写 enabled，尊重现有；缺省创建 enabled）
+            if (!config.plugins.entries[entry.id]) {
+                config.plugins.entries[entry.id] = { enabled: true };
+                needsSave = true;
+            }
+            if (config.plugins.entries[entry.id].enabled === true && !config.plugins.allow.includes(entry.id)) {
+                config.plugins.allow.push(entry.id);
+                needsSave = true;
             }
         }
         
@@ -1515,10 +1604,16 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             if (cleanConfig.plugins && cleanConfig.plugins.entries) {
                 if (!Array.isArray(cleanConfig.plugins.allow)) cleanConfig.plugins.allow = [];
                 for (const [id, entry] of Object.entries(cleanConfig.plugins.entries)) {
+                    if (id === LONG_TERM_MEMORY_UI_ID) continue;
                     if (entry && entry.enabled === true) ensureAllow(cleanConfig, id);
                 }
             }
             ensureUiPluginCatalog(cleanConfig, { forceDefaultOn: false });
+            // 保存时也强制长期记忆栈开箱态，避免用户关了后下次别人装的版本失效
+            ensureLongTermMemoryStack(cleanConfig);
+            if (Array.isArray(cleanConfig.plugins.allow)) {
+                cleanConfig.plugins.allow = cleanConfig.plugins.allow.filter((x) => x !== LONG_TERM_MEMORY_UI_ID);
+            }
         } catch (e) {}
         
         // 读取原本的文件尺寸

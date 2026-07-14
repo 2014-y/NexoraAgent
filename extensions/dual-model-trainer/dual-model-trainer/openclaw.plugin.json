@@ -15,19 +15,19 @@
       },
       "mode": {
         "type": "string",
-        "default": "teach-learn",
+        "default": "collect-only",
         "enum": ["teach-learn", "fallback", "collect-only"],
-        "description": "运行模式: teach-learn(老师教学生学) | fallback(老师挂学生顶) | collect-only(仅收集)"
+        "description": "运行模式: teach-learn(老师教学生学) | fallback(老师挂学生顶) | collect-only(仅收集，不影响回复速度)"
       },
       "teacherModel": {
         "type": "string",
-        "default": "yitong/qwen3-max",
-        "description": "教师模型（云端，提供高质量示范）"
+        "default": "",
+        "description": "教师模型（在模型配置页填写，提供高质量示范）"
       },
       "studentModel": {
         "type": "string",
-        "default": "ollama/jarvis",
-        "description": "学生模型（本地，学习老师口吻）"
+        "default": "",
+        "description": "学生模型（在模型配置页填写，学习老师口吻）"
       },
       "enableVoiceMimicry": {
         "type": "boolean",
@@ -36,8 +36,8 @@
       },
       "enableTeachLearn": {
         "type": "boolean",
-        "default": true,
-        "description": "是否启用 Teach-Learn 教学回合"
+        "default": false,
+        "description": "是否启用 Teach-Learn 教学回合（会额外打本地/云端模型，默认关闭以保证回复速度）"
       },
       "enableFallback": {
         "type": "boolean",

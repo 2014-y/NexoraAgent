@@ -25,7 +25,7 @@
 ### 新增
 - OpenClaw 2026.6.11 网关
 - Agnes-AI 大模型集成 (agnes-2.0-flash, agnes-1.5-flash)
-- Ollama 本地模型支持 (gemma4:latest)
+- Ollama 本地模型支持（按用户在模型配置中添加）
 - MCP Computer Use 桌面控制 (9 个工具)
 - 微信/WhatsApp 多渠道消息
 - 双模型训练插件 (Teacher-Student 蒸馏)

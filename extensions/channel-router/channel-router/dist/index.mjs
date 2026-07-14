@@ -1,7 +1,7 @@
 ﻿export async function init(config = {}) {
     const replyModel = config.replyModel || 'agnes-ai/agnes-2.0-flash';
     const taskModel = config.taskModel || 'agnes-ai/agnes-2.0-flash';
-    const fallbackModel = config.fallbackModel || 'ollama/gemma4:latest';
+    const fallbackModel = config.fallbackModel || '';
     const defaultModel = config.defaultModel || 'agnes-ai/agnes-2.0-flash';
 
     console.log('[channel-router] All models → agnes-2.0-flash');

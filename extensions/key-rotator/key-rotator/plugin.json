@@ -1,7 +1,7 @@
 {
     "version":  "1.0.0",
     "config":  {
-                   "failover":  "ollama/gemma4:latest",
+                   "failover":  "",
                    "healthCheck":  {
                                        "interval":  "30s",
                                        "timeout":  "5s",

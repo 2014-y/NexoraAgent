@@ -54,10 +54,10 @@ export default function createPlugin(runtime) {
     return {};
   }
 
-  // 配置项（带默认值和类型校验）
+  // 配置项（带默认值和类型校验）——老师/学生仅来自 UI/插件配置，不写死本地模型
   const config = {
-    teacherModel: String(pluginConfig.teacherModel || 'yitong/qwen3-max'),
-    studentModel: String(pluginConfig.studentModel || 'ollama/gemma4:latest'),
+    teacherModel: String(pluginConfig.teacherModel || '').trim(),
+    studentModel: String(pluginConfig.studentModel || '').trim(),
     mode: ['teach-learn', 'fallback', 'collect-only'].includes(pluginConfig.mode)
       ? pluginConfig.mode : 'collect-only',
     enableTeachLearn: Boolean(pluginConfig.enableTeachLearn === true),
@@ -70,14 +70,8 @@ export default function createPlugin(runtime) {
     timeoutMs: Number(pluginConfig.timeoutMs) || 20000,
   };
 
-  // 校验模型名称不为空
-  if (!config.teacherModel || config.teacherModel.length < 2) {
-    // [suppressed]
-    config.teacherModel = 'yitong/qwen3-max';
-  }
-  if (!config.studentModel || config.studentModel.length < 2) {
-    // [suppressed]
-    config.studentModel = 'ollama/jarvis';
+  function hasConfiguredModel(name) {
+    return typeof name === 'string' && name.length >= 2;
   }
 
   // ─── 确保数据目录存在 ───
@@ -115,8 +109,8 @@ export default function createPlugin(runtime) {
   const processedRequests = new Map();
 
   console.log(`[${pluginName}] ✅ 插件已启用 | 模式: ${config.mode}`);
-  console.log(`[${pluginName}] 👨‍🏫 老师模型: ${config.teacherModel}`);
-  console.log(`[${pluginName}] 👨‍🎓 学生模型: ${config.studentModel}`);
+  console.log(`[${pluginName}] 👨‍🏫 老师模型: ${hasConfiguredModel(config.teacherModel) ? config.teacherModel : '(未配置，跳过教学调用)'}`);
+  console.log(`[${pluginName}] 👨‍🎓 学生模型: ${hasConfiguredModel(config.studentModel) ? config.studentModel : '(未配置，跳过学生调用)'}`);
   console.log(`[${pluginName}] 🎭 口吻模仿: ${config.enableVoiceMimicry ? '开启' : '关闭'}`);
   console.log(`[${pluginName}] ⏱️  超时保护: ${config.timeoutMs / 1000}s`);
   console.log(`[${pluginName}] 📦 数据存储: ${config.trainingDataPath}`);
@@ -187,9 +181,10 @@ export default function createPlugin(runtime) {
    * 支持多提供者、多重试、超时保护
    */
   async function callModel(modelName, messages, maxRetries = config.maxRetries) {
-    // 输入校验
-    if (!modelName || typeof modelName !== 'string') {
-      return { success: false, error: 'Invalid model name', code: 'INVALID_MODEL' };
+    // 输入校验——未在 UI 配置的模型不发起请求
+    if (!hasConfiguredModel(modelName)) {
+      console.log(`[${pluginName}] ⏭️  跳过模型调用：未在配置中指定模型`);
+      return { success: false, error: 'Model not configured', code: 'MODEL_NOT_CONFIGURED' };
     }
     if (!Array.isArray(messages) || messages.length === 0) {
       return { success: false, error: 'Empty or invalid messages', code: 'INVALID_MESSAGES' };
@@ -573,6 +568,16 @@ ${question}
       teacherFailed: false,
     };
 
+    if (!hasConfiguredModel(config.teacherModel)) {
+      console.log(`[${pluginName}] ⏭️  老师模型未配置，跳过教学回答`);
+      result.teacherFailed = true;
+      if (config.enableFallback && hasConfiguredModel(config.studentModel)) {
+        stats.fallbackActivations++;
+        return autonomousStudentMode(question, deliveryContext, result);
+      }
+      return { ...result, finalAnswer: '⚠️ 请先在「模型配置」中填写教学老师模型。' };
+    }
+
     console.log(`[${pluginName}] 👨‍🏫 老师模型正在回答...`);
     const teacherMessages = [
       { role: 'system', content: '你是一个专业的AI助手，擅长分析问题、给出详细的解决方案。请用中文回答。' },
@@ -610,6 +615,20 @@ ${question}
    * 拿到老师答案后，后台跑口吻分析和学生模仿，结果存入 learning_log.jsonl
    */
   async function studentLearnInBackground(question, teacherAnswer, deliveryContext) {
+    if (!hasConfiguredModel(config.studentModel)) {
+      console.log(`[${pluginName}] ⏭️  [后台] 学生模型未配置，仅保存老师答案`);
+      saveTrainingData({
+        question,
+        teacherAnswer: sanitizeString(teacherAnswer),
+        studentAnswer: null,
+        teacherModel: config.teacherModel,
+        studentModel: '',
+        deliveryContext,
+        mode: 'teacher-only',
+      });
+      return;
+    }
+
     const voiceAnalysis = analyzeTeacherVoice(teacherAnswer);
     console.log(`[${pluginName}] 🎭 [后台] 口吻分析: ${voiceAnalysis.styleDescription}`);
 
@@ -710,6 +729,14 @@ ${question}
    * 学生自主模式（老师不可用时）
    */
   async function autonomousStudentMode(question, deliveryContext, result) {
+    if (!hasConfiguredModel(config.studentModel)) {
+      return {
+        ...result,
+        finalAnswer: '⚠️ 老师模型不可用，且未配置模仿学生模型。请先在「模型配置」中填写。',
+        mode: 'fallback-failed',
+      };
+    }
+
     const studentMessages = [
       { role: 'system', content: '你是一个专业的AI助手。老师暂时不可用，请直接回答问题。' },
       { role: 'user', content: question },

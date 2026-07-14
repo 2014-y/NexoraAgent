@@ -18,7 +18,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,30 +54,24 @@ export default function createPlugin(runtime) {
     return {};
   }
 
-  // 配置项（带默认值和类型校验）
+  // 配置项（带默认值和类型校验）——老师/学生仅来自 UI/插件配置，不写死本地模型
   const config = {
-    teacherModel: String(pluginConfig.teacherModel || 'yitong/qwen3-max'),
-    studentModel: String(pluginConfig.studentModel || 'ollama/gemma4:latest'),
+    teacherModel: String(pluginConfig.teacherModel || '').trim(),
+    studentModel: String(pluginConfig.studentModel || '').trim(),
     mode: ['teach-learn', 'fallback', 'collect-only'].includes(pluginConfig.mode)
-      ? pluginConfig.mode : 'teach-learn',
-    enableTeachLearn: Boolean(pluginConfig.enableTeachLearn !== false),
+      ? pluginConfig.mode : 'collect-only',
+    enableTeachLearn: Boolean(pluginConfig.enableTeachLearn === true),
     enableFallback: Boolean(pluginConfig.enableFallback !== false),
-    trainingDataPath: String(pluginConfig.trainingDataPath || process.env.USERPROFILE + '/glm4_finetune/learning_data/learning_log.jsonl'),
+    trainingDataPath: String(pluginConfig.trainingDataPath || path.join(os.homedir(), 'glm4_finetune', 'learning_data', 'learning_log.jsonl')),
     minAnswerLength: Number(pluginConfig.minAnswerLength) || 10,
-    maxRetries: Number(pluginConfig.maxRetries) || 2,
-    retryDelay: Number(pluginConfig.retryDelay) || 3000,
+    maxRetries: Number(pluginConfig.maxRetries) || 1,
+    retryDelay: Number(pluginConfig.retryDelay) || 1000,
     enableVoiceMimicry: Boolean(pluginConfig.enableVoiceMimicry !== false),
-    timeoutMs: Number(pluginConfig.timeoutMs) || TEACH_LEARN_TIMEOUT_MS,
+    timeoutMs: Number(pluginConfig.timeoutMs) || 20000,
   };
 
-  // 校验模型名称不为空
-  if (!config.teacherModel || config.teacherModel.length < 2) {
-    // [suppressed]
-    config.teacherModel = 'yitong/qwen3-max';
-  }
-  if (!config.studentModel || config.studentModel.length < 2) {
-    // [suppressed]
-    config.studentModel = 'ollama/jarvis';
+  function hasConfiguredModel(name) {
+    return typeof name === 'string' && name.length >= 2;
   }
 
   // ─── 确保数据目录存在 ───
@@ -88,9 +83,9 @@ export default function createPlugin(runtime) {
       console.log(`[${pluginName}] 📂 已创建数据目录: ${dataDir}`);
     }
   } catch (e) {
-    // [suppressed]
+    console.error(`[${pluginName}] ❌ 无法创建数据目录: ${e.message}`);
     // 降级到默认目录
-    config.trainingDataPath = process.env.USERPROFILE + '/glm4_finetune/learning_data/learning_log.jsonl';
+    config.trainingDataPath = path.join(os.homedir(), 'glm4_finetune', 'learning_data', 'learning_log.jsonl');
     dataDir = path.dirname(config.trainingDataPath);
   }
 
@@ -114,8 +109,8 @@ export default function createPlugin(runtime) {
   const processedRequests = new Map();
 
   console.log(`[${pluginName}] ✅ 插件已启用 | 模式: ${config.mode}`);
-  console.log(`[${pluginName}] 👨‍🏫 老师模型: ${config.teacherModel}`);
-  console.log(`[${pluginName}] 👨‍🎓 学生模型: ${config.studentModel}`);
+  console.log(`[${pluginName}] 👨‍🏫 老师模型: ${hasConfiguredModel(config.teacherModel) ? config.teacherModel : '(未配置，跳过教学调用)'}`);
+  console.log(`[${pluginName}] 👨‍🎓 学生模型: ${hasConfiguredModel(config.studentModel) ? config.studentModel : '(未配置，跳过学生调用)'}`);
   console.log(`[${pluginName}] 🎭 口吻模仿: ${config.enableVoiceMimicry ? '开启' : '关闭'}`);
   console.log(`[${pluginName}] ⏱️  超时保护: ${config.timeoutMs / 1000}s`);
   console.log(`[${pluginName}] 📦 数据存储: ${config.trainingDataPath}`);
@@ -173,7 +168,7 @@ export default function createPlugin(runtime) {
       // 删除临时文件
       try { fs.unlinkSync(tmpPath); } catch {}
     } catch (e) {
-      // [suppressed]
+      console.error(`[${pluginName}] ❌ 文件写入失败: ${e.message}`);
       // 清理临时文件
       try { fs.unlinkSync(filePath + '.tmp.*'); } catch {}
     }
@@ -186,9 +181,10 @@ export default function createPlugin(runtime) {
    * 支持多提供者、多重试、超时保护
    */
   async function callModel(modelName, messages, maxRetries = config.maxRetries) {
-    // 输入校验
-    if (!modelName || typeof modelName !== 'string') {
-      return { success: false, error: 'Invalid model name', code: 'INVALID_MODEL' };
+    // 输入校验——未在 UI 配置的模型不发起请求
+    if (!hasConfiguredModel(modelName)) {
+      console.log(`[${pluginName}] ⏭️  跳过模型调用：未在配置中指定模型`);
+      return { success: false, error: 'Model not configured', code: 'MODEL_NOT_CONFIGURED' };
     }
     if (!Array.isArray(messages) || messages.length === 0) {
       return { success: false, error: 'Empty or invalid messages', code: 'INVALID_MESSAGES' };
@@ -535,7 +531,7 @@ ${question}
         console.log(`[${pluginName}] 📚 已累计保存 ${stats.savedCount} 条教学数据`);
       }
     } catch (e) {
-      // [suppressed]
+      console.error(`[${pluginName}] ❌ 保存训练数据失败: ${e.message}`);
       stats.totalErrors++;
     }
   }
@@ -571,6 +567,16 @@ ${question}
       mode: 'teach-learn',
       teacherFailed: false,
     };
+
+    if (!hasConfiguredModel(config.teacherModel)) {
+      console.log(`[${pluginName}] ⏭️  老师模型未配置，跳过教学回答`);
+      result.teacherFailed = true;
+      if (config.enableFallback && hasConfiguredModel(config.studentModel)) {
+        stats.fallbackActivations++;
+        return autonomousStudentMode(question, deliveryContext, result);
+      }
+      return { ...result, finalAnswer: '⚠️ 请先在「模型配置」中填写教学老师模型。' };
+    }
 
     console.log(`[${pluginName}] 👨‍🏫 老师模型正在回答...`);
     const teacherMessages = [
@@ -609,6 +615,20 @@ ${question}
    * 拿到老师答案后，后台跑口吻分析和学生模仿，结果存入 learning_log.jsonl
    */
   async function studentLearnInBackground(question, teacherAnswer, deliveryContext) {
+    if (!hasConfiguredModel(config.studentModel)) {
+      console.log(`[${pluginName}] ⏭️  [后台] 学生模型未配置，仅保存老师答案`);
+      saveTrainingData({
+        question,
+        teacherAnswer: sanitizeString(teacherAnswer),
+        studentAnswer: null,
+        teacherModel: config.teacherModel,
+        studentModel: '',
+        deliveryContext,
+        mode: 'teacher-only',
+      });
+      return;
+    }
+
     const voiceAnalysis = analyzeTeacherVoice(teacherAnswer);
     console.log(`[${pluginName}] 🎭 [后台] 口吻分析: ${voiceAnalysis.styleDescription}`);
 
@@ -698,7 +718,7 @@ ${question}
       studentLearnInBackground(question, teacherResult.teacherAnswer, deliveryContext)
         .catch(err => {
           stats.totalErrors++;
-          // [suppressed]
+          console.error(`[${pluginName}] ❌ [后台] 学生学习失败: ${err?.message || String(err)}`);
         });
     }
 
@@ -709,6 +729,14 @@ ${question}
    * 学生自主模式（老师不可用时）
    */
   async function autonomousStudentMode(question, deliveryContext, result) {
+    if (!hasConfiguredModel(config.studentModel)) {
+      return {
+        ...result,
+        finalAnswer: '⚠️ 老师模型不可用，且未配置模仿学生模型。请先在「模型配置」中填写。',
+        mode: 'fallback-failed',
+      };
+    }
+
     const studentMessages = [
       { role: 'system', content: '你是一个专业的AI助手。老师暂时不可用，请直接回答问题。' },
       { role: 'user', content: question },
@@ -831,7 +859,7 @@ ${question}
         })
         .catch(error => {
           stats.totalErrors++;
-          // [suppressed]
+          console.error(`[${pluginName}] ❌ Teach-Learn 流程异常: ${error?.message || String(error)}`);
         });
     },
 
@@ -844,11 +872,13 @@ ${question}
    */
   async generateLearningSummary() {
     try {
-      const summaryModule = require(path.join(__dirname, "learning-summary.js"));
-      const result = summaryModule.generateLearningSummary();
+      const summaryModule = await import(pathToFileURL(path.join(__dirname, 'learning-summary.js')).href);
+      const generate = summaryModule.generateLearningSummary || summaryModule.default?.generateLearningSummary;
+      if (typeof generate !== 'function') throw new Error('generateLearningSummary export missing');
+      const result = await generate();
       console.log(`[dual-model-trainer] 📥 学习总结:`, result);
     } catch(e) {
-      // [suppressed]
+      console.error(`[dual-model-trainer] 学习总结失败:`, e.message);
     }
   },
     async onShutdown() {

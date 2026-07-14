@@ -3,7 +3,7 @@
  *
  * 监听 18790 端口，自动轮换 API key
  * 任何错误（非 2xx）都会切换到下一个 key
- * 所有 key 都失败时降级到本地 gemma4
+ * 所有 key 都失败时返回错误（不再降级到写死的本地模型）
  */
 
 import http from 'http';

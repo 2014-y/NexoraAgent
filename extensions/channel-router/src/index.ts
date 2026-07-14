@@ -14,7 +14,7 @@ import type { HookContext, HookHandler } from 'openclaw-plugin-types';
 export async function init(config: Record<string, unknown>) {
     const replyModel = (config.replyModel as string) || 'agnes-ai/agnes-1.5-flash';
     const taskModel = (config.taskModel as string) || 'agnes-ai/agnes-2.0-flash';
-    const fallbackModel = (config.fallbackModel as string) || 'ollama/gemma4:latest';
+    const fallbackModel = (config.fallbackModel as string) || '';
     const replyKeywords = (config.replyKeywords as string[]) || [];
     const taskKeywords = (config.taskKeywords as string[]) || [];
     const defaultModel = (config.defaultModel as string) || 'agnes-ai/agnes-2.0-flash';

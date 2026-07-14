@@ -38,8 +38,11 @@
   },
   "dependencies": {
     "@openclaw/feishu": "2026.6.11",
+    "@openclaw/matrix": "^2026.7.1",
     "@openclaw/qqbot": "2026.5.22",
+    "@openclaw/slack": "^2026.7.1",
     "@openclaw/voice-call": "2026.6.11",
+    "@openclaw/whatsapp": "^2026.7.1",
     "@tencent-weixin/openclaw-weixin": "2.4.6",
     "jsdom": "29.1.1",
     "node-pty": "^1.1.0",

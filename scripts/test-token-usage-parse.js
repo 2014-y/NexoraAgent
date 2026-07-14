@@ -18,8 +18,8 @@ const openai = parseUsageFromLlmBody('{"model":"gpt","usage":{"prompt_tokens":12
 assert(openai && openai.prompt_tokens === 12 && openai.completion_tokens === 34, 'openai usage');
 
 const ollama = parseUsageFromLlmBody(
-  '{"model":"jarvis","message":{"role":"assistant","content":"hi"},"done":false}\n' +
-  '{"model":"jarvis","message":{"role":"assistant","content":"hi"},"done":true,"prompt_eval_count":100,"eval_count":20}'
+  '{"model":"local-test","message":{"role":"assistant","content":"hi"},"done":false}\n' +
+  '{"model":"local-test","message":{"role":"assistant","content":"hi"},"done":true,"prompt_eval_count":100,"eval_count":20}'
 );
 assert(ollama && ollama.prompt_tokens === 100 && ollama.completion_tokens === 20, 'ollama native counts');
 

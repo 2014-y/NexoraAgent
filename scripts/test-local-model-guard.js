@@ -33,11 +33,14 @@ assert(isLlmProxyPath('/api/embeddings') === true, 'detect embeddings');
 assert(isLlmProxyPath('/api/chat/media/outgoing/x') === false, 'exclude media path');
 assert(isLlmProxyPath('/health') === false, 'ignore health');
 
-assert(isLocalModelRequest('gemma4:latest', 'http://127.0.0.1:11434/api/chat') === true, 'gemma on 11434');
-assert(isLocalModelRequest('jarvis', 'localhost') === true, 'jarvis local');
+assert(isLocalModelRequest('local-test', 'http://127.0.0.1:11434/api/chat') === true, 'any model on 11434 is local');
+assert(isLocalModelRequest('local-test', 'http://localhost:11434/api/chat') === true, 'named model on localhost is local via host');
+assert(isLocalModelRequest('local-test', 'https://api.example.com/v1/chat/completions') === false, 'model name alone NOT local');
+assert(isLocalModelRequest('cloud-only-name', 'https://api.example.com/v1/chat/completions') === false, 'unknown name on cloud URL NOT local');
 assert(isLocalModelRequest('qwen3-max', 'https://dashscope.aliyuncs.com/v1/chat/completions') === false, 'cloud qwen3 NOT local');
 assert(isLocalModelRequest('agnes-2.0-flash', 'https://apihub.agnes-ai.com/v1/chat/completions') === false, 'agnes NOT local');
 assert(isLocalModelRequest('something', 'http://127.0.0.1:11434/api/chat') === true, 'any model on 11434 is local');
+assert(isLocalModelRequest('ollama/qwen2.5:7b', 'https://api.example.com/v1') === true, 'ollama/ prefix is local');
 
 assert(
   sanitizeRawToolCallContent('{"name":"tts","arguments":{"text":"你好","timeoutMs":5000}}') === '你好',
@@ -54,7 +57,7 @@ assert(
 );
 
 const body = {
-  model: 'gemma4:latest',
+  model: 'local-test',
   tools: [{ name: 'tts' }, { name: 'update_goal' }],
   tool_choice: 'auto',
   messages: [

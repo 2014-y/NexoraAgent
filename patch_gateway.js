@@ -25,20 +25,8 @@ function isLocalModelRequest(model, hostOrUrl) {
     const m = String(model || '').toLowerCase();
     const h = String(hostOrUrl || '').toLowerCase();
     const localHost = h.includes('11434') || h.includes('localhost') || h.includes('127.0.0.1') || h.includes('[::1]') || h.includes('0.0.0.0');
-    // 仅按本地常见模型名判断；不要用裸 qwen/deepseek（线上同名会误伤）
-    const localName =
-        m.includes('ollama/') ||
-        m.startsWith('ollama') ||
-        m.includes('gemma') ||
-        m.includes('jarvis') ||
-        m.includes('llama') ||
-        m.includes('mistral') ||
-        m.includes('phi-') ||
-        m.includes('phi3') ||
-        m.includes('qwen2.5') ||
-        m.includes('qwen2:') ||
-        m.includes('deepseek-r1') ||
-        m.includes('deepseek-coder');
+    // 仅按 Ollama 前缀或本机地址判断，不按具体模型名猜测
+    const localName = m.includes('ollama/') || m.startsWith('ollama/');
     return localHost || localName;
 }
 
@@ -929,7 +917,8 @@ function parseUsageFromLlmBody(bodyText) {
 function inferProviderName(hostOrUrl, modelName) {
     const cleanUrl = String(hostOrUrl || '').toLowerCase();
     const model = String(modelName || '').toLowerCase();
-    if (cleanUrl.includes('11434') || cleanUrl.includes('/api/chat') || model.startsWith('ollama/') || model.includes('jarvis') || model.includes('gemma')) {
+    if (cleanUrl.includes('11434') || model.startsWith('ollama/') ||
+        ((cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1') || cleanUrl.includes('[::1]')) && cleanUrl.includes('/api/chat'))) {
         return 'ollama';
     }
     if (cleanUrl.includes('agnes')) return 'agnes-ai';

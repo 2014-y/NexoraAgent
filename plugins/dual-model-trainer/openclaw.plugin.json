@@ -21,13 +21,13 @@
       },
       "teacherModel": {
         "type": "string",
-        "default": "yitong/qwen3-max",
-        "description": "教师模型（云端，提供高质量示范）"
+        "default": "",
+        "description": "教师模型（在模型配置页填写，提供高质量示范）"
       },
       "studentModel": {
         "type": "string",
-        "default": "ollama/jarvis",
-        "description": "学生模型（本地，学习老师口吻）"
+        "default": "",
+        "description": "学生模型（在模型配置页填写，学习老师口吻）"
       },
       "enableVoiceMimicry": {
         "type": "boolean",

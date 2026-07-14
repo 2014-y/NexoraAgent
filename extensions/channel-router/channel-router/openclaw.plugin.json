@@ -34,7 +34,7 @@
                                                               "type":  "string"
                                                           },
                                             "fallbackModel":  {
-                                                                  "default":  "ollama/gemma4:latest",
+                                                                  "default":  "",
                                                                   "type":  "string"
                                                               },
                                             "replyModel":  {

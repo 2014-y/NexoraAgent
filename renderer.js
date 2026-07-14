@@ -629,12 +629,12 @@ let gatewayFullyReady = false;
 const UI_PLUGIN_ORDER = [
     'dual-model-trainer',
     'openclaw-weixin',
+    'long-term-memory',
     'qqbot',
     'voice-call',
     'telegram',
     'slack',
     'whatsapp',
-    'auto-summary',
     'matrix',
     'duckduckgo',
     'webhooks',
@@ -643,9 +643,12 @@ const UI_PLUGIN_ORDER = [
     'auto-start-codex'
 ];
 
+const LONG_TERM_MEMORY_STACK = ['auto-summary', 'memory-rotate', 'compaction-memory-guard'];
+
 const pluginMetadata = {
     'dual-model-trainer': { name: '🧠 双模型教学', desc: '利用主备模型对比，自动本地收集并训练属于你的专属模型', tier: 'zero' },
     'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将网关接入微信聊天，支持私聊、群聊和图片理解', tier: 'zero' },
+    'long-term-memory': { name: '📚 长期记忆', desc: '开箱即用：自动摘要、记忆旋转与压缩护栏，将关键信息持久写入 MEMORY.md，对话压缩后仍可召回。', tier: 'zero' },
     'qqbot': { name: '🐧 QQ机器人', desc: '将网关接入 QQ 开放平台机器人（QQ Bot）消息通道，实现 QQ 群聊及私聊交互。', tier: 'credentials' },
     'voice-call': { name: '📞 语音通话', desc: '开启实时语音对话服务，支持通过微信向 AI 拨打电话', tier: 'credentials' },
     'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI 网关对话', tier: 'credentials' },
@@ -1700,6 +1703,18 @@ async function loadAndRenderConfig() {
         } else {
             document.getElementById('model-video').value = '';
         }
+    }
+
+    // 双模型教学：老师/学生模型（来自插件配置，不写死本地模型）
+    const teacherEl = document.getElementById('model-teacher');
+    const studentEl = document.getElementById('model-student');
+    if (teacherEl || studentEl) {
+        const dmtCfg = (configData.plugins
+            && configData.plugins.entries
+            && configData.plugins.entries['dual-model-trainer']
+            && configData.plugins.entries['dual-model-trainer'].config) || {};
+        if (teacherEl) teacherEl.value = dmtCfg.teacherModel || '';
+        if (studentEl) studentEl.value = dmtCfg.studentModel || '';
     }
 
     // 优先从本地 localStorage 加载自定义的视频/图片生成配置（不写盘入 openclaw.json 以免损坏网关配置格式）
@@ -2882,6 +2897,19 @@ const handleSaveConfigAction = async () => {
     configData.agents.defaults.model.primary = document.getElementById('model-primary').value.trim();
     configData.agents.defaults.model.fallbacks = [document.getElementById('model-fallback').value.trim()];
 
+    // 双模型教学：老师/学生模型写回插件配置
+    if (!configData.plugins) configData.plugins = {};
+    if (!configData.plugins.entries) configData.plugins.entries = {};
+    if (!configData.plugins.entries['dual-model-trainer']) {
+        configData.plugins.entries['dual-model-trainer'] = { enabled: true };
+    }
+    const dmtEntry = configData.plugins.entries['dual-model-trainer'];
+    if (!dmtEntry.config) dmtEntry.config = {};
+    const teacherInput = document.getElementById('model-teacher');
+    const studentInput = document.getElementById('model-student');
+    if (teacherInput) dmtEntry.config.teacherModel = teacherInput.value.trim();
+    if (studentInput) dmtEntry.config.studentModel = studentInput.value.trim();
+
     if (!configData.videoGenerator) configData.videoGenerator = {};
     if (!configData.imageGenerator) configData.imageGenerator = {};
 
@@ -2993,6 +3021,11 @@ async function renderPluginsGrid() {
                     isEnabled = (configData.hooks && configData.hooks.internal && configData.hooks.internal.entries && configData.hooks.internal.entries['auto-start-codex'])
                         ? configData.hooks.internal.entries['auto-start-codex'].enabled === true
                         : false;
+                } else if (key === 'long-term-memory') {
+                    // 伞形卡：真实栈三者全部开启才算“已启用”
+                    isEnabled = LONG_TERM_MEMORY_STACK.every((id) => entries[id] && entries[id].enabled === true);
+                    if (!entries[key]) entries[key] = { enabled: isEnabled };
+                    else entries[key].enabled = isEnabled;
                 } else {
                     isEnabled = entries[key] ? entries[key].enabled === true : false;
                 }
@@ -3005,7 +3038,15 @@ async function renderPluginsGrid() {
                     catch (e) { return isEnabled ? '已启用' : '已禁用'; }
                 })();
                 const badgeText = (() => { try { return badgeLabelForProbe(probe); } catch (e) { return '开箱可用'; } })();
-                const hintText = probe.hint ? String(probe.hint) : '';
+                const hintText = (() => {
+                    if (!probe.hint) return '';
+                    const raw = String(probe.hint);
+                    // 主进程可能返回 locale key；按当前设置语言翻译
+                    if (raw.startsWith('plugin.')) {
+                        try { return t(raw); } catch (e) { return raw; }
+                    }
+                    return raw;
+                })();
 
                 const card = document.createElement('div');
                 card.className = 'plugin-card-item';
@@ -3177,6 +3218,25 @@ async function renderPluginsGrid() {
             }
             configData.hooks.internal.entries['auto-start-codex'].enabled = checked;
             if (checked) configData.hooks.internal.enabled = true;
+        } else if (pluginKey === 'long-term-memory') {
+            // 伞形开关：同步真实长期记忆栈（摘要 / 旋转 / 压缩护栏）
+            for (const id of LONG_TERM_MEMORY_STACK) {
+                if (!configData.plugins.entries[id]) configData.plugins.entries[id] = {};
+                configData.plugins.entries[id].enabled = checked;
+                if (checked && !configData.plugins.allow.includes(id)) {
+                    configData.plugins.allow.push(id);
+                }
+            }
+            configData.plugins.entries['long-term-memory'] = { enabled: checked };
+            configData.plugins.allow = configData.plugins.allow.filter((x) => x !== 'long-term-memory');
+            if (checked && !configData.plugins.allow.includes('llm-task')) {
+                configData.plugins.allow.push('llm-task');
+            }
+            if (!checked) {
+                showToast(t('plugin.toast.ltm_disabled'));
+            } else {
+                showToast(t('plugin.toast.ltm_enabled'));
+            }
         } else {
             if (!configData.plugins.entries[pluginKey]) configData.plugins.entries[pluginKey] = {};
             configData.plugins.entries[pluginKey].enabled = checked;
@@ -5841,9 +5901,14 @@ async function updateConsoleChannelStatusUI() {
                 const savedAtStr = result.details.savedAt ? new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false }) : '--';
                 detailsEl.innerHTML = `
                     <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
-                    <div><span style="color: var(--text-secondary);">${t('账户标识', 'Account ID', '帳號標識')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${result.details.accountId || '--'}</span></div>
-                    <div><span style="color: var(--text-secondary);">${t('绑定时间', 'Bind Time', '綁定時間')}: </span><span style="color: var(--text-primary);">${savedAtStr}</span></div>
-                    <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理解绑/绑定', '⚙️ Go to Channels to bind/unbind', '⚙️ 去通訊管理解綁/綁定')}</a></div>
+                    <div style="margin-bottom: 6px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('账户标识', 'Account ID', '帳號標識')}</div>
+                        <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${result.details.accountId || '--'}</div>
+                    </div>
+                    <div style="margin-bottom: 2px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('绑定时间', 'Bind Time', '綁定時間')}</div>
+                        <div style="color: var(--text-primary);">${savedAtStr}</div>
+                    </div>
                 `;
             } else {
                 setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
@@ -5869,9 +5934,14 @@ async function updateConsoleChannelStatusUI() {
             const defaultAcc = accounts[defaultAccId] || {};
             detailsEl.innerHTML = `
                 <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
-                <div><span style="color: var(--text-secondary);">${t('默认账户', 'Default Account', '默認帳戶')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
-                <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
-                <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理管理飞书账号', '⚙️ Go to Channels to manage Feishu', '⚙️ 去通訊管理管理飛書帳號')}</a></div>
+                <div style="margin-bottom: 6px;">
+                    <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
+                    <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
+                </div>
+                <div style="margin-bottom: 2px;">
+                    <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
+                    <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
+                </div>
             `;
         } else {
             setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
@@ -5894,9 +5964,14 @@ async function updateConsoleChannelStatusUI() {
             const defaultAcc = accounts[defaultAccId] || {};
             detailsEl.innerHTML = `
                 <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
-                <div><span style="color: var(--text-secondary);">${t('默认账户', 'Default Account', '默認帳戶')}: </span><span style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold;">${defaultAccId || '--'}</span></div>
-                <div><span style="color: var(--text-secondary);">App ID: </span><span style="color: var(--text-primary);">${defaultAcc.appId || '--'}</span></div>
-                <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理管理QQ机器人', '⚙️ Go to Channels to manage QQ Bot', '⚙️ 去通訊管理管理QQ機器人')}</a></div>
+                <div style="margin-bottom: 6px;">
+                    <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
+                    <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
+                </div>
+                <div style="margin-bottom: 2px;">
+                    <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
+                    <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
+                </div>
             `;
         } else {
             setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);

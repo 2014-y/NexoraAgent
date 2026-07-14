@@ -98,46 +98,17 @@ px -y @tencent-weixin/openclaw-weixin-cli install
 2. 安装完成后，Ollama 会自动启动并在后台运行
 3. 验证：打开 CMD，运行 ollama --version，应显示版本号
 
-### 5.2 拉取基础模型
+### 5.2 拉取本地模型（可选）
 
-在 CMD 中运行：
+在「模型配置」中可自行添加 Ollama 等本地通道。需要时在 CMD 中拉取你要用的模型，例如：
 
-`ash
-ollama pull gemma3:27b
-`
+```bash
+ollama pull <你的模型名>
+```
 
-这会在本地下载一个约 16GB 的模型文件（首次使用需要耐心等待下载）。
+不必依赖项目预置的个人定制模型；老师/学生模型均在 ClawAI「模型配置」页填写。
 
-### 5.3 构建 Jarvis 自定义模型
-
-项目自带一个 jarvis-modelfile.txt，它定义了 Jarvis 助手的系统提示词。在 CMD 中运行：
-
-`ash
-cd D:\ai\ClawAI
-ollama create jarvis -f jarvis-modelfile.txt
-`
-
-这会根据 gemma3:27b 创建一个名为 jarvis 的自定义模型。
-
-### 5.4 验证模型
-
-运行以下命令确认模型已安装：
-
-`ash
-ollama list
-`
-
-你应该看到 jarvis 和 gemma3:27b 都在列表中。
-
-### 5.5 测试本地模型
-
-`ash
-ollama run jarvis "你好，你是谁？"
-`
-
-如果回答正常，说明本地模型配置成功。
-
-> **注意**：本地模型不需要联网，所有推理都在你的电脑上完成，隐私性最好。但需要较好的硬件配置（建议 32GB 以上内存，独立显卡更佳）。
+> **注意**：本地模型不需要联网，所有推理都在你的电脑上完成，隐私性更好，但需要较好的硬件配置。
 
 ---
 

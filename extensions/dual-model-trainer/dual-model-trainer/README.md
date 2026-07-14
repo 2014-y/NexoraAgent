@@ -5,7 +5,7 @@
 ```
 用户提问
   ↓
-① 老师模型回答（云端 qwen3-max）← 高质量示范
+① 老师模型回答（在模型配置中指定）← 高质量示范
   ↓
 ② 口吻分析引擎 ← 提取老师的说话特征
    - 称呼习惯（您好/你好/先生...）
@@ -36,8 +36,8 @@
       "dual-model-trainer": {
         "enabled": true,
         "config": {
-          "teacherModel": "yitong/qwen3-max",
-          "studentModel": "ollama/jarvis",
+          "teacherModel": "agnes-ai/agnes-2.0-flash",
+          "studentModel": "",
           "mode": "teach-learn",
           "enableVoiceMimicry": true,
           "enableFallback": true,
@@ -82,8 +82,8 @@
   "question": "用户问题",
   "teacherAnswer": "老师的原始回答",
   "studentAnswer": "学生模仿老师口吻的回答",
-  "teacherModel": "yitong/qwen3-max",
-  "studentModel": "ollama/jarvis",
+  "teacherModel": "agnes-ai/agnes-2.0-flash",
+  "studentModel": "",
   "mode": "voice-mimic",
   "teacher_voice": {
     "styleDescription": "正式礼貌，善用列表，回答详尽",
