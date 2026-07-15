@@ -55,7 +55,10 @@
       },
       "maxConcurrent": 4,
       "bootstrapMaxChars": 8000,
-      "bootstrapTotalMaxChars": 24000
+      "bootstrapTotalMaxChars": 24000,
+      "compaction": {
+        "reserveTokensFloor": 20000
+      }
     }
   },
   "channels": {

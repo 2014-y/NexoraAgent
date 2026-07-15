@@ -54,6 +54,7 @@ assert(changed === true, 'slow config marked changed');
 assert(config.channels['openclaw-weixin'].inbound.debounceMs === DEFAULTS.weixinDebounceMs, 'weixin debounce capped');
 assert(config.agents.defaults.bootstrapMaxChars === DEFAULTS.bootstrapMaxChars, 'bootstrapMaxChars capped');
 assert(config.agents.defaults.bootstrapTotalMaxChars === DEFAULTS.bootstrapTotalMaxChars, 'bootstrapTotalMaxChars capped');
+assert(config.agents.defaults.compaction.reserveTokensFloor === DEFAULTS.reserveTokensFloor, 'reserveTokensFloor raised to 20000');
 assert(config.agents.defaults.humanDelay.enabled === false, 'humanDelay disabled');
 assert(config.models.providers.ollama.models[0].contextWindow === DEFAULTS.ollamaContextWindow, 'ollama contextWindow capped');
 assert(config.models.providers.ollama.models[0].maxTokens === DEFAULTS.ollamaMaxTokens, 'ollama maxTokens capped');

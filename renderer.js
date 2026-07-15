@@ -899,10 +899,30 @@ async function init() {
     const settingBuiltInModelsToggle = document.getElementById('setting-built-in-models-toggle');
     if (settingBuiltInModelsToggle) {
         settingBuiltInModelsToggle.checked = getUseBuiltIn();
-        settingBuiltInModelsToggle.addEventListener('change', (e) => {
+        settingBuiltInModelsToggle.addEventListener('change', async (e) => {
             localStorage.setItem('setting_use_built_in_models', e.target.checked ? 'true' : 'false');
             toggleProviderInputsEditable();
             loadChatModels(); // 开关状态改变时，立刻重新载入并选中默认内置模型
+
+            // 开启内置时立刻把默认模型写入沙箱 OpenClaw（否则只改了 UI，网关会话仍粘旧模型）
+            if (e.target.checked && configData && window.api && window.api.saveConfig) {
+                try {
+                    applyBuiltInModelPolicy(configData);
+                    if (configData.models && configData.models.providers) {
+                        localProviders = JSON.parse(JSON.stringify(configData.models.providers));
+                    }
+                    const result = await window.api.saveConfig(configData);
+                    if (result && result.success) {
+                        updateConfigJsonPreview();
+                        showToast(t('已同步内置模型到 OpenClaw，请重启网关后生效', 'Built-in model synced to OpenClaw. Restart gateway to apply.', '已同步內置模型到 OpenClaw，請重啟網關後生效'));
+                    }
+                } catch (err) {
+                    console.warn('[BuiltIn] Failed to sync model to OpenClaw:', err);
+                }
+            } else if (!e.target.checked) {
+                // 关闭后恢复自定义表单，并刷新 JSON 预览与磁盘一致
+                try { updateConfigJsonPreview(); } catch (err) {}
+            }
         });
     }
 
@@ -1989,11 +2009,71 @@ const AGNES_BUILT_IN_KEY = 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY'
 const KEY_MASK = '••••••••••••••••••••••••••••••••••••••••••••••••';
 const expandedProviders = new Set();
 
+/** 内置模型开启时，强制 config / providers / env 与 UI 锁定态一致，避免表单显示 Agnes 而 openclaw.json 仍是其它模型 */
+function applyBuiltInModelPolicy(cfg) {
+    if (!cfg || typeof cfg !== 'object') return false;
+    if (!getUseBuiltIn()) return false;
+    let changed = false;
+
+    if (!cfg.agents) cfg.agents = {};
+    if (!cfg.agents.defaults) cfg.agents.defaults = {};
+    if (!cfg.agents.defaults.model) cfg.agents.defaults.model = {};
+
+    const wantPrimary = 'agnes-ai/agnes-2.0-flash';
+    const wantFallback = 'agnes-ai/agnes-1.5-flash';
+    if (cfg.agents.defaults.model.primary !== wantPrimary) {
+        cfg.agents.defaults.model.primary = wantPrimary;
+        changed = true;
+    }
+    const fb = Array.isArray(cfg.agents.defaults.model.fallbacks) ? cfg.agents.defaults.model.fallbacks[0] : '';
+    if (fb !== wantFallback) {
+        cfg.agents.defaults.model.fallbacks = [wantFallback];
+        changed = true;
+    }
+
+    if (!cfg.models) cfg.models = {};
+    if (!cfg.models.providers) cfg.models.providers = {};
+    if (!cfg.models.providers['agnes-ai']) {
+        cfg.models.providers['agnes-ai'] = {
+            baseUrl: 'https://apihub.agnes-ai.com/v1',
+            api: 'openai-completions',
+            models: []
+        };
+        changed = true;
+    }
+    const agnes = cfg.models.providers['agnes-ai'];
+    if (agnes.baseUrl !== 'https://apihub.agnes-ai.com/v1') {
+        agnes.baseUrl = 'https://apihub.agnes-ai.com/v1';
+        changed = true;
+    }
+    if (agnes.apiKey !== AGNES_BUILT_IN_KEY) {
+        agnes.apiKey = AGNES_BUILT_IN_KEY;
+        changed = true;
+    }
+
+    if (!cfg.env) cfg.env = {};
+    if (cfg.env.AGNES_AI_API_KEY !== AGNES_BUILT_IN_KEY) {
+        cfg.env.AGNES_AI_API_KEY = AGNES_BUILT_IN_KEY;
+        changed = true;
+    }
+
+    return changed;
+}
+
 async function loadAndRenderConfig() {
     configData = await window.api.readConfig();
     if (!configData) {
         logTerminal.innerText = '[System] [Error] 无法读取 openclaw.json 配置文件！\n';
         return;
+    }
+
+    // 内置模型开启时：磁盘若仍是其它主模型，立即对齐写回，消除「设置开着 / 配置页与 OpenClaw 不一致」
+    try {
+        if (applyBuiltInModelPolicy(configData) && window.api && window.api.saveConfig) {
+            await window.api.saveConfig(configData);
+        }
+    } catch (e) {
+        console.warn('[BuiltIn] enforce on load failed:', e);
     }
 
     // 深度拷贝厂商数据到本地变量以支持动态修改与渲染
@@ -2193,6 +2273,14 @@ function updateConfigJsonPreview() {
     const gatewayPortEl = document.getElementById('gateway-port');
     if (gatewayPortEl) configData.gateway.port = parseInt(gatewayPortEl.value, 10) || 18789;
 
+    // 内置开启时，预览/内存必须与锁定表单一致（禁止仍显示 ollama 等旧主模型）
+    if (getUseBuiltIn()) {
+        applyBuiltInModelPolicy(configData);
+        if (configData.models && configData.models.providers) {
+            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
+        }
+    }
+
     const previewEl = document.getElementById('config-json-preview');
     // 只有当用户当前没有聚焦在 JSON 编辑框输入时，才自动用表单最新状态覆盖内容，防止打字时光标位移
     if (previewEl && document.activeElement !== previewEl) {
@@ -2299,6 +2387,16 @@ function syncJsonToFormFields(parsed) {
         localProviders = JSON.parse(JSON.stringify(parsed.models.providers));
         renderProvidersList();
         updateModelsDatalist();
+    }
+
+    // 内置开启时：JSON 手改不得压过锁定态（表单强制 Agnes，configData 同步写回）
+    if (getUseBuiltIn()) {
+        toggleProviderInputsEditable();
+        applyBuiltInModelPolicy(configData);
+        if (configData.models && configData.models.providers) {
+            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
+        }
+        updateConfigJsonPreview();
     }
 }
 
@@ -3819,6 +3917,14 @@ const handleSaveConfigAction = async () => {
         finalFallback = `${fallbackProviderVal}/${fallbackModelVal}`;
     }
     configData.agents.defaults.model.fallbacks = [finalFallback];
+
+    // 内置开启：最终再强制一次，防止 JSON 手改 / 脏表单写回非 Agnes
+    if (useBuiltIn) {
+        applyBuiltInModelPolicy(configData);
+        if (configData.models && configData.models.providers) {
+            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
+        }
+    }
 
     // 双模型教学：老师/学生模型写回插件配置
     if (!configData.plugins) configData.plugins = {};

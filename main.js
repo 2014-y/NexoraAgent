@@ -40,6 +40,7 @@ const {
     syncGatewayAuthToStateDirs,
     buildGatewayChildEnv
 } = require('./gateway-auth');
+const { syncModelConfigToStateDirs } = require('./openclaw-model-sync');
 
 function safeMainErrorLogPath() {
     try {
@@ -455,6 +456,19 @@ function lockGatewayAuthBeforeStart() {
         }
     } catch (e) {
         console.warn('[TokenGuard] Auth sync skipped:', e.message);
+    }
+
+    // 启动前按当前默认模型纠正沙箱 OpenClaw 会话粘性，避免面板仍用旧 modelOverride
+    try {
+        if (fs.existsSync(CONFIG_PATH)) {
+            const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+            const syncedModels = syncModelConfigToStateDirs(altDirs, cfg, CONFIG_DIR);
+            if (syncedModels.length) {
+                console.log('[ModelSync] Pre-start synced model config to:', syncedModels.join(' | '));
+            }
+        }
+    } catch (e) {
+        console.warn('[ModelSync] Pre-start sync skipped:', e.message);
     }
 
     global.latestAcpDashboardUrl = buildControlUiUrl(port, token);
@@ -2380,6 +2394,11 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         try {
             cleanConfig = normalizeGatewayAuthConfig(cleanConfig, CLAWAI_DEFAULT_GATEWAY_TOKEN).config;
         } catch (e) {}
+
+        // 保存时强制补齐压缩预留等安全默认，避免 Auto-compaction could not recover
+        try {
+            cleanConfig = ensureLatencySafeConfig(cleanConfig).config;
+        } catch (e) {}
         
         // 读取原本的文件尺寸
         const originalBytes = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).size : 39500;
@@ -2394,6 +2413,19 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         }
 
         fs.writeFileSync(CONFIG_PATH, newJson, 'utf8');
+
+        // 沙箱 OpenClaw 会话会粘住旧 model/modelOverride；只改 openclaw.json 不会换网关对话模型。
+        // 保存时把默认主/备模型同步进 sessions + 旁路状态目录，避免面板仍用上一模型。
+        try {
+            const altDirs = listKnownOpenClawStateDirs(process.env, CONFIG_DIR);
+            const syncedDirs = syncModelConfigToStateDirs(altDirs, cleanConfig, CONFIG_DIR);
+            if (syncedDirs.length) {
+                console.log('[ModelSync] Synced default model config to:', syncedDirs.join(' | '));
+            }
+        } catch (e) {
+            console.warn('[ModelSync] Session/model sync skipped:', e.message);
+        }
+
         return { success: true };
     } catch (e) {
         console.error('Failed to save config:', e);

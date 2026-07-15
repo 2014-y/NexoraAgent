@@ -56,14 +56,17 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "agnes-ai/agnes-2.0-flash",
+        "primary": "ollama/qwen2.5-coder:7b",
         "fallbacks": [
-          "agnes-ai/agnes-1.5-flash"
+          "ollama/qwen2.5:7b"
         ]
       },
       "maxConcurrent": 4,
       "bootstrapMaxChars": 8000,
-      "bootstrapTotalMaxChars": 24000
+      "bootstrapTotalMaxChars": 24000,
+      "compaction": {
+        "reserveTokensFloor": 20000
+      }
     }
   },
   "channels": {

@@ -1,0 +1,20 @@
+=== C:\Users\Yuan\AppData\Local\ClawAI\.openclaw
+agent:main:main => {"model":"agnes-2.0-flash","modelProvider":"agnes-ai"}
+=== C:\Users\Yuan\.openclaw
+agent:main:main => {"authProfileOverride":"agnes-1","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0,"modelProvider":"agnes-ai","model":"agnes-2.0-flash"}
+agent:main:openclaw-weixin:385aea8dd4fa-im-bot:direct:o9cq80z2g__3qcelqxkzeznij5iy@im.wechat => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-1","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:ffd3eac7-5576-4a25-8aad-f0f0cfc88648 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash"}
+agent:main:dashboard:38df98ae-6f33-4d36-8335-4e4b327e7750 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash"}
+agent:main:dashboard:343b4711-1782-4f13-b6bb-15b990629852 => {"providerOverride":"ollama","modelOverride":"gemma4:latest","modelOverrideSource":"auto","modelOverrideFallbackOriginProvider":"agnes-ai","modelOverrideFallbackOriginModel":"agnes-2.0-flash","fallbackNoticeSelectedModel":"agnes-ai/agnes-2.0-flash","fallbackNoticeActiveModel":"ollama/gemma4:latest","modelProvider":"ollama","model":"gemma4:latest"}
+agent:main:main-new => {"modelProvider":"ollama","model":"gemma4:latest"}
+agent:main:dashboard:fa9e220a-debc-410a-81fb-73727b12c19e => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-2","authProfileOverrideSource":"auto"}
+agent:main:openclaw-weixin:c5d88ed69890-im-bot:direct:o9cq80z2g__3qcelqxkzeznij5iy@im.wechat => {"authProfileOverride":"agnes-3","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:7f9ccdd3-19ad-4cf5-96f8-f62a5b9600aa => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-1","authProfileOverrideSource":"auto"}
+agent:main:dashboard:0013b942-3d60-4e22-b36d-b8cad0b269a0 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-1","authProfileOverrideSource":"auto"}
+agent:main:openclaw-weixin:a50bb0d83d20-im-bot:direct:o9cq80z2g__3qcelqxkzeznij5iy@im.wechat => {"authProfileOverride":"agnes-6","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:8131c342-ca7b-4228-b4db-1f074dfb2e0b => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-6","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:3ae32640-3f72-450f-9e6e-d3d8f3ae5b3e => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-6","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:88eaa261-2b9e-431d-9b6f-e968916825c0 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-6","authProfileOverrideSource":"auto","authProfileOverrideCompactionCount":0}
+agent:main:dashboard:c597d418-84a6-4d4a-b4ea-a3fc188075d8 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-4","authProfileOverrideSource":"auto"}
+agent:main:dashboard:4a619a7a-1153-4202-8e80-345b31f9de53 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-4","authProfileOverrideSource":"auto"}
+agent:main:dashboard:fab81fa4-cff1-4b52-a36a-ab31399b0457 => {"modelProvider":"agnes-ai","model":"agnes-2.0-flash","authProfileOverride":"agnes-4","authProfileOverrideSource":"auto"}

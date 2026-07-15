@@ -15,7 +15,9 @@ const DEFAULTS = {
   ollamaMaxTokens: 1024,
   bootstrapMaxChars: 8000,
   bootstrapTotalMaxChars: 24000,
-  cloudContextWindowCap: 131072
+  cloudContextWindowCap: 131072,
+  // OpenClaw auto-compaction：低于此值易触发 “could not recover this turn”
+  reserveTokensFloor: 20000
 };
 
 function isObject(v) {
@@ -55,6 +57,15 @@ function ensureLatencySafeConfig(config, opts = {}) {
     const prev = ad.bootstrapTotalMaxChars;
     ad.bootstrapTotalMaxChars = DEFAULTS.bootstrapTotalMaxChars;
     changes.push(`bootstrapTotalMaxChars: ${prev ?? 'unset'} -> ${DEFAULTS.bootstrapTotalMaxChars}`);
+  }
+
+  // 压缩预留 token：缺省或过小会导致 Auto-compaction could not recover this turn
+  if (!ad.compaction || typeof ad.compaction !== 'object') ad.compaction = {};
+  const floor = Number(ad.compaction.reserveTokensFloor);
+  if (!Number.isFinite(floor) || floor < DEFAULTS.reserveTokensFloor) {
+    const prev = ad.compaction.reserveTokensFloor;
+    ad.compaction.reserveTokensFloor = DEFAULTS.reserveTokensFloor;
+    changes.push(`compaction.reserveTokensFloor: ${prev ?? 'unset'} -> ${DEFAULTS.reserveTokensFloor}`);
   }
 
   // 关闭人工延迟（如果被打开会感觉「一句话都要等一下」）
