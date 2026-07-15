@@ -79,7 +79,8 @@
       "shortcutName": "ClawAI",
       "include": "config/installer.nsh",
       "installerIcon": "config/icon.ico",
-      "uninstallerIcon": "config/icon.ico"
+      "uninstallerIcon": "config/icon.ico",
+      "useZip": true
     },
     "files": [
       "main.js",
@@ -103,11 +104,6 @@
       "config/icon.png",
       "config/icon.ico",
       "plugins/**/*",
-      "extensions/**/*",
-      "node_modules/**/*",
-      "!node_modules/electron/**/*",
-      "!node_modules/electron-builder/**/*",
-      "!node_modules/electron-packager/**/*",
       ".node-sandbox/**/*",
       "!.node-sandbox/node_modules/**/*",
       "extensions/**/*"
