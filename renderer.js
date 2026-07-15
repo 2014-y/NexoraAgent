@@ -1207,7 +1207,8 @@ async function init() {
             
             consoleSelectedChannel = pill.getAttribute('data-channel');
             localStorage.setItem('console_pref_channel', consoleSelectedChannel);
-            showConsoleChannelSkeleton();
+            const loadingEl = document.getElementById('console-channel-loading');
+            if (loadingEl) loadingEl.style.display = 'flex';
             updateConsoleChannelStatusUI();
         });
     });
@@ -6572,117 +6573,124 @@ function showConsoleChannelSkeleton() {
 
 async function updateConsoleChannelStatusUI() {
     const detailsEl = document.getElementById('console-channel-details-panel');
+    const loadingEl = document.getElementById('console-channel-loading');
     if (!detailsEl) return;
 
     if (!configData) {
-        showConsoleChannelSkeleton();
+        if (loadingEl) loadingEl.style.display = 'flex';
         return;
     }
 
-    if (consoleSelectedChannel === 'wechat') {
-        try {
-            const result = await window.api.checkWeChatStatus();
-            if (result.bound) {
+    if (loadingEl) loadingEl.style.display = 'flex';
+
+    try {
+        if (consoleSelectedChannel === 'wechat') {
+            try {
+                const result = await window.api.checkWeChatStatus();
+                if (result.bound) {
+                    setConsoleStatus(t('已配置', 'Configured', '已配置'), true);
+                    const savedAtStr = result.details.savedAt ? new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false }) : '--';
+                    detailsEl.style.display = 'block';
+                    detailsEl.innerHTML = `
+                        <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
+                        <div style="margin-bottom: 6px;">
+                            <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('账户标识', 'Account ID', '帳號標識')}</div>
+                            <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${result.details.accountId || '--'}</div>
+                        </div>
+                        <div style="margin-bottom: 2px;">
+                            <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('绑定时间', 'Bind Time', '綁定時間')}</div>
+                            <div style="color: var(--text-primary);">${savedAtStr}</div>
+                        </div>
+                    `;
+                } else {
+                    setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
+                    detailsEl.style.display = 'block';
+                    detailsEl.innerHTML = `
+                        <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
+                        <div style="color: #ff5252; font-weight: bold;">${t('当前未绑定微信', 'WeChat is not bound', '當前未綁定微信')}</div>
+                        <div style="color: var(--text-secondary); margin-top: 4px;">${t('扫码绑定微信后可作为助手收发微信消息。', 'Bind WeChat to send and receive messages.', '掃碼綁定微信後可作為助手收發微信消息。')}</div>
+                        <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理绑定', '⚙️ Go to Channels to bind', '⚙️ 去通訊管理綁定')}</a></div>
+                    `;
+                }
+            } catch(e) {
+                setConsoleStatus(t('获取失败', 'Failed', '獲取失敗'), false);
+            }
+        } 
+        else if (consoleSelectedChannel === 'feishu') {
+            const feishu = (configData.channels && configData.channels.feishu) || {};
+            const accounts = feishu.accounts || {};
+            const defaultAccId = feishu.defaultAccount || '';
+            const isEnabled = feishu.enabled !== false && Object.keys(accounts).length > 0;
+
+            if (isEnabled) {
                 setConsoleStatus(t('已配置', 'Configured', '已配置'), true);
-                const savedAtStr = result.details.savedAt ? new Date(result.details.savedAt).toLocaleString('zh-CN', { hour12: false }) : '--';
+                const defaultAcc = accounts[defaultAccId] || {};
                 detailsEl.style.display = 'block';
                 detailsEl.innerHTML = `
-                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
                     <div style="margin-bottom: 6px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('账户标识', 'Account ID', '帳號標識')}</div>
-                        <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${result.details.accountId || '--'}</div>
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
+                        <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
                     </div>
                     <div style="margin-bottom: 2px;">
-                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('绑定时间', 'Bind Time', '綁定時間')}</div>
-                        <div style="color: var(--text-primary);">${savedAtStr}</div>
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
+                        <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
                     </div>
                 `;
             } else {
                 setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
                 detailsEl.style.display = 'block';
                 detailsEl.innerHTML = `
-                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 微信绑定信息', '👤 WeChat Binding Info', '👤 微信綁定信息')}</div>
-                    <div style="color: #ff5252; font-weight: bold;">${t('当前未绑定微信', 'WeChat is not bound', '當前未綁定微信')}</div>
-                    <div style="color: var(--text-secondary); margin-top: 4px;">${t('扫码绑定微信后可作为助手收发微信消息。', 'Bind WeChat to send and receive messages.', '掃碼綁定微信後可作為助手收發微信消息。')}</div>
-                    <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理绑定', '⚙️ Go to Channels to bind', '⚙️ 去通訊管理綁定')}</a></div>
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
+                    <div style="color: #ff5252; font-weight: bold;">${t('当前未配置飞书账号', 'Feishu account not configured', '當前未配置飛書帳號')}</div>
+                    <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置飞书 App ID 和 Secret。', 'Please go to Channels to configure Feishu App ID & Secret.', '請前往多渠道通訊管理配置飛書 App ID 和 Secret。')}</div>
+                    <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
                 `;
             }
-        } catch(e) {
-            setConsoleStatus(t('获取失败', 'Failed', '獲取失敗'), false);
-        }
-    } 
-    else if (consoleSelectedChannel === 'feishu') {
-        const feishu = (configData.channels && configData.channels.feishu) || {};
-        const accounts = feishu.accounts || {};
-        const defaultAccId = feishu.defaultAccount || '';
-        const isEnabled = feishu.enabled !== false && Object.keys(accounts).length > 0;
+        } 
+        else if (consoleSelectedChannel === 'qqbot') {
+            const qqbot = (configData.channels && configData.channels.qqbot) || {};
+            const accounts = qqbot.accounts || {};
+            const defaultAccId = qqbot.defaultAccount || '';
+            const isEnabled = qqbot.enabled === true && Object.keys(accounts).length > 0;
 
-        if (isEnabled) {
-            setConsoleStatus(t('已配置', 'Configured', '已配置'), true);
-            const defaultAcc = accounts[defaultAccId] || {};
-            detailsEl.style.display = 'block';
-            detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
-                <div style="margin-bottom: 6px;">
-                    <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
-                    <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
-                </div>
-                <div style="margin-bottom: 2px;">
-                    <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
-                    <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
-                </div>
-            `;
-        } else {
-            setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
-            detailsEl.style.display = 'block';
-            detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 飞书绑定信息', '👤 Feishu Binding Info', '👤 飛書綁定信息')}</div>
-                <div style="color: #ff5252; font-weight: bold;">${t('当前未配置飞书账号', 'Feishu account not configured', '當前未配置飛書帳號')}</div>
-                <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置飞书 App ID 和 Secret。', 'Please go to Channels to configure Feishu App ID & Secret.', '請前往多渠道通訊管理配置飛書 App ID 和 Secret。')}</div>
-                <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
-            `;
+            if (isEnabled) {
+                setConsoleStatus(t('已配置', 'Configured', '已配置'), true);
+                const defaultAcc = accounts[defaultAccId] || {};
+                detailsEl.style.display = 'block';
+                detailsEl.innerHTML = `
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
+                    <div style="margin-bottom: 6px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
+                        <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
+                    </div>
+                    <div style="margin-bottom: 2px;">
+                        <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
+                        <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
+                    </div>
+                `;
+            } else {
+                setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
+                detailsEl.style.display = 'block';
+                detailsEl.innerHTML = `
+                    <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
+                    <div style="color: #ff5252; font-weight: bold;">${t('当前未配置QQ机器人', 'QQ Bot not configured', '當前未配置QQ機器人')}</div>
+                    <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置 QQ 机器人凭证。', 'Please go to Channels to configure QQ Bot credentials.', '請前往多渠道通訊管理配置 QQ 機器人憑證。')}</div>
+                    <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
+                `;
+            }
         }
-    } 
-    else if (consoleSelectedChannel === 'qqbot') {
-        const qqbot = (configData.channels && configData.channels.qqbot) || {};
-        const accounts = qqbot.accounts || {};
-        const defaultAccId = qqbot.defaultAccount || '';
-        const isEnabled = qqbot.enabled === true && Object.keys(accounts).length > 0;
 
-        if (isEnabled) {
-            setConsoleStatus(t('已配置', 'Configured', '已配置'), true);
-            const defaultAcc = accounts[defaultAccId] || {};
-            detailsEl.style.display = 'block';
-            detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
-                <div style="margin-bottom: 6px;">
-                    <div style="color: var(--text-secondary); margin-bottom: 2px;">${t('默认账户', 'Default Account', '默認帳戶')}</div>
-                    <div style="font-family: var(--font-mono); color: var(--text-primary); font-weight: bold; word-break: break-all;">${defaultAccId || '--'}</div>
-                </div>
-                <div style="margin-bottom: 2px;">
-                    <div style="color: var(--text-secondary); margin-bottom: 2px;">App ID</div>
-                    <div style="color: var(--text-primary); word-break: break-all;">${defaultAcc.appId || '--'}</div>
-                </div>
-            `;
-        } else {
-            setConsoleStatus(t('未配置', 'Not Configured', '未配置'), false);
-            detailsEl.style.display = 'block';
-            detailsEl.innerHTML = `
-                <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 6px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">${t('👤 QQ机器人绑定', '👤 QQ Bot Binding Info', '👤 QQ機器人綁定')}</div>
-                <div style="color: #ff5252; font-weight: bold;">${t('当前未配置QQ机器人', 'QQ Bot not configured', '當前未配置QQ機器人')}</div>
-                <div style="color: var(--text-secondary); margin-top: 4px;">${t('请前往多渠道通讯管理配置 QQ 机器人凭证。', 'Please go to Channels to configure QQ Bot credentials.', '請前往多渠道通訊管理配置 QQ 機器人憑證。')}</div>
-                <div style="margin-top: 10px; width: 100%;"><a href="#" id="lnk-go-communication" class="console-go-bind-btn">${t('⚙️ 去通讯管理配置', '⚙️ Go to Channels to configure', '⚙️ 去通訊管理配置')}</a></div>
-            `;
+        const goCommLnk = document.getElementById('lnk-go-communication');
+        if (goCommLnk) {
+            goCommLnk.addEventListener('click', (e) => {
+                e.preventDefault();
+                const commTab = document.getElementById('nav-communication-mgmt');
+                if (commTab) commTab.click();
+            });
         }
-    }
-
-    const goCommLnk = document.getElementById('lnk-go-communication');
-    if (goCommLnk) {
-        goCommLnk.addEventListener('click', (e) => {
-            e.preventDefault();
-            const commTab = document.getElementById('nav-communication-mgmt');
-            if (commTab) commTab.click();
-        });
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
     }
 }
 

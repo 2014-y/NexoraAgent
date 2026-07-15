@@ -1909,3 +1909,32 @@ input:focus, select:focus, textarea:focus {
   50% { opacity: 0.7; }
   100% { opacity: 0.35; }
 }
+
+/* 卡片加载遮罩层 */
+.card-loading-overlay {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(13, 14, 21, 0.75);
+  backdrop-filter: blur(1.5px);
+  border-radius: 8px;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+  pointer-events: auto; /* 阻止对卡片的点击操作 */
+  transition: all 0.25s ease;
+}
+.card-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: card-spin 0.85s infinite linear;
+}
+@keyframes card-spin {
+  to { transform: rotate(360deg); }
+}
