@@ -218,42 +218,36 @@
                   <span data-i18n="console.today_requests">今日请求次数</span>
                   <div class="stat-card-name-val" id="stat-total-requests">0 次</div>
                 </div>
-                <!-- 控制台通道整合卡片 -->
-                <div class="stat-card-mini" id="console-channel-card" style="display: flex; flex-direction: column; align-items: center; padding: 12px 14px; box-sizing: border-box; position: relative; gap: 10px; min-height: auto; height: auto; justify-content: flex-start;">
+                <div class="stat-card-mini" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 72px; padding: 8px 10px; box-sizing: border-box; position: relative;">
+                  <!-- 动态状态字样 -->
+                  <div class="stat-card-name-val" id="stat-channel-status" style="font-size: 13px; font-weight: bold; color: #ff5252; display: flex; align-items: center; gap: 6px; justify-content: center; margin-bottom: 8px;">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #ff5252; display: inline-block; transition: background 0.3s;" id="stat-channel-status-dot"></span>
+                    <span id="stat-channel-status-text" data-i18n="console.wechat_status.unbound">未配置</span>
+                  </div>
+                  <!-- 胶囊选项卡 -->
+                  <div style="display: flex; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 20px; padding: 2px; gap: 2px; width: 100%; box-sizing: border-box;">
+                    <div class="console-channel-pill active" data-channel="qqbot" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: white; transition: all 0.2s; font-weight: bold; background: linear-gradient(135deg, var(--accent-color), #4f46e5); box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);">QQ</div>
+                    <div class="console-channel-pill" data-channel="wechat" data-i18n="console.channel.wechat" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">微信</div>
+                    <div class="console-channel-pill" data-channel="feishu" data-i18n="console.channel.feishu" style="flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">飞书</div>
+                  </div>
+                </div>
+                
+                <!-- 控制台通道详细绑定信息 -->
+                <div id="console-channel-details-panel" style="display: block; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-size: 11px; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left; position: relative;">
                   <!-- 加载遮罩层 Loading Overlay -->
                   <div class="card-loading-overlay" id="console-channel-loading" style="display: flex;">
                     <div class="card-spinner"></div>
                   </div>
-                  <!-- 头部：状态与小药丸 -->
-                  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <!-- 动态状态字样 -->
-                    <div class="stat-card-name-val" id="stat-channel-status" style="font-size: 12px; font-weight: bold; color: #ff5252; display: flex; align-items: center; gap: 4px; justify-content: center; margin-bottom: 0;">
-                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #ff5252; display: inline-block; transition: background 0.3s;" id="stat-channel-status-dot"></span>
-                      <span id="stat-channel-status-text" data-i18n="console.wechat_status.unbound">未配置</span>
-                    </div>
-                    <!-- 胶囊选项卡 -->
-                    <div style="display: flex; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 20px; padding: 2px; gap: 2px; width: 130px; box-sizing: border-box;">
-                      <div class="console-channel-pill active" data-channel="qqbot" style="flex: 1; text-align: center; font-size: 9px; padding: 3px 0; border-radius: 18px; cursor: pointer; color: white; transition: all 0.2s; font-weight: bold; background: linear-gradient(135deg, var(--accent-color), #4f46e5); box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);">QQ</div>
-                      <div class="console-channel-pill" data-channel="wechat" data-i18n="console.channel.wechat" style="flex: 1; text-align: center; font-size: 9px; padding: 3px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">微信</div>
-                      <div class="console-channel-pill" data-channel="feishu" data-i18n="console.channel.feishu" style="flex: 1; text-align: center; font-size: 9px; padding: 3px 0; border-radius: 18px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s;">飞书</div>
-                    </div>
-                  </div>
-                  
-                  <!-- 分割线 -->
-                  <div style="width: 100%; border-bottom: 1px dashed rgba(255, 255, 255, 0.08); margin: 2px 0;"></div>
-
                   <!-- 动态渲染绑定信息 / 初始骨架屏 -->
-                  <div id="console-channel-details-panel" style="display: block; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left; font-size: 11px;">
-                    <div class="skeleton-loader">
-                      <div class="skeleton-title"></div>
-                      <div class="skeleton-item">
-                        <div class="skeleton-label"></div>
-                        <div class="skeleton-value"></div>
-                      </div>
-                      <div class="skeleton-item" style="margin-top: 4px;">
-                        <div class="skeleton-label"></div>
-                        <div class="skeleton-value"></div>
-                      </div>
+                  <div class="skeleton-loader">
+                    <div class="skeleton-title"></div>
+                    <div class="skeleton-item">
+                      <div class="skeleton-label"></div>
+                      <div class="skeleton-value"></div>
+                    </div>
+                    <div class="skeleton-item" style="margin-top: 4px;">
+                      <div class="skeleton-label"></div>
+                      <div class="skeleton-value"></div>
                     </div>
                   </div>
                 </div>
