@@ -1592,9 +1592,9 @@ function setupIpcListeners() {
         }
         text = filteredLines.join('\n');
 
-        if (text.includes('[gateway] ready') || text.includes('[heartbeat] started') || text.includes('advertised gateway')) {
+        if (text.includes('agent runtime plugins pre-warmed')) {
             const wasReady = gatewayFullyReady;
-            gatewayFullyReady = true;
+            setGatewayFullyReadyUI();
             // 网关刚就绪：若已在 OpenClaw 面板，强制用当前令牌免密重载一次
             if (!wasReady) {
                 const pane = document.getElementById('openclaw-panel-view');
@@ -1643,7 +1643,7 @@ function setupIpcListeners() {
                 targetProgress = 20;
                 targetText = '正在校验ClawAI配置文件与诊断系统...';
                 updated = true;
-            } else if (text.includes('Failed to install missing configured plugin') || text.includes('TokenGuard')) {
+            } else if (text.includes('Failed to install missing configured plugin')) {
                 targetProgress = 60;
                 targetText = '正在后台下载并安装缺失的扩展插件，可能需要1-3分钟，请耐心等待...';
                 updated = true;
@@ -1652,10 +1652,14 @@ function setupIpcListeners() {
                 targetText = '正在装载核心插件驱动程序...';
                 updated = true;
             } else if (text.includes('starting HTTP server') || text.includes('force: no listeners')) {
-                targetProgress = 80;
+                targetProgress = 70;
                 targetText = '正在拉起 HTTP 路由服务器端口服务...';
                 updated = true;
-            } else if (text.includes('HTTP server is listening') || text.includes('Server is running on') || text.includes('Setup complete!') || text.includes('running on port') || text.includes('started (interval:')) {
+            } else if (text.includes('HTTP server listening on') || text.includes('Server is running on') || text.includes('Setup complete!') || text.includes('running on port') || text.includes('started (interval:')) {
+                targetProgress = 90;
+                targetText = '核心服务已开启，正在加载业务插件与长连接服务...';
+                updated = true;
+            } else if (text.includes('agent runtime plugins pre-warmed')) {
                 targetProgress = 100;
                 targetText = '本地 AI ClawAI服务就绪！';
                 updated = true;
@@ -1765,9 +1769,20 @@ function setupIpcListeners() {
     });
 
     // ClawAI状态同步
+function setGatewayFullyReadyUI() {
+    if (gatewayFullyReady) return;
+    gatewayFullyReady = true;
+    gatewayStatus = 'running';
+    
+    updateGatewayStatusUI('running');
+    sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已成功启动运行！');
+    // 重启后清掉缓存的面板 URL，下次进入强制免密重载
+    __openclawPanelLastUrl = '';
+}
+
+    // ClawAI状态同步
     window.api.onStatusChanged((status) => {
         const oldStatus = gatewayStatus;
-        gatewayStatus = status;
         
         // 当状态变更时，主动释放启停锁定状态并恢复按钮可用样式
         window.isTogglingGateway = false;
@@ -1779,19 +1794,34 @@ function setupIpcListeners() {
         gatewayToggleBtn.style.opacity = '';
         gatewayToggleBtn.style.cursor = '';
 
-        updateGatewayStatusUI(status);
-        if (status === 'running') {
-            gatewayRunningTime = Date.now();
-            if (oldStatus !== 'running') {
-                sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已成功启动运行！');
-                // 重启后清掉缓存的面板 URL，下次进入强制免密重载
-                __openclawPanelLastUrl = '';
-            }
-        } else if (status === 'stopped') {
+        if (status === 'stopped') {
+            gatewayStatus = 'stopped';
+            gatewayFullyReady = false;
+            updateGatewayStatusUI('stopped');
             if (oldStatus === 'running') {
                 sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已停止运行。');
             }
             __openclawPanelLastUrl = '';
+        } 
+        else if (status === 'running') {
+            gatewayRunningTime = Date.now();
+            // 如果是冷启动，当前进度还在进行中，不直接设为 running UI，而是维持在 starting
+            if (currentProgress > 0 && !gatewayFullyReady) {
+                gatewayStatus = 'starting';
+                updateGatewayStatusUI('starting');
+            } else {
+                gatewayStatus = 'running';
+                gatewayFullyReady = true;
+                updateGatewayStatusUI('running');
+                if (oldStatus !== 'running') {
+                    sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已成功启动运行！');
+                    __openclawPanelLastUrl = '';
+                }
+            }
+        }
+        else {
+            gatewayStatus = status;
+            updateGatewayStatusUI(status);
         }
     });
 
