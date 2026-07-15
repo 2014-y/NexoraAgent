@@ -32,9 +32,10 @@
     "probe": "openclaw mcp probe",
     "logs": "type logs\\openclaw-%date%.log",
     "app:start": "electron .",
-    "preapp:dist": "node patch_nsis.js",
+    "preapp:dist": "node scripts/pack-gateway-runtime.js && node patch_nsis.js",
     "app:dist": "electron-builder --windows nsis",
-    "app:pack": "electron-packager . \"ClawAI\" --platform=win32 --arch=x64 --out=dist --overwrite"
+    "app:pack": "electron-packager . \"ClawAI\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "pack:runtime": "node scripts/pack-gateway-runtime.js"
   },
   "dependencies": {
     "@openclaw/feishu": "2026.6.11",
@@ -59,7 +60,15 @@
   "build": {
     "appId": "com.2014y.aigateway",
     "productName": "ClawAI",
-    "asar": false,
+    "asar": true,
+    "compression": "store",
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "forceCodeSigning": false,
+    "asarUnpack": [
+      "**/*.node",
+      "**/node-pty/**"
+    ],
     "icon": "config/icon.ico",
     "directories": {
       "output": "dist"
@@ -77,47 +86,54 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "ClawAI",
+      "runAfterFinish": false,
       "include": "config/installer.nsh",
       "installerIcon": "config/icon.ico",
-      "uninstallerIcon": "config/icon.ico"
+      "uninstallerIcon": "config/icon.ico",
+      "deleteAppDataOnUninstall": false
     },
+    "extraResources": [
+      {
+        "from": "build-resources/gateway-runtime.zip",
+        "to": "gateway-runtime.zip"
+      }
+    ],
     "files": [
       "main.js",
+      "gateway-runtime.js",
       "home-resolve.js",
       "plugin-adapt.js",
       "openclaw-state.js",
       "gateway-auth.js",
+      "openclaw-model-sync.js",
       "latency-tune.js",
       "token-usage-parse.js",
       "plugin-catalog.js",
       "preload.js",
-      "patch_gateway.js",
-      "weixin-direct-login.mjs",
-      "capture-desktop.ps1",
       "renderer.js",
       "locales.js",
       "index.html",
       "index.css",
+      "splash.html",
       "config/openclaw.json.example",
       "config/icon.jpg",
       "config/icon.png",
       "config/icon.ico",
-      "plugins/**/*",
-      "extensions/**/*",
       "node_modules/**/*",
       "!node_modules/electron/**/*",
       "!node_modules/electron-builder/**/*",
       "!node_modules/electron-packager/**/*",
-      ".node-sandbox/**/*",
-      "!.node-sandbox/node_modules/**/*",
-      "extensions/**/*"
-    ],
-    "extraFiles": [
-      {
-        "from": ".node-sandbox/node_modules",
-        "to": "resources/app/.node-sandbox/node_modules",
-        "filter": ["**/*"]
-      }
+      "!node_modules/openclaw/**/*",
+      "!node_modules/@openclaw/**/*",
+      "!node_modules/@tencent-weixin/**/*",
+      "!node_modules/open-computer-use/**/*",
+      "!node_modules/**/{test,tests,__tests__,docs,doc,example,examples,coverage,.github,man}/**",
+      "!node_modules/**/*.{md,markdown,map,ts,tsx}",
+      "!node_modules/**/LICENSE*",
+      "!node_modules/**/LICENCE*",
+      "!plugins/**/*",
+      "!extensions/**/*",
+      "!.node-sandbox/**/*"
     ]
   }
 }

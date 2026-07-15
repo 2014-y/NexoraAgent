@@ -41,6 +41,10 @@ const {
     buildGatewayChildEnv
 } = require('./gateway-auth');
 const { syncModelConfigToStateDirs } = require('./openclaw-model-sync');
+const {
+    getGatewayRuntimeRoot,
+    ensureGatewayRuntime
+} = require('./gateway-runtime');
 
 function safeMainErrorLogPath() {
     try {
@@ -74,9 +78,30 @@ process.on('unhandledRejection', (reason) => {
     } catch(e) {}
 });
 
+// 打包后网关运行时在用户目录解压；开发态则是工程根目录。
+// Electron 自身资源（preload/html/icon）仍用 __dirname（可在 asar 内）。
+function resolveAppFsRoot() {
+    try {
+        return getGatewayRuntimeRoot(app);
+    } catch (e) {
+        // app 未就绪时退化：开发态工程根 / 旧 asar.unpacked
+    }
+    let base = __dirname;
+    if (base.includes(`${path.sep}app.asar`) && !base.includes(`${path.sep}app.asar.unpacked`)) {
+        base = base.replace(`${path.sep}app.asar`, `${path.sep}app.asar.unpacked`);
+    } else if (base.includes('/app.asar') && !base.includes('/app.asar.unpacked')) {
+        base = base.replace('/app.asar', '/app.asar.unpacked');
+    }
+    return base;
+}
+
+function resolveAppFsPath(...segments) {
+    return path.join(resolveAppFsRoot(), ...segments);
+}
+
 // 获取可用的 Node 可执行文件路径
 function getAvailableNodePath() {
-    const sandboxPath = path.join(__dirname, '.node-sandbox', 'node.exe');
+    const sandboxPath = resolveAppFsPath('.node-sandbox', 'node.exe');
     if (fs.existsSync(sandboxPath)) {
         return sandboxPath;
     }
@@ -185,7 +210,7 @@ function httpGetBuffer(url, { json = false, timeout = 30000 } = {}) {
 
 // 自愈升级内置的 Node.js 绿色沙箱
 async function checkAndHealSandboxNode() {
-    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const sandboxDir = resolveAppFsPath('.node-sandbox');
     const nodeExePath = path.join(sandboxDir, 'node.exe');
     
     let isOk = false;
@@ -592,8 +617,9 @@ function deployRuntimeArtifacts() {
     // openclaw-state / gateway-auth 必须与 patch 同目录部署，供沙箱子进程 require
     const names = ['patch_gateway.js', 'token-usage-parse.js', 'capture-desktop.ps1', 'openclaw-state.js', 'gateway-auth.js'];
     for (const name of names) {
-        const src = path.join(__dirname, name);
-        if (!fs.existsSync(src)) continue;
+        const srcCandidates = [resolveAppFsPath(name), path.join(__dirname, name)];
+        const src = srcCandidates.find((p) => fs.existsSync(p));
+        if (!src) continue;
         try {
             fs.copyFileSync(src, path.join(dir, name));
         } catch (e) {
@@ -661,12 +687,21 @@ function applyMachinePluginPathSanitize(config) {
 function resolveBundledNpmPluginPath(entry) {
     const candidates = entry.candidates || [];
     for (const rel of candidates) {
-        const abs = path.isAbsolute(rel) ? rel : path.join(__dirname, rel);
+        if (path.isAbsolute(rel)) {
+            if (fs.existsSync(rel)) return rel;
+            continue;
+        }
+        // 优先 asar.unpacked（沙箱 OpenClaw / 渠道插件需要真实文件路径）
+        const unpacked = resolveAppFsPath(rel);
+        if (fs.existsSync(unpacked)) return unpacked;
+        const abs = path.join(__dirname, rel);
         if (fs.existsSync(abs)) return abs;
     }
     // 开发树缺包时，回退到已安装产品目录（用户当前卡在 Install Weixin? 的常见原因）
     const fallbackRoots = [
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ClawAI', 'resources', 'app.asar.unpacked'),
         path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ClawAI', 'resources', 'app'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'ClawAI', 'resources', 'app.asar.unpacked'),
         path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'ClawAI', 'resources', 'app')
     ];
     for (const root of fallbackRoots) {
@@ -1188,8 +1223,11 @@ function seedBundledPlugins() {
             }
         };
 
-        seedFromRoot(path.join(__dirname, 'plugins'));
-        seedFromRoot(path.join(__dirname, 'extensions'));
+        seedFromRoot(resolveAppFsPath('plugins'));
+        seedFromRoot(resolveAppFsPath('extensions'));
+        // 开发态/asar 回退
+        if (!fs.existsSync(resolveAppFsPath('plugins'))) seedFromRoot(path.join(__dirname, 'plugins'));
+        if (!fs.existsSync(resolveAppFsPath('extensions'))) seedFromRoot(path.join(__dirname, 'extensions'));
 
         // 终极自愈保底：遍历所有已部署的 extensions 插件目录，补齐缺失的配置文件防止 OpenClaw 报错
         if (fs.existsSync(destRoot)) {
@@ -1460,8 +1498,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 }
 
-function createWindow() {
-    // ------------------- Splash Screen -------------------
+function createSplashWindow() {
     const splash = new BrowserWindow({
         width: 400,
         height: 300,
@@ -1471,9 +1508,26 @@ function createWindow() {
         resizable: false,
         center: true,
         show: true,
-        backgroundColor: '#00000000' // 透明背景，交由 splash.html 样式控制
+        backgroundColor: '#00000000'
     });
     splash.loadFile('splash.html');
+    return splash;
+}
+
+function updateSplashStatus(splash, message, percent) {
+    if (!splash || splash.isDestroyed()) return;
+    const msg = JSON.stringify(String(message || ''));
+    const pct = typeof percent === 'number' ? percent : 'null';
+    splash.webContents
+        .executeJavaScript(`window.__setStatus && window.__setStatus(${msg}, ${pct})`)
+        .catch(() => {});
+}
+
+function createWindow(existingSplash) {
+    // ------------------- Splash Screen -------------------
+    const splash = existingSplash && !existingSplash.isDestroyed()
+        ? existingSplash
+        : createSplashWindow();
     // 主窗口保持隐藏，待渲染完成后一次性弹出
     mainWindow = new BrowserWindow({
         width: 1120,
@@ -1495,31 +1549,18 @@ function createWindow() {
             webviewTag: true
         }
     });
-    // 每次启动清除渲染进程缓存，确保 HTML/CSS/JS 修改立即生效
-    session.defaultSession.clearCache().catch(() => {});
+    // 开发态才清缓存；安装包每次 clearCache 会明显拖慢首屏
+    try {
+        if (!app.isPackaged) {
+            session.defaultSession.clearCache().catch(() => {});
+        }
+    } catch (e) {}
 
     mainWindow.loadFile('index.html');
     // 当渲染进程首次绘制完成后，关闭 splash 并展示主窗口
     mainWindow.once('ready-to-show', () => {
         splash.destroy();
         mainWindow.show();
-    });
-    // Duplicate mainWindow creation removed
-
-
-    // Duplicate window init block removed
-
-    mainWindow.webContents.on('did-finish-load', async () => {
-        try {
-            const html = await mainWindow.webContents.executeJavaScript("document.body.innerHTML");
-            const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'actual_rendered_html.log');
-            require('fs').writeFileSync(logPath, html, 'utf8');
-        } catch (e) {
-            try {
-                const logPath = path.join(process.env.USERPROFILE || process.env.HOME || process.env.APPDATA || 'C:\\', '.openclaw', 'actual_rendered_html.log');
-                require('fs').writeFileSync(logPath, `Error executing script: ${e.message}`, 'utf8');
-            } catch (err) {}
-        }
     });
 
     // 拦截本地ClawAI面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
@@ -1793,7 +1834,10 @@ async function startGatewayProcess() {
             const lockedAuth = lockGatewayAuthBeforeStart();
 
             // 部署补丁/截图脚本到可写运行时目录（云电脑不用固定 Public）
-            let patchPath = path.join(__dirname, 'patch_gateway.js').replace(/\\/g, '/');
+            let patchPath = resolveAppFsPath('patch_gateway.js').replace(/\\/g, '/');
+            if (!fs.existsSync(patchPath)) {
+                patchPath = path.join(__dirname, 'patch_gateway.js').replace(/\\/g, '/');
+            }
             try {
                 const deployed = deployRuntimeArtifacts();
                 if (deployed && deployed.patchPath && fs.existsSync(deployed.patchAbs)) {
@@ -1804,8 +1848,11 @@ async function startGatewayProcess() {
                 console.error('[TokenGuard] Failed to deploy runtime artifacts:', e.message);
             }
 
-            // 优先通过物理路径直接定位（完美避开打包后 Node.js 模块 exports 对子路径文件的加载限制）
-            let openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
+            // 优先通过物理路径直接定位（asar 打包时走 unpacked，供沙箱 Node 读取）
+            let openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'dist', 'index.js');
+            if (!fs.existsSync(openclawEntry)) {
+                openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
+            }
             if (!fs.existsSync(openclawEntry)) {
                 openclawEntry = require.resolve('openclaw/dist/index.js');
             }
@@ -1822,6 +1869,16 @@ async function startGatewayProcess() {
             childEnv.CLAWAI_PATCH_PATH = patchPath;
             childEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
             childEnv.CLAWAI_RUNTIME_DIR = process.env.CLAWAI_RUNTIME_DIR || path.dirname(patchPath);
+            // 打包后依赖在 gateway-runtime/node_modules（不在 asar），显式注入便于解析
+            try {
+                const runtimeNm = resolveAppFsPath('node_modules');
+                if (fs.existsSync(runtimeNm)) {
+                    childEnv.NODE_PATH = childEnv.NODE_PATH
+                        ? `${runtimeNm}${path.delimiter}${childEnv.NODE_PATH}`
+                        : runtimeNm;
+                    childEnv.CLAWAI_GATEWAY_RUNTIME = resolveAppFsRoot();
+                }
+            } catch (e) {}
 
             const forkOptions = {
                 cwd: CONFIG_DIR,
@@ -1930,7 +1987,7 @@ ipcMain.on('gateway-action', (event, action) => {
 });
 
 ipcMain.on('open-sandbox-terminal', () => {
-    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const sandboxDir = resolveAppFsPath('.node-sandbox');
     const { spawn } = require('child_process');
     
     // 终极无痛方案：使用 PowerShell 的 -EncodedCommand 特性！
@@ -1968,7 +2025,7 @@ let ptyProcess = null;
 
 ipcMain.handle('builtin-terminal-start', (event, lang) => {
     if (ptyProcess) return; // 已经存在则不重复创建
-    const sandboxDir = path.join(__dirname, '.node-sandbox');
+    const sandboxDir = resolveAppFsPath('.node-sandbox');
     const pty = require('node-pty');
     
     const isEn = lang === 'en-US';
@@ -2196,7 +2253,7 @@ function ensureOpenClawConfigInitialized() {
             if (sanitized.changed) needsSave = true;
         } catch (e) {}
 
-        const weixinPluginPath = path.join(__dirname, 'node_modules', '@tencent-weixin', 'openclaw-weixin');
+        const weixinPluginPath = resolveAppFsPath('node_modules', '@tencent-weixin', 'openclaw-weixin');
         // 当前安装目录下「允许进 load.paths」的渠道插件权威路径（仅微信等非官方）
         const bundledChannelAbsById = {};
         for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
@@ -2776,6 +2833,7 @@ function emitChannelLoginFailed(sess, error) {
  */
 function ensureWeixinDirectLoginScript() {
     const candidates = [
+        resolveAppFsPath('weixin-direct-login.mjs'),
         path.join(__dirname, 'weixin-direct-login.mjs'),
         path.join(CONFIG_DIR, 'weixin-direct-login.mjs')
     ];
@@ -2785,7 +2843,9 @@ function ensureWeixinDirectLoginScript() {
         } catch (e) {}
     }
 
-    const src = path.join(__dirname, 'weixin-direct-login.mjs');
+    const src = candidates.find((p) => {
+        try { return fs.existsSync(p) && !p.startsWith(CONFIG_DIR); } catch (e) { return false; }
+    }) || resolveAppFsPath('weixin-direct-login.mjs');
     // 开发树有源文件时拷到 ~/.openclaw
     if (fs.existsSync(src)) {
         try {
@@ -2910,7 +2970,7 @@ function startDirectWeixinChannelLogin(spec) {
     }
     env.WEIXIN_PLUGIN_ROOT = pluginRoot;
     // 让插件能解析到同级的 openclaw/plugin-sdk
-    const appNm = path.join(__dirname, 'node_modules');
+    const appNm = resolveAppFsPath('node_modules');
     env.NODE_PATH = env.NODE_PATH ? `${appNm}${path.delimiter}${env.NODE_PATH}` : appNm;
 
     const child = spawn(nodeExePath, [scriptPath], {
@@ -3112,7 +3172,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
         return startDirectWeixinChannelLogin(spec);
     }
 
-    const openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
+    const openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'dist', 'index.js');
     if (!fs.existsSync(openclawEntry)) {
         return { success: false, error: '内置 OpenClaw 模块缺失，无法唤醒绑定' };
     }
@@ -3122,7 +3182,9 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
         try { return deployRuntimeArtifacts(); } catch (e) { return null; }
     })();
     const patchPath = (deployed && deployed.patchPath)
-        || path.join(__dirname, 'patch_gateway.js').replace(/\\/g, '/');
+        || (fs.existsSync(resolveAppFsPath('patch_gateway.js'))
+            ? resolveAppFsPath('patch_gateway.js').replace(/\\/g, '/')
+            : path.join(__dirname, 'patch_gateway.js').replace(/\\/g, '/'));
     const cleanEnv = {
         ...process.env,
         NODE_TLS_REJECT_UNAUTHORIZED: '0',
@@ -3132,6 +3194,15 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
         if (key.toLowerCase().includes('proxy')) delete cleanEnv[key];
     }
     cleanEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
+    try {
+        const runtimeNm = resolveAppFsPath('node_modules');
+        if (fs.existsSync(runtimeNm)) {
+            cleanEnv.NODE_PATH = cleanEnv.NODE_PATH
+                ? `${runtimeNm}${path.delimiter}${cleanEnv.NODE_PATH}`
+                : runtimeNm;
+            cleanEnv.CLAWAI_GATEWAY_RUNTIME = resolveAppFsRoot();
+        }
+    } catch (e) {}
     const forkOptions = {
         cwd: CONFIG_DIR,
         stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -4452,7 +4523,7 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
 });
 
 // 初始化应用
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     // 家目录矫正：优先真实用户目录；不可写时改走 AppData\ClawAI，禁止落到裸 Temp
     try {
         // 保留改写前的真实用户目录，供鉴权双目录同步 / 排障
@@ -4516,10 +4587,52 @@ app.whenReady().then(() => {
         console.error('[System] Failed to resolve true user home:', err.message);
     }
 
-    // 尽早部署插件, 确保首次读配置 / 启动ClawAI前 ~/.openclaw/extensions 已就绪
-    try { seedBundledPlugins(); } catch (e) {}
-    createWindow();
+    // 打包态：异步解压 gateway-runtime.zip（切勿 spawnSync，否则窗口「未响应」）
+    let bootSplash = null;
+    let heartbeat = null;
+    try {
+        let packaged = false;
+        try { packaged = !!app.isPackaged; } catch (e) { packaged = false; }
+        if (packaged) {
+            bootSplash = createSplashWindow();
+            updateSplashStatus(bootSplash, '正在准备 OpenClaw 运行时…', 5);
+            let tick = 8;
+            heartbeat = setInterval(() => {
+                tick = Math.min(72, tick + 1.5);
+                updateSplashStatus(bootSplash, '正在解压运行时（首次启动，请稍候）…', Math.floor(tick));
+            }, 700);
+        }
+        const runtimeInfo = await ensureGatewayRuntime(app, {
+            onProgress: (p) => {
+                updateSplashStatus(bootSplash, (p && p.message) || '', p && p.percent);
+            }
+        });
+        console.log(
+            `[GatewayRuntime] mode=${runtimeInfo && runtimeInfo.mode} extracted=${runtimeInfo && runtimeInfo.extracted} root=${runtimeInfo && runtimeInfo.root}`
+        );
+        if (runtimeInfo && runtimeInfo.extracted) {
+            updateSplashStatus(bootSplash, '运行时就绪，正在启动…', 100);
+        }
+    } catch (err) {
+        console.error('[GatewayRuntime] ensure failed:', err);
+        try {
+            dialog.showErrorBox(
+                'OpenClaw 运行时未就绪',
+                `无法解压或定位网关运行时。\n\n${err && err.message ? err.message : err}\n\n请重新安装 ClawAI，或联系支持。`
+            );
+        } catch (e) {}
+    } finally {
+        if (heartbeat) {
+            try { clearInterval(heartbeat); } catch (e) {}
+        }
+    }
+
+    // 先出窗口再种插件，避免首启同步拷贝把 UI 卡死
+    createWindow(bootSplash);
     createTray();
+    setImmediate(() => {
+        try { seedBundledPlugins(); } catch (e) {}
+    });
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
