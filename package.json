@@ -79,8 +79,7 @@
       "shortcutName": "ClawAI",
       "include": "config/installer.nsh",
       "installerIcon": "config/icon.ico",
-      "uninstallerIcon": "config/icon.ico",
-      "useZip": true
+      "uninstallerIcon": "config/icon.ico"
     },
     "files": [
       "main.js",
@@ -106,7 +105,19 @@
       "plugins/**/*",
       ".node-sandbox/**/*",
       "!.node-sandbox/node_modules/**/*",
-      "extensions/**/*"
+      "extensions/**/*",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.ts",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.txt",
+      "!node_modules/**/*.yml",
+      "!node_modules/**/*.yaml",
+      "!node_modules/**/tests/**/*",
+      "!node_modules/**/test/**/*",
+      "!node_modules/**/examples/**/*",
+      "!node_modules/**/example/**/*",
+      "!node_modules/**/.github/**/*",
+      "!node_modules/**/.circleci/**/*"
     ],
     "extraFiles": [
       {
