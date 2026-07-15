@@ -1869,3 +1869,43 @@ input:focus, select:focus, textarea:focus {
 #status-label {
   display: none !important;
 }
+
+/* 骨架屏动画与样式 */
+.skeleton-loader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.skeleton-title {
+  width: 60%;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  animation: skeleton-pulse 1.4s infinite ease-in-out;
+  margin-bottom: 4px;
+}
+.skeleton-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skeleton-label {
+  width: 40%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 3px;
+  animation: skeleton-pulse 1.4s infinite ease-in-out;
+}
+.skeleton-value {
+  width: 90%;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  animation: skeleton-pulse 1.4s infinite ease-in-out;
+}
+@keyframes skeleton-pulse {
+  0% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+  100% { opacity: 0.35; }
+}

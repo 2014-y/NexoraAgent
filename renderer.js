@@ -1207,6 +1207,7 @@ async function init() {
             
             consoleSelectedChannel = pill.getAttribute('data-channel');
             localStorage.setItem('console_pref_channel', consoleSelectedChannel);
+            showConsoleChannelSkeleton();
             updateConsoleChannelStatusUI();
         });
     });
@@ -6550,11 +6551,33 @@ function setConsoleStatus(text, isGreen) {
     }
 }
 
+function showConsoleChannelSkeleton() {
+    const detailsEl = document.getElementById('console-channel-details-panel');
+    if (!detailsEl) return;
+    detailsEl.style.display = 'block';
+    detailsEl.innerHTML = `
+        <div class="skeleton-loader">
+            <div class="skeleton-title"></div>
+            <div class="skeleton-item">
+                <div class="skeleton-label"></div>
+                <div class="skeleton-value"></div>
+            </div>
+            <div class="skeleton-item" style="margin-top: 4px;">
+                <div class="skeleton-label"></div>
+                <div class="skeleton-value"></div>
+            </div>
+        </div>
+    `;
+}
+
 async function updateConsoleChannelStatusUI() {
     const detailsEl = document.getElementById('console-channel-details-panel');
     if (!detailsEl) return;
 
-    if (!configData) return;
+    if (!configData) {
+        showConsoleChannelSkeleton();
+        return;
+    }
 
     if (consoleSelectedChannel === 'wechat') {
         try {

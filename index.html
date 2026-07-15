@@ -228,8 +228,19 @@
                 </div>
                 
                 <!-- 控制台通道详细绑定信息 -->
-                <div id="console-channel-details-panel" style="display: none; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-size: 11px; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left;">
-                  <!-- 动态渲染绑定信息 -->
+                <div id="console-channel-details-panel" style="display: block; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-size: 11px; width: 100%; box-sizing: border-box; line-height: 1.6; color: var(--text-secondary); text-align: left;">
+                  <!-- 动态渲染绑定信息 / 初始骨架屏 -->
+                  <div class="skeleton-loader">
+                    <div class="skeleton-title"></div>
+                    <div class="skeleton-item">
+                      <div class="skeleton-label"></div>
+                      <div class="skeleton-value"></div>
+                    </div>
+                    <div class="skeleton-item" style="margin-top: 4px;">
+                      <div class="skeleton-label"></div>
+                      <div class="skeleton-value"></div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 系统诊断与核心配置面板 -->
