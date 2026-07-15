@@ -2956,22 +2956,72 @@ function startDirectWeixinChannelLogin(spec) {
                     clearTimeout(sess.wakeTimer);
                     sess.wakeTimer = null;
                 }
-                try {
-                    const status = getWeChatStatus();
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('wechat-login-success', status.bound ? status : {
-                            success: true,
-                            bound: true,
-                            details: { accountId: msg.accountId || 'weixin', userId: msg.userId || 'WeChat Bot' }
-                        });
-                        mainWindow.webContents.send('channel-login-success', {
-                            pluginId: 'openclaw-weixin',
-                            channel: 'wechat',
-                            accountId: msg.accountId
-                        });
-                        mainWindow.webContents.send('gateway-log', `[WeChat Login] ✅ 绑定成功\n`);
+                const accountId = msg.accountId || 'weixin';
+                // 延迟检查：给文件系统足够的时间落盘
+                const verifyAndNotify = () => {
+                    try {
+                        let status = getWeChatStatus();
+                        // 如果凭证文件不存在，创建目录后再试一次
+                        if (!status.bound) {
+                            console.warn(`[WeChat Login] 子进程报告成功但 accounts.json 不存在，创建目录后重试...`);
+                            try {
+                                const weixinDir = path.join(CONFIG_DIR, 'openclaw-weixin');
+                                fs.mkdirSync(weixinDir, { recursive: true });
+                                fs.mkdirSync(path.join(weixinDir, 'accounts'), { recursive: true });
+                            } catch (e) {}
+                            // 再等 1.5s 后最终检查
+                            setTimeout(() => {
+                                try {
+                                    status = getWeChatStatus();
+                                    emitWeChatResult(status, accountId, msg.userId);
+                                } catch (e2) {
+                                    console.error('[WeChat Login] 延迟校验失败:', e2);
+                                    emitWeChatResult({ bound: false }, accountId, msg.userId);
+                                }
+                            }, 1500);
+                            return;
+                        }
+                        emitWeChatResult(status, accountId, msg.userId);
+                    } catch (e) {
+                        console.error('[WeChat Login] verifyAndNotify error:', e);
+                        emitWeChatResult({ bound: false }, accountId, msg.userId);
                     }
-                } catch (e) {}
+                };
+                const emitWeChatResult = (status, acctId, userId) => {
+                    if (!mainWindow || mainWindow.isDestroyed()) return;
+                    if (status.bound) {
+                        mainWindow.webContents.send('wechat-login-success', status);
+                        mainWindow.webContents.send('gateway-log', `[WeChat Login] ✅ 绑定成功 (凭证已落盘)\n`);
+                    } else {
+                        console.warn(`[WeChat Login] 凭证文件仍未找到，使用子进程返回信息。accountId=${acctId}`);
+                        mainWindow.webContents.send('wechat-login-success', {
+                            success: true, bound: true,
+                            details: { accountId: (acctId || '').split('-')[0], userId: userId || 'WeChat Bot' }
+                        });
+                        mainWindow.webContents.send('gateway-log', `[WeChat Login] ⚠️ 绑定成功但凭证文件未发现，重启网关后可能需要重新扫码\n`);
+                    }
+                    mainWindow.webContents.send('channel-login-success', {
+                        pluginId: 'openclaw-weixin', channel: 'wechat', accountId: acctId
+                    });
+                    // 确保 channels 配置中有 enabled: true
+                    try {
+                        const raw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
+                        const cfg = JSON.parse(raw);
+                        let save = false;
+                        if (!cfg.channels) { cfg.channels = {}; save = true; }
+                        if (!cfg.channels['openclaw-weixin']) { cfg.channels['openclaw-weixin'] = {}; save = true; }
+                        if (cfg.channels['openclaw-weixin'].enabled !== true) {
+                            cfg.channels['openclaw-weixin'].enabled = true; save = true;
+                        }
+                        if (save) {
+                            fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+                            console.log('[WeChat Login] 已在 openclaw.json channels 中设置 openclaw-weixin.enabled = true');
+                        }
+                    } catch (cfgErr) {
+                        console.warn('[WeChat Login] 更新 channels 配置失败:', cfgErr.message);
+                    }
+                };
+                setTimeout(verifyAndNotify, 500);
             } else if (msg.type === 'error') {
                 emitChannelLoginFailed(sess, msg.message || '微信绑定失败');
             }

@@ -22,7 +22,7 @@ function normalizeAccountId(id) {
   return String(id || '')
     .trim()
     .replace(/@/g, '-')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '') || 'weixin';
 }
