@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
     readSystemLogs: () => ipcRenderer.invoke('read-system-logs'),
     clearSystemLogs: () => ipcRenderer.invoke('clear-system-logs'),
     getStatsData: () => ipcRenderer.invoke('stats-get'),
+    appendStatsData: (logEntry) => ipcRenderer.invoke('stats-append', logEntry),
     probePlugins: () => ipcRenderer.invoke('plugins-probe'),
     probePlugin: (pluginId) => ipcRenderer.invoke('plugin-probe', pluginId),
     savePluginCredentials: (payload) => ipcRenderer.invoke('plugin-save-credentials', payload),

@@ -116,6 +116,17 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
             }
         }
     }
+
+    if (parsedBody.stream === true) {
+        if (!parsedBody.stream_options) {
+            parsedBody.stream_options = { include_usage: true };
+            hasModified = true;
+        } else if (parsedBody.stream_options.include_usage !== true) {
+            parsedBody.stream_options.include_usage = true;
+            hasModified = true;
+        }
+    }
+
     return hasModified;
 }
 
@@ -879,10 +890,57 @@ function parseUsageFromLlmBody(bodyText) {
     if (inputTokens <= 0 && outputTokens <= 0) return null;
     return { prompt_tokens: inputTokens, completion_tokens: outputTokens, hit_tokens: hitTokens };
 }
+let _providerMapCache = null;
+let _providerMapCacheTime = 0;
+
+function getConfiguredProviders() {
+    try {
+        const now = Date.now();
+        if (_providerMapCache && (now - _providerMapCacheTime < 60000)) {
+            return _providerMapCache;
+        }
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const cfgPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+        
+        if (fs.existsSync(cfgPath)) {
+            const data = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+            if (data && data.models && data.models.providers) {
+                _providerMapCache = data.models.providers;
+                _providerMapCacheTime = now;
+                return _providerMapCache;
+            }
+        }
+    } catch(e) {}
+    return null;
+}
 
 function inferProviderName(hostOrUrl, modelName) {
     const cleanUrl = String(hostOrUrl || '').toLowerCase();
     const model = String(modelName || '').toLowerCase();
+
+    const userProviders = getConfiguredProviders();
+    if (userProviders) {
+        for (const pKey of Object.keys(userProviders)) {
+            const pConfig = userProviders[pKey];
+            if (pConfig && pConfig.baseUrl) {
+                const bUrl = pConfig.baseUrl.toLowerCase();
+                try {
+                    const u1 = new URL(bUrl);
+                    const u2 = new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`);
+                    if (u1.host && u1.host === u2.host) {
+                        return pKey;
+                    }
+                } catch(e) {}
+                
+                if (cleanUrl.includes(bUrl) || bUrl.includes(cleanUrl)) {
+                    return pKey;
+                }
+            }
+        }
+    }
+
     if (cleanUrl.includes('11434') || model.startsWith('ollama/') ||
         ((cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1') || cleanUrl.includes('[::1]')) && cleanUrl.includes('/api/chat'))) {
         return 'ollama';

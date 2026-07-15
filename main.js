@@ -3756,6 +3756,61 @@ ipcMain.handle('stats-get', async () => {
     }
 });
 
+ipcMain.handle('stats-append', async (event, logEntry) => {
+    try {
+        const persistentCandidates = [
+            path.join(CONFIG_DIR, 'persistent_logs', 'real_tokens.json'),
+            process.env.OPENCLAW_STATE_DIR ? path.join(process.env.OPENCLAW_STATE_DIR, 'persistent_logs', 'real_tokens.json') : null,
+            process.env.OPENCLAW_HOME ? path.join(process.env.OPENCLAW_HOME, '.openclaw', 'persistent_logs', 'real_tokens.json') : null,
+            path.join(process.env.USERPROFILE || process.env.HOME || '', '.openclaw', 'persistent_logs', 'real_tokens.json'),
+            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ClawAI', '.openclaw', 'persistent_logs', 'real_tokens.json') : null
+        ].filter((p, i, arr) => Boolean(p) && String(p).includes('real_tokens.json') && arr.indexOf(p) === i);
+
+        let realTokensPath = null;
+        for (const candidate of persistentCandidates) {
+            try {
+                if (fs.existsSync(candidate)) {
+                    realTokensPath = candidate;
+                    break;
+                }
+            } catch (e) {}
+        }
+
+        if (!realTokensPath && persistentCandidates.length > 0) {
+            realTokensPath = persistentCandidates[0];
+            const dir = path.dirname(realTokensPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(realTokensPath, '[]', 'utf8');
+        }
+
+        if (realTokensPath) {
+            let realLogs = [];
+            try {
+                const content = fs.readFileSync(realTokensPath, 'utf8');
+                realLogs = JSON.parse(content);
+            } catch (e) {}
+            
+            if (!Array.isArray(realLogs)) realLogs = [];
+            
+            if (!logEntry.time) {
+                const dt = new Date();
+                const pad = (n) => n < 10 ? '0' + n : n;
+                logEntry.time = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+            }
+            if (!logEntry.timestamp) logEntry.timestamp = Date.now();
+            if (!logEntry.status) logEntry.status = '成功';
+
+            realLogs.push(logEntry);
+            
+            fs.writeFileSync(realTokensPath, JSON.stringify(realLogs, null, 2), 'utf8');
+        }
+        return true;
+    } catch (err) {
+        console.error('stats-append error:', err);
+        return false;
+    }
+});
+
 // 获取本地最新的带 token 的ClawAI面板 URL（始终按当前 openclaw.json 组装，保证默认免密登入）
 ipcMain.handle('get-dashboard-url', async () => {
     return rememberDashboardUrl(global.latestAcpDashboardUrl || buildGatewayDashboardUrl());

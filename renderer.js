@@ -6672,8 +6672,8 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
     sessionStats.models[model].hit += hit;
 
     // 追加日志明细
-    sessionStats.logs.unshift({
-        time: timeStr,
+    const newLog = {
+        time: timeStr.split(' ')[1] || timeStr,
         provider: provider,
         model: model,
         input: input,
@@ -6682,10 +6682,17 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
         duration: `${(durationMs / 1000.0).toFixed(1)}s`,
         status: "成功",
         timestamp: Date.now()
-    });
+    };
+    
+    sessionStats.logs.unshift(newLog);
 
     if (sessionStats.logs.length > 50) {
         sessionStats.logs = sessionStats.logs.slice(0, 50);
+    }
+    
+    // 同步到后端持久化日志文件 (real_tokens.json)
+    if (window.api && window.api.appendStatsData) {
+        window.api.appendStatsData(newLog).catch(e => console.error('Failed to append stats:', e));
     }
 
     // 存入当前会话快照中
