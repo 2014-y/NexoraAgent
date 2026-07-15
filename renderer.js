@@ -643,6 +643,40 @@ let currentTab = 'console-view';
 let gatewayStatus = 'stopped';
 let gatewayFullyReady = false;
 
+let topoNodeStates = {
+    'node-client': 'pending',
+    'node-core': 'pending',
+    'node-llm': 'pending',
+    'node-wechat': 'pending',
+    'node-qq': 'pending',
+    'node-feishu': 'pending'
+};
+
+function updateTopologyUI() {
+    function setTopoState(nodeId, lineId, state) {
+        const nodeEl = document.getElementById(nodeId);
+        const lineEl = document.getElementById(lineId);
+        if (nodeEl) {
+            nodeEl.classList.remove('pending', 'active', 'completed');
+            nodeEl.classList.add(state);
+        }
+        if (lineEl) {
+            lineEl.classList.remove('pending', 'active', 'completed');
+            lineEl.classList.add(state);
+        }
+    }
+
+    for (const [nodeId, state] of Object.entries(topoNodeStates)) {
+        let lineId = null;
+        if (nodeId === 'node-client') lineId = 'line-client';
+        else if (nodeId === 'node-llm') lineId = 'line-llm';
+        else if (nodeId === 'node-wechat') lineId = 'line-wechat';
+        else if (nodeId === 'node-qq') lineId = 'line-qq';
+        else if (nodeId === 'node-feishu') lineId = 'line-feishu';
+        setTopoState(nodeId, lineId, state);
+    }
+}
+
 // 常见插件元数据（用于生成美观的插件网格）
 // 顺序即 UI 卡片顺序；自动摘要主卡映射自研 auto-summary（llm-task 仍会进 allow）
 const UI_PLUGIN_ORDER = [
@@ -917,6 +951,22 @@ function drawSidebarChart() {
 
 // 3. 初始化加载
 async function init() {
+    const dismissLoading = () => {
+        try {
+            const appLoadingScreen = document.getElementById('app-loading-screen');
+            if (appLoadingScreen) {
+                appLoadingScreen.style.opacity = '0';
+                appLoadingScreen.style.visibility = 'hidden';
+                setTimeout(() => {
+                    appLoadingScreen.style.display = 'none';
+                }, 400);
+            }
+        } catch (e) {}
+    };
+    // 保底：最多 8 秒必关遮罩，避免脚本异常或 IPC 卡住一直转圈
+    const loadingFailsafe = setTimeout(dismissLoading, 8000);
+
+    try {
     // 获取并设置当前版本号
     try {
         const version = await window.api.getAppVersion();
@@ -1513,6 +1563,20 @@ async function init() {
         });
     }
 
+    // 视图模式切换按钮监听 (步骤进度 vs 调试日志)
+    const btnToggleViewMode = document.getElementById('btn-toggle-view-mode');
+    if (btnToggleViewMode) {
+        const savedMode = localStorage.getItem('console_view_mode') || 'step';
+        applyViewMode(savedMode);
+
+        btnToggleViewMode.addEventListener('click', () => {
+            const currentMode = localStorage.getItem('console_view_mode') || 'step';
+            const nextMode = currentMode === 'step' ? 'log' : 'step';
+            localStorage.setItem('console_view_mode', nextMode);
+            applyViewMode(nextMode);
+        });
+    }
+
     // 打开沙箱终端按钮监听
     const btnOpenTerminal = document.getElementById('btn-open-terminal');
     if (btnOpenTerminal) {
@@ -1628,13 +1692,12 @@ async function init() {
     }
 
     // 隐藏全局初始化遮罩层，平滑淡出
-    const appLoadingScreen = document.getElementById('app-loading-screen');
-    if (appLoadingScreen) {
-        appLoadingScreen.style.opacity = '0';
-        appLoadingScreen.style.visibility = 'hidden';
-        setTimeout(() => {
-            appLoadingScreen.style.display = 'none';
-        }, 400);
+    clearTimeout(loadingFailsafe);
+    dismissLoading();
+    } catch (initErr) {
+        console.error('[ClawAI] init failed:', initErr);
+        clearTimeout(loadingFailsafe);
+        dismissLoading();
     }
 }
 
@@ -1642,6 +1705,57 @@ async function init() {
 function setupIpcListeners() {
     // 实时日志接收处理函数
     const handleReceivedLog = (text) => {
+        // Dynamic topology node activation based on logs
+        if (gatewayStatus === 'starting' || gatewayStatus === 'running') {
+            const lowerText = text.toLowerCase();
+            let stateChanged = false;
+
+            if (lowerText.includes('loading configuration') || lowerText.includes('doctor') || lowerText.includes('migration')) {
+                topoNodeStates['node-client'] = 'completed';
+                topoNodeStates['node-core'] = 'active';
+                stateChanged = true;
+            }
+            if (lowerText.includes('resolving authentication') || lowerText.includes('model-fetch') || lowerText.includes('auth state')) {
+                topoNodeStates['node-core'] = 'completed';
+                topoNodeStates['node-llm'] = 'active';
+                stateChanged = true;
+            }
+            if (lowerText.includes('provider auth state pre-warmed') || lowerText.includes('pre-warmed') || lowerText.includes('model engine loaded')) {
+                topoNodeStates['node-llm'] = 'completed';
+                stateChanged = true;
+            }
+            // WeChat Gateway
+            if (lowerText.includes('weixin') || lowerText.includes('wechat') || lowerText.includes('wx-bot') || lowerText.includes('ilink')) {
+                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('bound') || lowerText.includes('webhook listening') || lowerText.includes('server listening')) {
+                    topoNodeStates['node-wechat'] = 'completed';
+                } else {
+                    topoNodeStates['node-wechat'] = 'active';
+                }
+                stateChanged = true;
+            }
+            // QQ Gateway
+            if (lowerText.includes('qqbot') || lowerText.includes('qq-bot') || lowerText.includes('qq_bot')) {
+                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('connected') || lowerText.includes('listening')) {
+                    topoNodeStates['node-qq'] = 'completed';
+                } else {
+                    topoNodeStates['node-qq'] = 'active';
+                }
+                stateChanged = true;
+            }
+            // Feishu Gateway
+            if (lowerText.includes('feishu') || lowerText.includes('lark')) {
+                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('connected') || lowerText.includes('listening')) {
+                    topoNodeStates['node-feishu'] = 'completed';
+                } else {
+                    topoNodeStates['node-feishu'] = 'active';
+                }
+                stateChanged = true;
+            }
+
+            if (stateChanged) {
+                updateTopologyUI();
+            }
+        }
         // 解析 http server listening 中的运行插件数量，动态更新右侧侧边栏统计
         if (text && text.includes('http server listening')) {
             const match = text.match(/http server listening\s*\((\d+)\s*plugins/i);
@@ -1873,6 +1987,16 @@ function setupIpcListeners() {
             }
         }
         // --- 结束：前端终端下载进度注入 ---
+
+        // 不在「ClawAI状态」页时：别往可视控制台刷 DOM（这是菜单切换卡顿的主因之一）
+        if (currentTab !== 'console-view' && currentTab !== null) {
+            if (!window.__deferredConsoleLogs) window.__deferredConsoleLogs = [];
+            window.__deferredConsoleLogs.push(cleanedText);
+            if (window.__deferredConsoleLogs.length > 200) {
+                window.__deferredConsoleLogs = window.__deferredConsoleLogs.slice(-120);
+            }
+            return;
+        }
 
         // 追加日志并做中文翻译及着色
         const span = document.createElement('span');
@@ -3820,8 +3944,27 @@ function beautifyAllSelects() {
 
 function startSelectAutoBeautify() {
     beautifyAllSelects();
-    const observer = new MutationObserver(() => {
-        beautifyAllSelects();
+    let debounceTimer = null;
+    const observer = new MutationObserver((mutations) => {
+        // 仅当新增了 <select> 才美化；日志刷屏/普通 DOM 更新不再扫全页
+        let needBeautify = false;
+        for (const m of mutations) {
+            if (!m.addedNodes || !m.addedNodes.length) continue;
+            for (const node of m.addedNodes) {
+                if (!node || node.nodeType !== 1) continue;
+                if (node.tagName === 'SELECT' || (node.querySelector && node.querySelector('select:not(.custom-beautified)'))) {
+                    needBeautify = true;
+                    break;
+                }
+            }
+            if (needBeautify) break;
+        }
+        if (!needBeautify) return;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+            beautifyAllSelects();
+        }, 120);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 }
@@ -4489,6 +4632,153 @@ function updateProgressUI(val, textLabel = '') {
             }, 800);
         }
     }
+    try { updateStepperUI(val); } catch (e) {}
+}
+
+// 视图切换应用逻辑
+function applyViewMode(mode) {
+    const btnToggleViewMode = document.getElementById('btn-toggle-view-mode');
+    const stepProgressContainer = document.getElementById('step-progress-container');
+    const logTerminalOutput = document.getElementById('log-terminal-output');
+    const terminalLeft = document.getElementById('tour-log-terminal');
+
+    if (mode === 'log') {
+        if (stepProgressContainer) stepProgressContainer.style.display = 'none';
+        if (logTerminalOutput) logTerminalOutput.style.display = 'block';
+        if (terminalLeft) terminalLeft.classList.remove('step-view-active');
+        if (btnToggleViewMode) {
+            btnToggleViewMode.setAttribute('data-i18n', 'console.btn.toggle_step_view');
+            btnToggleViewMode.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> ${t('console.btn.toggle_step_view')}`;
+        }
+    } else {
+        // 'step'
+        if (stepProgressContainer) stepProgressContainer.style.display = 'flex';
+        if (logTerminalOutput) logTerminalOutput.style.display = 'none';
+        if (terminalLeft) terminalLeft.classList.add('step-view-active');
+        if (btnToggleViewMode) {
+            btnToggleViewMode.setAttribute('data-i18n', 'console.btn.toggle_log_view');
+            btnToggleViewMode.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> ${t('console.btn.toggle_log_view')}`;
+        }
+    }
+}
+
+function updateStepperUI(progressVal) {
+    const overallStatusEl = document.getElementById('stepper-overall-status');
+
+    if (gatewayStatus === 'stopped') {
+        topoNodeStates = {
+            'node-client': 'pending',
+            'node-core': 'pending',
+            'node-llm': 'pending',
+            'node-wechat': 'pending',
+            'node-qq': 'pending',
+            'node-feishu': 'pending'
+        };
+        updateTopologyUI();
+
+        if (overallStatusEl) {
+            overallStatusEl.setAttribute('data-i18n', 'console.stepper.status.stopped');
+            overallStatusEl.innerText = t('console.stepper.status.stopped');
+        }
+        return;
+    }
+
+    if (gatewayStatus === 'upgrading') {
+        topoNodeStates = {
+            'node-client': 'active',
+            'node-core': 'active',
+            'node-llm': 'pending',
+            'node-wechat': 'pending',
+            'node-qq': 'pending',
+            'node-feishu': 'pending'
+        };
+        updateTopologyUI();
+
+        if (overallStatusEl) {
+            overallStatusEl.setAttribute('data-i18n', 'console.stepper.status.upgrading');
+            overallStatusEl.innerText = t('console.stepper.status.upgrading');
+        }
+        return;
+    }
+
+    // Fallback progression in case logs are missing:
+    if (progressVal === 0) {
+        // Do not override log-based states if they are already active/completed,
+        // but if they are all pending, we keep them pending.
+    } else if (progressVal < 25) {
+        if (topoNodeStates['node-client'] === 'pending') topoNodeStates['node-client'] = 'active';
+        if (topoNodeStates['node-core'] === 'pending') topoNodeStates['node-core'] = 'active';
+    } else if (progressVal < 55) {
+        topoNodeStates['node-client'] = 'completed';
+        if (topoNodeStates['node-core'] === 'pending' || topoNodeStates['node-core'] === 'active') topoNodeStates['node-core'] = 'completed';
+        if (topoNodeStates['node-llm'] === 'pending') topoNodeStates['node-llm'] = 'active';
+    } else if (progressVal < 85) {
+        topoNodeStates['node-client'] = 'completed';
+        topoNodeStates['node-core'] = 'completed';
+        topoNodeStates['node-llm'] = 'completed';
+        
+        // Configured channels start lighting up
+        if (configData && configData.channels) {
+            const hasWechat = configData.channels.wechat?.enabled || (configData.plugins?.entries?.['weixin']?.enabled === true);
+            const hasQq = configData.channels.qqbot?.enabled;
+            const hasFeishu = configData.channels.feishu?.enabled;
+
+            if (hasWechat && topoNodeStates['node-wechat'] === 'pending') topoNodeStates['node-wechat'] = 'active';
+            if (hasQq && topoNodeStates['node-qq'] === 'pending') topoNodeStates['node-qq'] = 'active';
+            if (hasFeishu && topoNodeStates['node-feishu'] === 'pending') topoNodeStates['node-feishu'] = 'active';
+        } else {
+            // Default fallback
+            if (topoNodeStates['node-wechat'] === 'pending') topoNodeStates['node-wechat'] = 'active';
+            if (topoNodeStates['node-qq'] === 'pending') topoNodeStates['node-qq'] = 'active';
+            if (topoNodeStates['node-feishu'] === 'pending') topoNodeStates['node-feishu'] = 'active';
+        }
+    } else if (progressVal < 100) {
+        topoNodeStates['node-client'] = 'completed';
+        topoNodeStates['node-core'] = 'completed';
+        topoNodeStates['node-llm'] = 'completed';
+        
+        if (configData && configData.channels) {
+            const hasWechat = configData.channels.wechat?.enabled || (configData.plugins?.entries?.['weixin']?.enabled === true);
+            const hasQq = configData.channels.qqbot?.enabled;
+            const hasFeishu = configData.channels.feishu?.enabled;
+
+            if (hasWechat) topoNodeStates['node-wechat'] = 'completed';
+            if (hasQq) topoNodeStates['node-qq'] = 'completed';
+            if (hasFeishu) topoNodeStates['node-feishu'] = 'completed';
+        }
+    } else {
+        // 100% Running
+        topoNodeStates['node-client'] = 'completed';
+        topoNodeStates['node-core'] = 'completed';
+        topoNodeStates['node-llm'] = 'completed';
+
+        // Check which channels are actually enabled and complete them
+        if (configData && configData.channels) {
+            const hasWechat = configData.channels.wechat?.enabled || (configData.plugins?.entries?.['weixin']?.enabled === true);
+            const hasQq = configData.channels.qqbot?.enabled;
+            const hasFeishu = configData.channels.feishu?.enabled;
+
+            topoNodeStates['node-wechat'] = hasWechat ? 'completed' : 'pending';
+            topoNodeStates['node-qq'] = hasQq ? 'completed' : 'pending';
+            topoNodeStates['node-feishu'] = hasFeishu ? 'completed' : 'pending';
+        } else {
+            topoNodeStates['node-wechat'] = 'completed';
+            topoNodeStates['node-qq'] = 'completed';
+            topoNodeStates['node-feishu'] = 'completed';
+        }
+    }
+
+    updateTopologyUI();
+
+    if (overallStatusEl) {
+        if (progressVal === 100) {
+            overallStatusEl.setAttribute('data-i18n', 'console.stepper.status.running');
+            overallStatusEl.innerText = t('console.stepper.status.running');
+        } else {
+            overallStatusEl.setAttribute('data-i18n', 'console.stepper.status.starting');
+            overallStatusEl.innerText = t('console.stepper.status.starting');
+        }
+    }
 }
 
 // 6. UI 状态刷新
@@ -4718,16 +5008,19 @@ function updateMemoryMock() {
 
 // 7. Tab 页切换控制
 function setupTabSwitching() {
-    const allNavItems = document.querySelectorAll('.nav-item');
+    const allNavItems = Array.from(document.querySelectorAll('.nav-item'));
+    const allTabPanes = Array.from(document.querySelectorAll('.tab-pane'));
+    let activeNav = document.querySelector('.nav-item.active');
+    let activePane = document.querySelector('.tab-pane.active');
+
     allNavItems.forEach((tab) => {
-        tab.addEventListener('click', async (e) => {
+        tab.addEventListener('click', (e) => {
             if (tab.id === 'nav-check-update') {
                 e.preventDefault();
                 e.stopPropagation();
                 triggerUpdateCheck(true);
                 return;
             }
-            
 
             // HTTP 已监听即可打开（setGatewayFullyReadyUI 会提前置位）
             if (tab.getAttribute('data-tab') === 'openclaw-panel-view') {
@@ -4743,16 +5036,36 @@ function setupTabSwitching() {
                 }
             }
 
-            allNavItems.forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-
-            tab.classList.add('active');
-            const targetPane = document.getElementById(tab.getAttribute('data-tab'));
-            if (targetPane) {
-                targetPane.classList.add('active');
+            const nextTab = tab.getAttribute('data-tab');
+            if (nextTab === currentTab && tab.classList.contains('active')) {
+                return; // 同页不重复切
             }
+
+            // 轻量切换：只动当前/目标，避免全量 query + 动画
+            if (activeNav) activeNav.classList.remove('active');
+            if (activePane) activePane.classList.remove('active');
+            tab.classList.add('active');
+            const targetPane = document.getElementById(nextTab);
+            if (targetPane) targetPane.classList.add('active');
+            activeNav = tab;
+            activePane = targetPane || null;
+
             const prevTab = currentTab;
-            currentTab = tab.getAttribute('data-tab');
+            currentTab = nextTab;
+
+            // 离开 OpenClaw 面板时先藏 webview，减轻后台合成压力
+            if (prevTab === 'openclaw-panel-view' || nextTab === 'openclaw-panel-view') {
+                const wv = document.getElementById('openclaw-iframe');
+                if (wv) {
+                    wv.style.visibility = (nextTab === 'openclaw-panel-view') ? 'visible' : 'hidden';
+                }
+            }
+
+            // 离开终端：停光标闪烁，降低后台 GPU 占用
+            if (prevTab === 'terminal-view' && builtinTerminal) {
+                try { builtinTerminal.blur(); } catch (err) {}
+                try { builtinTerminal.options.cursorBlink = false; } catch (err) {}
+            }
 
             // 仅离开「通讯管理」时取消绑定；同页内切换勿误关飞书码
             if (prevTab === 'communication-view' && currentTab !== 'communication-view'
@@ -4761,49 +5074,63 @@ function setupTabSwitching() {
                 endCommBinding({ cancelBackend: true, toast: '已离开通讯管理，绑定已取消' });
             }
 
-            // 切换到用量页重画图表防自适应显示错误
-            if (currentTab === 'dashboard-view') {
-                renderUsageCharts();
-            }
+            // 重活全部丢到下一任务，保证菜单点击瞬时响应
+            setTimeout(() => {
+                if (currentTab !== nextTab) return;
 
-            // 切换到控制台状态页时，自动刷新通道绑定状态卡片
-            if (currentTab === 'console-view') {
-                try { updateConsoleChannelStatusUI(); } catch (err) { console.error(err); }
-            }
+                if (currentTab === 'dashboard-view') {
+                    try { renderUsageCharts(); } catch (err) { console.error(err); }
+                }
 
-            // 切换到内置终端时，初始化终端并适应大小
-            if (currentTab === 'terminal-view') {
-                if (typeof initBuiltinTerminal === 'function') {
+                if (currentTab === 'console-view') {
+                    try { updateConsoleChannelStatusUI(); } catch (err) { console.error(err); }
+                    // 刷回离页期间积压的控制台日志（限量，避免一次卡死）
+                    try {
+                        const q = window.__deferredConsoleLogs;
+                        if (q && q.length && logTerminal) {
+                            const chunk = q.splice(0, q.length).slice(-80);
+                            const frag = document.createDocumentFragment();
+                            chunk.forEach((line) => {
+                                const s = document.createElement('span');
+                                s.textContent = line + (line.endsWith('\n') ? '' : '\n');
+                                frag.appendChild(s);
+                            });
+                            logTerminal.appendChild(frag);
+                            logTerminal.scrollTop = logTerminal.scrollHeight;
+                        }
+                    } catch (err) {}
+                }
+
+                if (currentTab === 'terminal-view' && typeof initBuiltinTerminal === 'function') {
                     initBuiltinTerminal();
                 }
-            }
 
-            // 切到插件页必须重绘（避免 flex 布局下初次隐藏时网格高度为 0）
-            if (currentTab === 'plugins-view') {
-                try { await renderPluginsGrid(); } catch (err) { console.error(err); }
-            }
-
-            // 切换到内置ClawAI面板：免密 URL 载入（同 URL 不重复刷新，避免认证限流）
-            if (currentTab === 'openclaw-panel-view') {
-                await loadOpenclawControlUi(false);
-            }
-
-            // 切换到系统设置页拉取最新并展示完整本地历史日志文件
-            if (currentTab === 'settings-view') {
-                loadAndRenderSystemLogs();
-            }
-
-            // 切换到模型对话页初始化或刷新模型
-            if (currentTab === 'chat-view') {
-                if (!chatInitialized) {
-                    chatInitialized = true;
-                    initChatView();
-                } else {
-                    loadChatModels();
+                if (currentTab === 'plugins-view') {
+                    Promise.resolve().then(() => renderPluginsGrid()).catch((err) => console.error(err));
                 }
-            }
+
+                if (currentTab === 'openclaw-panel-view') {
+                    Promise.resolve().then(() => loadOpenclawControlUi(false)).catch((err) => console.error(err));
+                }
+
+                if (currentTab === 'settings-view') {
+                    try { loadAndRenderSystemLogs(); } catch (err) { console.error(err); }
+                }
+
+                if (currentTab === 'chat-view') {
+                    if (!chatInitialized) {
+                        chatInitialized = true;
+                        try { initChatView(); } catch (err) { console.error(err); }
+                    } else {
+                        try { loadChatModels(); } catch (err) { console.error(err); }
+                    }
+                }
+            }, 0);
         });
     });
+
+    // 兜底缓存未就绪时仍可用
+    void allTabPanes;
 }
 
 // 8. 主题一键无缝切换
@@ -5982,6 +6309,12 @@ function applyLanguage(lang) {
     }
     if (typeof updateFilterOptions === 'function') {
         try { updateFilterOptions(); } catch(e) { console.error(e); }
+    }
+    if (typeof applyViewMode === 'function') {
+        try { applyViewMode(localStorage.getItem('console_view_mode') || 'step'); } catch(e) { console.error(e); }
+    }
+    if (typeof updateStepperUI === 'function') {
+        try { updateStepperUI(currentProgress); } catch(e) { console.error(e); }
     }
 }
 
@@ -8009,14 +8342,47 @@ function setupUpdateModal() {
 let builtinTerminal = null;
 let builtinTerminalFitAddon = null;
 let isTerminalInitialized = false;
+let isTerminalInitializing = false;
+let terminalFitScheduled = false;
+let terminalLastFitKey = '';
+let terminalNeedsFit = true; // 仅窗口尺寸变化后才需要 fit
+
+function scheduleBuiltinTerminalFit(forceResizePty) {
+    if (!terminalNeedsFit && !forceResizePty) return;
+    if (terminalFitScheduled) return;
+    terminalFitScheduled = true;
+    requestAnimationFrame(() => {
+        terminalFitScheduled = false;
+        if (currentTab !== 'terminal-view' || !builtinTerminalFitAddon || !builtinTerminal) return;
+        const prevCols = builtinTerminal.cols;
+        const prevRows = builtinTerminal.rows;
+        try { builtinTerminalFitAddon.fit(); } catch (e) {}
+        terminalNeedsFit = false;
+        terminalLastFitKey = builtinTerminal.cols + 'x' + builtinTerminal.rows;
+        const changed = builtinTerminal.cols !== prevCols || builtinTerminal.rows !== prevRows;
+        if ((forceResizePty || changed) && window.api && window.api.resizeBuiltinTerminal) {
+            try { window.api.resizeBuiltinTerminal(builtinTerminal.cols, builtinTerminal.rows); } catch (e) {}
+        }
+    });
+}
 
 function initBuiltinTerminal() {
-    if (isTerminalInitialized) {
-        if (builtinTerminalFitAddon) {
-            setTimeout(() => builtinTerminalFitAddon.fit(), 100);
-        }
+    const pane = document.getElementById('terminal-view');
+    if (pane) pane.classList.add('terminal-keeplive');
+
+    if (isTerminalInitialized && builtinTerminal) {
+        // 再次切入：不 fit、不强刷，只恢复光标并延后聚焦
+        try { builtinTerminal.options.cursorBlink = true; } catch (e) {}
+        setTimeout(() => {
+            if (currentTab === 'terminal-view' && builtinTerminal) {
+                try { builtinTerminal.focus(); } catch (e) {}
+                if (terminalNeedsFit) scheduleBuiltinTerminalFit(false);
+            }
+        }, 0);
         return;
     }
+
+    if (isTerminalInitializing) return;
     
     const container = document.getElementById('xterm-container');
     if (!container) return;
@@ -8025,71 +8391,76 @@ function initBuiltinTerminal() {
         return;
     }
     
-    // 初始化 Terminal 实例
-    builtinTerminal = new window.Terminal({
-        cursorBlink: true,
-        theme: {
-            background: '#0c0c0c',
-            foreground: '#cccccc',
-            cursor: '#00e676',
-            selection: 'rgba(0, 230, 118, 0.3)'
-        },
-        fontFamily: 'Consolas, "Courier New", monospace',
-        fontSize: 14
-    });
-    
-    // 使用 FitAddon
-    if (window.FitAddon && window.FitAddon.FitAddon) {
-        builtinTerminalFitAddon = new window.FitAddon.FitAddon();
-        builtinTerminal.loadAddon(builtinTerminalFitAddon);
-    }
-    
-    builtinTerminal.open(container);
-    if (builtinTerminalFitAddon) {
-        builtinTerminalFitAddon.fit();
-    }
-    
-    // 监听前端输入，发送给后台
-    builtinTerminal.onData(data => {
-        window.api.writeBuiltinTerminal(data);
-    });
-    
-    // 监听窗口缩放，同步调整 pty 大小
-    window.addEventListener('resize', () => {
-        if (currentTab === 'terminal-view' && builtinTerminalFitAddon) {
-            builtinTerminalFitAddon.fit();
-            if (builtinTerminal) {
-                window.api.resizeBuiltinTerminal(builtinTerminal.cols, builtinTerminal.rows);
-            }
-        }
-    });
-    
-    // 接收后台 pty 吐出的数据
-    window.api.onBuiltinTerminalData((data) => {
+    isTerminalInitializing = true;
+    setTimeout(() => {
         if (builtinTerminal) {
-            builtinTerminal.write(data);
+            isTerminalInitializing = false;
+            isTerminalInitialized = true;
+            scheduleBuiltinTerminalFit(true);
+            return;
         }
-    });
-    
-    // 请求主进程启动后端 node-pty
-    const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
-    window.api.startBuiltinTerminal(currentLang).then((res) => {
-        if (res && res.ok === false && builtinTerminal) {
-            builtinTerminal.writeln('');
-            builtinTerminal.writeln('\x1b[33m若内置终端无输出，已尝试打开外部沙箱窗口。\x1b[0m');
-        }
-        setTimeout(() => {
-            if (builtinTerminalFitAddon) builtinTerminalFitAddon.fit();
-            if (builtinTerminal) {
-                window.api.resizeBuiltinTerminal(builtinTerminal.cols, builtinTerminal.rows);
+        try {
+            builtinTerminal = new window.Terminal({
+                cursorBlink: true,
+                scrollback: 1500,
+                theme: {
+                    background: '#0c0c0c',
+                    foreground: '#cccccc',
+                    cursor: '#00e676',
+                    selection: 'rgba(0, 230, 118, 0.3)'
+                },
+                fontFamily: 'Consolas, "Courier New", monospace',
+                fontSize: 14,
+                allowTransparency: false,
+                convertEol: true
+            });
+            
+            if (window.FitAddon && window.FitAddon.FitAddon) {
+                builtinTerminalFitAddon = new window.FitAddon.FitAddon();
+                builtinTerminal.loadAddon(builtinTerminalFitAddon);
             }
-        }, 300);
-    }).catch((err) => {
-        if (builtinTerminal) {
-            builtinTerminal.writeln('');
-            builtinTerminal.writeln('\x1b[31m内置终端启动失败: ' + (err && err.message ? err.message : err) + '\x1b[0m');
+            
+            builtinTerminal.open(container);
+            isTerminalInitialized = true;
+            isTerminalInitializing = false;
+            terminalNeedsFit = true;
+            scheduleBuiltinTerminalFit(true);
+            
+            builtinTerminal.onData(data => {
+                window.api.writeBuiltinTerminal(data);
+            });
+            
+            window.addEventListener('resize', () => {
+                terminalNeedsFit = true;
+                if (currentTab === 'terminal-view') scheduleBuiltinTerminalFit(true);
+            });
+            
+            window.api.onBuiltinTerminalData((data) => {
+                if (builtinTerminal) builtinTerminal.write(data);
+            });
+            
+            const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
+            window.api.startBuiltinTerminal(currentLang).then((res) => {
+                if (res && res.ok === false && builtinTerminal) {
+                    builtinTerminal.writeln('');
+                    builtinTerminal.writeln('\x1b[33m若内置终端无输出，已尝试打开外部沙箱窗口。\x1b[0m');
+                }
+                terminalNeedsFit = true;
+                scheduleBuiltinTerminalFit(true);
+            }).catch((err) => {
+                if (builtinTerminal) {
+                    builtinTerminal.writeln('');
+                    builtinTerminal.writeln('\x1b[31m内置终端启动失败: ' + (err && err.message ? err.message : err) + '\x1b[0m');
+                }
+            });
+        } catch (err) {
+            isTerminalInitializing = false;
+            isTerminalInitialized = false;
+            console.error('[BuiltinTerminal] init failed:', err);
+            try {
+                container.innerHTML = '<div style="color:#f44336;padding:16px;font-family:Consolas,monospace;font-size:13px;">内置终端初始化失败: '
+                    + (err && err.message ? err.message : String(err)) + '</div>';
+            } catch (e) {}
         }
-    });
-    
-    isTerminalInitialized = true;
+    }, 0);
 }

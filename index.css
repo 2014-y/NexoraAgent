@@ -390,19 +390,19 @@ body.maximized .app-container {
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  border: 1px solid transparent; /* 关键修复：防止 hover 时由于边框出现导致元素尺寸微调产生抖动 */
-  transition: all 0.2s ease;
+  border: 1px solid transparent; /* 预留边框，避免 hover 抖动 */
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .nav-item:hover, .nav-item.active {
   background: var(--bg-card);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  box-shadow: var(--accent-glow);
 }
 
 .nav-item.active {
   border-color: var(--accent-color);
+  box-shadow: var(--accent-glow);
 }
 
 /* 主题和设置工具区 */
@@ -486,11 +486,28 @@ body.maximized .app-container {
   height: 100%;
   flex-direction: column;
   min-height: 0;
-  animation: fadeIn 0.25s ease-in-out;
+  /* 去掉 fadeIn：每次切换菜单都会触发全量合成，体感明显卡一下 */
 }
 
 .tab-pane.active {
   display: flex;
+}
+
+/* 内置终端保活：切走仍保留 DOM，再进无需 xterm 整页重建 */
+#terminal-view.terminal-keeplive {
+  display: flex !important;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+#terminal-view.terminal-keeplive.active {
+  position: relative;
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
 }
 
 /* 模块标题 */
@@ -1826,36 +1843,34 @@ input:focus, select:focus, textarea:focus {
 
 .pulse-visualizer {
   display: flex;
-  align-items: center; /* 居中对齐，形成完美的水平对称声波，确保与左侧文字的中心线完全吻合 */
-  gap: 5px;
+  align-items: center;
+  gap: 4px;
   height: 24px;
 }
 .pulse-visualizer .bar {
-  width: 5px; /* 稍微加粗，防止过于纤细看不清 */
+  width: 3px;
   background: var(--accent-color);
-  border-radius: 2.5px;
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
-  opacity: 0; /* 没启动时完全不展示透明底，保持顶栏清爽极简 */
-  height: 6px; /* 提高底线高度 */
-  transition: height 0.1s ease, opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 2px;
+  opacity: 0;
+  height: 14px;
+  transform: scaleY(0.35);
+  transform-origin: center;
+  will-change: transform;
+  /* 用 transform 动画，避免改 height 触发整页 layout */
+  transition: opacity 0.3s ease;
 }
 .pulse-visualizer.active .bar {
   animation: pulse-bar 1s infinite alternate ease-in-out;
-  opacity: 0.9;
+  opacity: 0.85;
 }
-/* Generate random delays and heights for a cool effect using modulo selectors */
 .pulse-visualizer.active .bar:nth-child(3n+1) { animation-delay: -0.2s; animation-duration: 0.8s; }
-.pulse-visualizer.active .bar:nth-child(3n+2) { animation-delay: -0.5s; animation-duration: 0.6s; }
-.pulse-visualizer.active .bar:nth-child(3n) { animation-delay: -0.8s; animation-duration: 1.1s; }
-.pulse-visualizer.active .bar:nth-child(4n+1) { animation-delay: -0.3s; animation-duration: 0.9s; }
-.pulse-visualizer.active .bar:nth-child(5n+2) { animation-delay: -0.6s; animation-duration: 1.2s; }
-.pulse-visualizer.active .bar:nth-child(5n+4) { animation-delay: -0.4s; animation-duration: 0.7s; }
-.pulse-visualizer.active .bar:nth-child(7n+1) { animation-delay: -0.1s; animation-duration: 1.0s; }
-.pulse-visualizer.active .bar:nth-child(7n+3) { animation-delay: -0.9s; animation-duration: 1.3s; }
+.pulse-visualizer.active .bar:nth-child(3n+2) { animation-delay: -0.5s; animation-duration: 0.65s; }
+.pulse-visualizer.active .bar:nth-child(3n) { animation-delay: -0.8s; animation-duration: 1.05s; }
+.pulse-visualizer.active .bar:nth-child(4n+1) { animation-delay: -0.35s; animation-duration: 0.9s; }
 
 @keyframes pulse-bar {
-  0% { height: 4px; }
-  100% { height: 100%; }
+  0% { transform: scaleY(0.28); }
+  100% { transform: scaleY(1); }
 }
 
 @keyframes pulse-circle {
@@ -2111,4 +2126,497 @@ input:focus, select:focus, textarea:focus {
   pointer-events: none !important;
   opacity: 0.5 !important;
   cursor: not-allowed !important;
+}
+
+/* --- Stepper Mode View Styles --- */
+.btn-toggle-view-mode {
+  position: absolute;
+  top: 16px;
+  right: 132px; /* Sits to the left of "Clear Logs" button */
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+
+.btn-toggle-view-mode:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-toggle-view-mode:active {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(0.96);
+}
+
+.step-progress-wrapper {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.stepper-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 12px;
+}
+
+.stepper-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.stepper-status-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s ease;
+}
+
+.stepper-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+}
+
+.stepper-item {
+  display: flex;
+  gap: 16px;
+  min-height: 72px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.step-icon-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 24px;
+}
+
+.step-icon-status {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-sizing: border-box;
+  position: relative;
+  z-index: 2;
+}
+
+.step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transition: all 0.3s ease;
+}
+
+.step-line {
+  width: 2px;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+  position: relative;
+  z-index: 1;
+  transition: all 0.4s ease;
+}
+
+.step-content {
+  flex: 1;
+  padding-top: 1px;
+}
+
+.step-title-text {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+}
+
+.step-desc-text {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  transition: all 0.3s ease;
+  line-height: 1.4;
+}
+
+/* --- Stepper States --- */
+
+/* Pending (默认) */
+.stepper-item.pending .step-icon-status {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.stepper-item.pending .step-dot {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Active (进行中) */
+.stepper-item.active .step-icon-status {
+  background: rgba(var(--accent-rgb), 0.1);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
+  animation: step-active-pulse 2s infinite ease-in-out;
+}
+
+.stepper-item.active .step-dot {
+  background: var(--accent-color);
+  box-shadow: 0 0 6px var(--accent-color);
+  width: 8px;
+  height: 8px;
+}
+
+.stepper-item.active .step-title-text {
+  color: var(--text-primary);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.15);
+}
+
+.stepper-item.active .step-desc-text {
+  color: var(--text-secondary);
+}
+
+@keyframes step-active-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 0 10px 4px rgba(var(--accent-rgb), 0.15); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+}
+
+/* Completed (已完成) */
+.stepper-item.completed .step-icon-status {
+  background: rgba(0, 230, 118, 0.12);
+  border-color: #00e676;
+  box-shadow: 0 0 6px rgba(0, 230, 118, 0.2);
+}
+
+.stepper-item.completed .step-icon-status::after {
+  content: '✓';
+  color: #00e676;
+  font-size: 11px;
+  font-weight: 900;
+  position: absolute;
+}
+
+.stepper-item.completed .step-dot {
+  display: none;
+}
+
+.stepper-item.completed .step-line {
+  background: #00e676;
+  box-shadow: 0 0 2px rgba(0, 230, 118, 0.3);
+}
+
+.stepper-item.completed .step-title-text {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.stepper-item.completed .step-desc-text {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Light Theme overrides for Stepper */
+.theme-light .btn-toggle-view-mode {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-secondary);
+}
+.theme-light .btn-toggle-view-mode:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+}
+.theme-light .stepper-status-text {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+.theme-light .step-icon-status {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+.theme-light .step-dot {
+  background: rgba(0, 0, 0, 0.3);
+}
+.theme-light .step-line {
+  background: rgba(0, 0, 0, 0.06);
+}
+.theme-light .step-desc-text {
+  color: rgba(0, 0, 0, 0.45);
+}
+.theme-light .stepper-item.completed .step-desc-text {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+/* --- Watermark subtle overlay --- */
+.console-left .terminal-bg-robot {
+  opacity: 0.025 !important;
+  animation: none !important; /* Disable pulse animations to reduce visual noise */
+}
+
+/* --- Console Left Header layout --- */
+.console-left-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 10;
+}
+
+.console-left-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.console-left-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.console-left-actions .btn-clear-logs,
+.console-left-actions .btn-toggle-view-mode {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  margin: 0 !important;
+}
+
+.theme-light .console-left-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+/* --- Stepper Centered Layout --- */
+.step-progress-wrapper {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* Move layout up */
+  padding: 36px 16px 16px 16px; /* Shift content up */
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* --- Topology Container --- */
+.topology-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* Shift topology map up! */
+  margin-top: 10px;
+}
+
+.topology-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  z-index: 3;
+}
+
+.topology-map {
+  position: relative;
+  width: 100%;
+  max-width: 360px; /* Strictly capped at 360px to preserve 4:3 ratio with 270px max-height */
+  max-height: 270px; /* Ceiling to prevent container scrollbar */
+  aspect-ratio: 4 / 3;
+  margin: 0 auto;
+}
+
+/* --- Topology Lines --- */
+.topo-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.topo-line {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 2;
+  fill: none;
+  transition: all 0.5s ease;
+}
+
+.topo-line.active {
+  stroke: var(--accent-color);
+  filter: drop-shadow(0 0 3px var(--accent-color));
+  stroke-dasharray: 6 6;
+  animation: topo-flow 1.2s infinite linear;
+}
+
+.topo-line.completed {
+  stroke: #00e676;
+  filter: drop-shadow(0 0 2px rgba(0, 230, 118, 0.4));
+  stroke-dasharray: 6 6;
+  animation: topo-flow 0.8s infinite linear;
+}
+
+@keyframes topo-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* --- Topology Nodes --- */
+.topo-node {
+  position: absolute;
+  width: 48px; /* Anchor dimension matches icon exactly */
+  height: 48px;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.node-core {
+  width: 62px; /* Anchor dimension matches core icon exactly */
+  height: 62px;
+}
+
+.topo-node .node-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  /* Blend semi-transparent style over solid var(--card-bg) to completely mask connection lines behind the circle */
+  background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)), var(--card-bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--text-secondary);
+  transition: all 0.5s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+}
+
+.topo-node .node-label {
+  position: absolute;
+  bottom: -22px; /* Hang below icon container */
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+/* Center Core Node Specifics */
+.node-core .node-icon {
+  font-size: 28px;
+  background: linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05)), var(--card-bg);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.node-core .node-label {
+  bottom: auto;
+  top: -35px; /* Shift further up to clear the diagonal connection lines */
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Satellite nodes positioning using percentages for dynamic scaling */
+.node-core { left: 50%; top: 50%; }
+.node-wechat { left: 20%; top: 18%; }
+.node-qq { left: 20%; top: 82%; }
+.node-feishu { left: 50%; top: 88%; }
+.node-llm { left: 80%; top: 18%; }
+.node-client { left: 80%; top: 82%; }
+
+/* States */
+.topo-node.active .node-icon {
+  background: linear-gradient(rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.12)), var(--card-bg);
+  border-color: var(--accent-color);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.4);
+  transform: scale(1.1);
+  animation: node-pulse-anim 2s infinite ease-in-out;
+}
+
+.topo-node.active .node-label {
+  color: var(--text-primary);
+  opacity: 1;
+  font-weight: bold;
+}
+
+.topo-node.completed .node-icon {
+  background: linear-gradient(rgba(0, 230, 118, 0.1), rgba(0, 230, 118, 0.1)), var(--card-bg);
+  border-color: #00e676;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.3);
+}
+
+.topo-node.completed .node-label {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+@keyframes node-pulse-anim {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* Light Theme overrides for Topology */
+.theme-light .topo-node .node-icon {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+.theme-light .topo-line {
+  stroke: rgba(0, 0, 0, 0.06);
+}
+
+/* When in step view, hide the background robot watermark to avoid clashing with text and topology map */
+.console-left.step-view-active .terminal-bg-robot {
+  display: none !important;
 }
