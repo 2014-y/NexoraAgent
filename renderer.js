@@ -1758,13 +1758,10 @@ function setupIpcListeners() {
         }
         // 解析 http server listening 中的运行插件数量，动态更新右侧侧边栏统计
         if (text && text.includes('http server listening')) {
-            const match = text.match(/http server listening\s*\((\d+)\s*plugins/i);
+            const match = text.match(/http server listening\s*\((\d+)\s*plugins?/i);
             if (match) {
-                const count = match[1];
-                const rightPluginsCountEl = document.getElementById('right-plugins-count');
-                if (rightPluginsCountEl) {
-                    rightPluginsCountEl.innerText = `${count} 个`;
-                }
+                __gatewayLoadedPluginCount = parseInt(match[1], 10) || 0;
+                updateRightPluginsCountUI();
             }
         }
 
@@ -2057,8 +2054,10 @@ function setupIpcListeners() {
             gatewayStatus = 'stopped';
             gatewayFullyReady = false;
             gatewayLogReadyTail = '';
+            __gatewayLoadedPluginCount = null;
             stopGatewayReadyProbe();
             updateGatewayStatusUI('stopped');
+            updateRightPluginsCountUI();
             if (oldStatus === 'running') {
                 sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已停止运行。');
             }
@@ -4263,14 +4262,22 @@ if (topSaveBtn) {
 }
 
 // 动态更新右侧侧边栏“载入插件”统计数量
+// 优先用 Gateway 日志里的真实载入数；不要用 plugins.allow.length（那是配置白名单，会虚高）
+let __gatewayLoadedPluginCount = null;
 function updateRightPluginsCountUI() {
     const rightPluginsCountEl = document.getElementById('right-plugins-count');
     if (!rightPluginsCountEl) return;
-    if (configData && configData.plugins && Array.isArray(configData.plugins.allow)) {
-        rightPluginsCountEl.innerText = `${configData.plugins.allow.length} 个`;
-    } else {
-        rightPluginsCountEl.innerText = '0 个';
+    if (__gatewayLoadedPluginCount != null) {
+        rightPluginsCountEl.innerText = `${__gatewayLoadedPluginCount} 个`;
+        return;
     }
+    // 尚未收到 gateway listening 前：只数「真正 enabled」的条目，避免 allow 虚高
+    if (configData && configData.plugins && configData.plugins.entries) {
+        const n = Object.values(configData.plugins.entries).filter((e) => e && e.enabled === true).length;
+        rightPluginsCountEl.innerText = `${n} 个`;
+        return;
+    }
+    rightPluginsCountEl.innerText = '0 个';
 }
 
 // 渲染插件卡片网格
