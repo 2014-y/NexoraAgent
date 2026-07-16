@@ -1,7 +1,7 @@
 {
   "id": "image-generator",
   "name": "Image Generator",
-  "description": "Generate images via agnes-ai image API with key rotation",
+  "description": "Generate images via agnes-ai image API with key rotation.",
   "version": "1.0.0",
   "main": "index.js",
   "type": "module",

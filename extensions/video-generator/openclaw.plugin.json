@@ -1,7 +1,7 @@
 {
   "id": "video-generator",
   "name": "Video Generator",
-  "description": "Generate videos via agnes-ai video API",
+  "description": "Generate videos via agnes-ai video API.",
   "version": "1.0.0",
   "main": "index.js",
   "type": "module",

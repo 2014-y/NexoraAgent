@@ -8,5 +8,6 @@
     "extensions": [
       "./index.js"
     ]
-  }
+  },
+  "license": "MIT"
 }
