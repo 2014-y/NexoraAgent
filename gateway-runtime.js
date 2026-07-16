@@ -41,17 +41,52 @@ function setGatewayRuntimeRoot(root) {
     cachedRoot = root ? path.resolve(root) : null;
 }
 
+/** 渠道插件 + 沙箱 npm：缺任一即视为运行时残缺，必须重解压（不能只看版本戳） */
+const REQUIRED_RUNTIME_MARKERS = [
+    ['node_modules', 'openclaw', 'dist', 'index.js'],
+    ['node_modules', '@tencent-weixin', 'openclaw-weixin', 'package.json'],
+    ['node_modules', '@openclaw', 'feishu', 'package.json'],
+    ['node_modules', '@openclaw', 'qqbot', 'package.json'],
+    ['node_modules', '@openclaw', 'voice-call', 'package.json'],
+    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-cli.js'],
+    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-prefix.js']
+    // AGENTS.md 不放这里：旧 zip 可能仍缺模板；启动时由 ensureOpenClawWorkspaceTemplates 从 asar 补齐
+];
+
 function runtimeLooksReady(root, version) {
     if (!root) return false;
-    const entry = path.join(root, 'node_modules', 'openclaw', 'dist', 'index.js');
-    if (!fs.existsSync(entry)) return false;
     const stamp = path.join(root, '.runtime-version');
     if (!fs.existsSync(stamp)) return false;
     try {
-        return fs.readFileSync(stamp, 'utf8').trim() === String(version || '');
+        if (fs.readFileSync(stamp, 'utf8').trim() !== String(version || '')) return false;
     } catch (e) {
         return false;
     }
+    for (const segs of REQUIRED_RUNTIME_MARKERS) {
+        if (!fs.existsSync(path.join(root, ...segs))) return false;
+    }
+    return true;
+}
+
+/** 诊断残缺原因（日志用） */
+function explainRuntimeGaps(root, version) {
+    const gaps = [];
+    if (!root) return ['no-root'];
+    const stamp = path.join(root, '.runtime-version');
+    if (!fs.existsSync(stamp)) gaps.push('missing-.runtime-version');
+    else {
+        try {
+            const got = fs.readFileSync(stamp, 'utf8').trim();
+            if (got !== String(version || '')) gaps.push(`version-mismatch:${got}!=${version}`);
+        } catch (e) {
+            gaps.push('stamp-unreadable');
+        }
+    }
+    for (const segs of REQUIRED_RUNTIME_MARKERS) {
+        const p = path.join(root, ...segs);
+        if (!fs.existsSync(p)) gaps.push('missing:' + segs.join('/'));
+    }
+    return gaps;
 }
 
 function findGatewayRuntimeZip(app) {
@@ -182,17 +217,24 @@ async function ensureGatewayRuntime(app, opts = {}) {
         return { root, extracted: false, ready: true, mode: 'cached' };
     }
 
+    const gaps = explainRuntimeGaps(root, version);
+    try {
+        console.warn('[GatewayRuntime] incomplete runtime, will re-extract:', gaps.slice(0, 12).join(', '));
+    } catch (e) {}
+
     const zip = findGatewayRuntimeZip(app);
     if (!zip) {
         const legacy = findLegacyUnpackedRoot(app);
-        if (legacy) {
+        if (legacy && runtimeLooksReady(legacy, version)) {
             setGatewayRuntimeRoot(legacy);
             return { root: legacy, extracted: false, ready: true, mode: 'legacy-unpacked' };
         }
-        throw new Error('缺少 gateway-runtime.zip，且未找到旧版 app.asar.unpacked 运行时');
+        throw new Error(
+            '缺少 gateway-runtime.zip，且本地运行时残缺（缺渠道插件/npm）。gaps=' + gaps.slice(0, 8).join('; ')
+        );
     }
 
-    onProgress({ phase: 'extract', percent: 10, message: '正在覆盖安装 OpenClaw 运行时…' });
+    onProgress({ phase: 'extract', percent: 10, message: '正在补齐渠道插件运行时…' });
 
     // 全面覆盖：直接解压到目标目录，不先整树删除（删几万文件极慢）
     fs.mkdirSync(root, { recursive: true });
@@ -214,6 +256,8 @@ module.exports = {
     setGatewayRuntimeRoot,
     ensureGatewayRuntime,
     runtimeLooksReady,
+    explainRuntimeGaps,
+    REQUIRED_RUNTIME_MARKERS,
     findGatewayRuntimeZip,
     findLegacyUnpackedRoot,
     deferRmTree
