@@ -41,24 +41,16 @@ function setGatewayRuntimeRoot(root) {
     cachedRoot = root ? path.resolve(root) : null;
 }
 
-/** 渠道插件 + 沙箱 npm：缺任一即视为运行时残缺，必须重解压（不能只看版本戳） */
-const REQUIRED_RUNTIME_MARKERS = [
-    ['node_modules', 'openclaw', 'dist', 'index.js'],
-    ['node_modules', '@tencent-weixin', 'openclaw-weixin', 'package.json'],
-    ['node_modules', '@openclaw', 'feishu', 'package.json'],
-    ['node_modules', '@openclaw', 'qqbot', 'package.json'],
-    ['node_modules', '@openclaw', 'voice-call', 'package.json'],
-    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-cli.js'],
-    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-prefix.js']
-    // AGENTS.md 不放这里：旧 zip 可能仍缺模板；启动时由 ensureOpenClawWorkspaceTemplates 从 asar 补齐
-];
+/** 与 pack-gateway-runtime.js 同步；变更即强制重解压（同 app 版本也生效） */
+const { RUNTIME_PACK_ID, REQUIRED_RUNTIME_MARKERS } = require('./runtime-pack-manifest');
 
 function runtimeLooksReady(root, version) {
     if (!root) return false;
-    const stamp = path.join(root, '.runtime-version');
+    const stamp = path.join(root, '.runtime-stamp');
+    const want = `${String(version || '')}:${RUNTIME_PACK_ID}`;
     if (!fs.existsSync(stamp)) return false;
     try {
-        if (fs.readFileSync(stamp, 'utf8').trim() !== String(version || '')) return false;
+        if (fs.readFileSync(stamp, 'utf8').trim() !== want) return false;
     } catch (e) {
         return false;
     }
@@ -68,16 +60,25 @@ function runtimeLooksReady(root, version) {
     return true;
 }
 
+function writeRuntimeStamp(root, version) {
+    const stamp = path.join(root, '.runtime-stamp');
+    fs.writeFileSync(stamp, `${String(version || '')}:${RUNTIME_PACK_ID}`, 'utf8');
+    try {
+        fs.writeFileSync(path.join(root, '.runtime-version'), String(version || ''), 'utf8');
+    } catch (e) {}
+}
+
 /** 诊断残缺原因（日志用） */
 function explainRuntimeGaps(root, version) {
     const gaps = [];
     if (!root) return ['no-root'];
-    const stamp = path.join(root, '.runtime-version');
-    if (!fs.existsSync(stamp)) gaps.push('missing-.runtime-version');
+    const stamp = path.join(root, '.runtime-stamp');
+    const want = `${String(version || '')}:${RUNTIME_PACK_ID}`;
+    if (!fs.existsSync(stamp)) gaps.push('missing-.runtime-stamp');
     else {
         try {
             const got = fs.readFileSync(stamp, 'utf8').trim();
-            if (got !== String(version || '')) gaps.push(`version-mismatch:${got}!=${version}`);
+            if (got !== want) gaps.push(`stamp-mismatch:${got}!=${want}`);
         } catch (e) {
             gaps.push('stamp-unreadable');
         }
@@ -241,9 +242,17 @@ async function ensureGatewayRuntime(app, opts = {}) {
     try {
         await extractZip(zip, root);
         onProgress({ phase: 'extract', percent: 90, message: '正在写入版本信息…' });
-        fs.writeFileSync(path.join(root, '.runtime-version'), String(version), 'utf8');
+        writeRuntimeStamp(root, version);
     } catch (e) {
         throw e;
+    }
+
+    if (!runtimeLooksReady(root, version)) {
+        const left = explainRuntimeGaps(root, version).filter((g) => g.startsWith('missing:'));
+        throw new Error(
+            'gateway-runtime 解压后仍残缺（缺渠道插件或 npm）。请重新安装 Nexora Agent。'
+            + (left.length ? ' missing=' + left.slice(0, 6).join('; ') : '')
+        );
     }
 
     setGatewayRuntimeRoot(root);
@@ -258,6 +267,8 @@ module.exports = {
     runtimeLooksReady,
     explainRuntimeGaps,
     REQUIRED_RUNTIME_MARKERS,
+    RUNTIME_PACK_ID,
+    writeRuntimeStamp,
     findGatewayRuntimeZip,
     findLegacyUnpackedRoot,
     deferRmTree

@@ -141,16 +141,16 @@
         "enabled": false
       },
       "voice-call": {
-        "enabled": true
+        "enabled": false
       },
       "telegram": {
-        "enabled": true
+        "enabled": false
       },
       "slack": {
-        "enabled": true
+        "enabled": false
       },
       "whatsapp": {
-        "enabled": true
+        "enabled": false
       },
       "lobster": {
         "enabled": false
@@ -162,7 +162,7 @@
         "enabled": false
       },
       "matrix": {
-        "enabled": true
+        "enabled": false
       },
       "msteams": {
         "enabled": false
@@ -228,10 +228,10 @@
         "enabled": false
       },
       "feishu": {
-        "enabled": true
+        "enabled": false
       },
       "qqbot": {
-        "enabled": true
+        "enabled": false
       },
       "duckduckgo": {
         "enabled": true

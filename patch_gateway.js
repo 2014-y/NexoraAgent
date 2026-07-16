@@ -114,6 +114,70 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
                 parsedBody.messages.unshift({ role: 'system', content: LOCAL_MODEL_NO_TOOL_GUARD });
                 hasModified = true;
             }
+
+            // 本地小窗：硬裁历史，避免 Preflight compaction 必挂
+            // 保留全部 system + 最近若干轮 user/assistant
+            const MAX_CHARS = 12000; // ~3k tokens 量级，给 8k 窗留出回复空间
+            const msgs = parsedBody.messages;
+            let total = 0;
+            for (const m of msgs) {
+                if (!m) continue;
+                if (typeof m.content === 'string') total += m.content.length;
+                else if (Array.isArray(m.content)) {
+                    for (const part of m.content) {
+                        if (part && typeof part.text === 'string') total += part.text.length;
+                    }
+                }
+            }
+            if (total > MAX_CHARS && msgs.length > 6) {
+                const systems = msgs.filter((m) => m && m.role === 'system');
+                const rest = msgs.filter((m) => m && m.role !== 'system');
+                // 从尾部往前凑，直到接近上限
+                const kept = [];
+                let budget = Math.floor(MAX_CHARS * 0.7);
+                for (let i = rest.length - 1; i >= 0; i--) {
+                    const m = rest[i];
+                    let len = 0;
+                    if (typeof m.content === 'string') len = m.content.length;
+                    else if (Array.isArray(m.content)) {
+                        for (const part of m.content) {
+                            if (part && typeof part.text === 'string') len += part.text.length;
+                        }
+                    }
+                    if (kept.length >= 8 && budget - len < 0) break;
+                    kept.unshift(m);
+                    budget -= len;
+                    if (budget <= 0 && kept.length >= 4) break;
+                }
+                parsedBody.messages = [...systems.slice(0, 3), ...kept];
+                hasModified = true;
+            }
+        }
+
+        // 上限与 latency-tune 一致（16384）。旧逻辑压到 8192 会抵消配置侧修复，
+        // 导致 OpenClaw 按 16k 预算、Ollama 实际 8k → 必触发 context overflow。
+        let ollamaCtxCap = 16384;
+        let ollamaMaxTokCap = 1024;
+        try {
+            const lt = require('./latency-tune');
+            if (lt && lt.DEFAULTS) {
+                if (Number(lt.DEFAULTS.ollamaNumCtx) > 0) ollamaCtxCap = Number(lt.DEFAULTS.ollamaNumCtx);
+                if (Number(lt.DEFAULTS.ollamaMaxTokens) > 0) ollamaMaxTokCap = Number(lt.DEFAULTS.ollamaMaxTokens);
+            }
+        } catch (e) {}
+        if (parsedBody.options && typeof parsedBody.options === 'object') {
+            if (Number(parsedBody.options.num_ctx) > ollamaCtxCap) {
+                parsedBody.options.num_ctx = ollamaCtxCap;
+                hasModified = true;
+            }
+        }
+        if (Number(parsedBody.num_ctx) > ollamaCtxCap) {
+            parsedBody.num_ctx = ollamaCtxCap;
+            hasModified = true;
+        }
+        if (Number(parsedBody.max_tokens) > ollamaMaxTokCap) {
+            parsedBody.max_tokens = ollamaMaxTokCap;
+            hasModified = true;
         }
     }
 
@@ -1139,7 +1203,22 @@ function wrapRequest(originalRequest, defaultProto) {
 
 http.request = wrapRequest(http.request, 'http');
 https.request = wrapRequest(https.request, 'https');
-console.error('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.');
+
+// npm view/install 子进程也会 --require 本补丁；刷屏 TokenGuard 横幅会把 Doctor 日志淹没
+function __nexoraTokenGuardQuiet() {
+    try {
+        if (process.env.NEXORA_TOKENGUARD_QUIET === '1') return true;
+        const argv = (process.argv || []).join(' ');
+        if (/npm-cli\.js|npm-prefix\.js|[\\/]npm\.cmd/i.test(argv)) return true;
+        if (process.env.npm_command || process.env.npm_lifecycle_event) return true;
+    } catch (e) {}
+    return false;
+}
+function __tgInfo(msg) {
+    if (__nexoraTokenGuardQuiet()) return;
+    console.error(msg);
+}
+__tgInfo('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.');
 
 // ─── 代理 2：fetch / globalThis.fetch 拦截通道 (Node 18+ 闭环) ───
 function wrapFetch(originalFetch) {
@@ -1207,14 +1286,46 @@ function wrapFetch(originalFetch) {
 
 if (typeof globalThis === 'object' && globalThis.fetch) {
     globalThis.fetch = wrapFetch(globalThis.fetch);
-    console.error('[TokenGuard] Transparent globalThis.fetch hook successfully loaded.');
+    __tgInfo('[TokenGuard] Transparent globalThis.fetch hook successfully loaded.');
 }
 
 // ─── 代理 3：天罗地网 (拦截基于 Require 的第三方底层网络库) ───
 const Module = require('module');
 const originalLoad = Module._load;
+
+function isStartupPluginNpmRepairFailure(err) {
+    const msg = String((err && err.message) || err || '');
+    if (!msg.includes('startup migrations did not complete cleanly')) return false;
+    return /npm (view|install) failed|npm-cli\.js|npm-prefix\.js|MODULE_NOT_FOUND/i.test(msg)
+        || /Failed to install missing configured plugin/i.test(msg);
+}
+
 Module._load = function(request, parent, isMain) {
     const exports = originalLoad.apply(this, arguments);
+
+    // Soft-skip：沙箱缺 npm / 离线时 Doctor 插件修复失败不应阻断 Gateway ready
+    try {
+        if (typeof request === 'string' && /doctor-config-preflight/i.test(request) && exports && typeof exports === 'object') {
+            for (const key of Object.keys(exports)) {
+                const fn = exports[key];
+                if (typeof fn !== 'function' || fn.__NEXORA_SOFT_MIGRATION__) continue;
+                // 只包异步 preflight；同步 helper（如 shouldSkipPluginValidation）不能改成 async
+                if (fn.constructor.name !== 'AsyncFunction') continue;
+                const wrapped = async function(options) {
+                    try {
+                        return await fn.apply(this, arguments);
+                    } catch (err) {
+                        if (!isStartupPluginNpmRepairFailure(err)) throw err;
+                        console.error('[NexoraAgent] Soft-skipping startup plugin npm repair failure; continuing gateway boot.');
+                        console.error(String(err && err.message || err).split('\n').slice(0, 6).join('\n'));
+                        return await fn.call(this, Object.assign({}, options || {}, { requireStartupMigrationCheckpoint: false }));
+                    }
+                };
+                wrapped.__NEXORA_SOFT_MIGRATION__ = true;
+                exports[key] = wrapped;
+            }
+        }
+    } catch (e) {}
     
     // 1. 拦截 Undici (被 langchain 等高级 AI 框架内置使用，会绕过所有常规拦截)
     if (request === 'undici' || request.endsWith('/undici/index.js')) {
@@ -1275,7 +1386,7 @@ Module._load = function(request, parent, isMain) {
                         return res;
                     };
                 }
-                console.error('[TokenGuard] Transparent undici module hook successfully loaded.');
+                __tgInfo('[TokenGuard] Transparent undici module hook successfully loaded.');
             } catch (e) {}
         }
     }
@@ -1288,7 +1399,7 @@ Module._load = function(request, parent, isMain) {
                 if (typeof exports === 'function') {
                     const newExport = wrapFetch(exports);
                     Object.assign(newExport, exports);
-                    console.error('[TokenGuard] node-fetch module hook successfully loaded.');
+                    __tgInfo('[TokenGuard] node-fetch module hook successfully loaded.');
                     return newExport;
                 }
             } catch(e) {}
@@ -1299,7 +1410,7 @@ Module._load = function(request, parent, isMain) {
 };
 if (typeof global === 'object' && global.fetch && global.fetch !== (globalThis && globalThis.fetch)) {
     global.fetch = wrapFetch(global.fetch);
-    console.error('[TokenGuard] Transparent global.fetch hook successfully loaded.');
+    __tgInfo('[TokenGuard] Transparent global.fetch hook successfully loaded.');
 }
 
 // ─── fs.writeFileSync 防爆盾 ───

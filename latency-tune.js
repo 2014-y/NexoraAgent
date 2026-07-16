@@ -8,19 +8,23 @@
  */
 const DEFAULTS = {
   weixinDebounceMs: 500,
-  ollamaContextWindow: 8192,
-  ollamaNumCtx: 8192,
+  /**
+   * 实测：OpenClaw 系统提示+workspace 空会话就约 6500+ tokens。
+   * 8192 窗 + reserve≈4096 → 提示预算仅 4096，必触发 compaction 失败。
+   * 16384 才能给提示留出余量；再大拖慢首 token，不默认更高。
+   */
+  ollamaContextWindow: 16384,
+  ollamaNumCtx: 16384,
   ollamaMaxTokens: 1024,
   bootstrapMaxChars: 8000,
   bootstrapTotalMaxChars: 24000,
-  /** 本地/小窗口专用：避免 AGENTS.md+记忆把 8k 窗口塞爆 */
-  smallBootstrapMaxChars: 1800,
-  smallBootstrapTotalMaxChars: 4500,
+  /** 本地模型：尽量少注入，但仍靠更大窗口兜底 */
+  smallBootstrapMaxChars: 1200,
+  smallBootstrapTotalMaxChars: 2800,
   cloudContextWindowCap: 131072,
-  /** 云端默认压缩预留（OpenClaw 官方默认也是 2e4） */
   reserveTokensFloor: 20000,
-  /** 小于等于此窗口视为「小上下文」 */
-  smallContextThreshold: 16384
+  /** 小于等于此窗口视为「小上下文」——用自适应 floor + 短 bootstrap */
+  smallContextThreshold: 24576
 };
 
 function isObject(v) {
@@ -114,7 +118,8 @@ function ensureLatencySafeConfig(config, opts = {}) {
     for (const model of providers.ollama.models) {
       if (!isObject(model)) continue;
       const id = model.id || model.name || 'unknown';
-      if (!Number.isFinite(Number(model.contextWindow)) || Number(model.contextWindow) > ollamaCtx) {
+      // 强制钉在目标窗口：过小会 compaction 必挂，过大首 token 极慢
+      if (!Number.isFinite(Number(model.contextWindow)) || Number(model.contextWindow) !== ollamaCtx) {
         const prev = model.contextWindow;
         model.contextWindow = ollamaCtx;
         changes.push(`ollama/${id}.contextWindow: ${prev ?? 'unset'} -> ${ollamaCtx}`);
@@ -125,7 +130,7 @@ function ensureLatencySafeConfig(config, opts = {}) {
         changes.push(`ollama/${id}.maxTokens: ${prev ?? 'unset'} -> ${ollamaMaxTokens}`);
       }
       if (!isObject(model.params)) model.params = {};
-      if (!Number.isFinite(Number(model.params.num_ctx)) || Number(model.params.num_ctx) > ollamaNumCtx) {
+      if (!Number.isFinite(Number(model.params.num_ctx)) || Number(model.params.num_ctx) !== ollamaNumCtx) {
         const prev = model.params.num_ctx;
         model.params.num_ctx = ollamaNumCtx;
         changes.push(`ollama/${id}.params.num_ctx: ${prev ?? 'unset'} -> ${ollamaNumCtx}`);
@@ -134,12 +139,29 @@ function ensureLatencySafeConfig(config, opts = {}) {
         model.params.thinking = false;
         changes.push(`ollama/${id}.params.thinking: -> false`);
       }
+      // 关掉 thinking 档位（日志出现 thinking=medium 时会额外吃 token）
+      if (model.params.think != null && model.params.think !== false) {
+        model.params.think = false;
+        changes.push(`ollama/${id}.params.think: -> false`);
+      }
       if (!isObject(model.compat)) model.compat = {};
       if (model.compat.supportsTools !== false) {
         model.compat.supportsTools = false;
         changes.push(`ollama/${id}.compat.supportsTools: -> false`);
       }
     }
+  }
+
+  // agents.defaults 上的 thinking 也会覆盖模型级设置
+  if (ad.thinkingDefault && ad.thinkingDefault !== 'off') {
+    const prev = ad.thinkingDefault;
+    ad.thinkingDefault = 'off';
+    changes.push(`agents.defaults.thinkingDefault: ${prev} -> off`);
+  }
+  if (ad.thinking !== undefined && ad.thinking !== false && ad.thinking !== 'off') {
+    const prev = ad.thinking;
+    ad.thinking = 'off';
+    changes.push(`agents.defaults.thinking: ${prev} -> off`);
   }
 
   for (const [provId, prov] of Object.entries(providers)) {

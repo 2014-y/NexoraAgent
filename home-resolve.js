@@ -79,13 +79,29 @@ function detectRestrictedDesktop(env = process.env) {
 
 /** 路径是否指向「另一台电脑/另一个用户」的配置（无影拷贝本机配置时最常见） */
 function isForeignUserPath(p, env = process.env) {
-    const s = String(p || '');
+    let s = String(p || '');
+    try {
+        if (fs.existsSync(s)) {
+            s = fs.realpathSync(s);
+        }
+    } catch (e) {}
     const m = s.match(/[\\/]Users[\\/]([^\\/]+)[\\/]/i);
     if (!m) return false;
     const pathUser = String(m[1] || '').toLowerCase();
     const current = safeUsername(env).toLowerCase();
     if (!pathUser || !current) return false;
     if (pathUser === current) return false;
+    
+    // 兼容 Windows 8.3 短文件名 (例如 admini~1 与 administrator)
+    if (current.length >= 6 && pathUser.includes('~')) {
+        const shortPart = pathUser.split('~')[0];
+        if (current.startsWith(shortPart)) return false;
+    }
+    if (pathUser.length >= 6 && current.includes('~')) {
+        const shortPart = current.split('~')[0];
+        if (pathUser.startsWith(shortPart)) return false;
+    }
+
     // Public / Default 不算「别人的配置家目录」
     if (pathUser === 'public' || pathUser === 'default' || pathUser === 'default user' || pathUser === 'all users') {
         return false;

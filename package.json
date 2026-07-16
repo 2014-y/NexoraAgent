@@ -67,6 +67,8 @@
     "forceCodeSigning": false,
     "asarUnpack": [
       "**/node_modules/node-pty/**",
+      "**/node_modules/@openclaw/**",
+      "**/node_modules/@tencent-weixin/**",
       "**/*.node"
     ],
     "icon": "config/icon.ico",

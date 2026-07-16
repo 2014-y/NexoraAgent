@@ -135,15 +135,10 @@ function ensureLongTermMemoryStack(config) {
     }
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
   }
-  // UI 伞形状态（仅 Nexora Agent 使用，OpenClaw 忽略未知条目也无害，但不进 allow）
-  if (!config.plugins) config.plugins = {};
-  if (!config.plugins.entries) config.plugins.entries = {};
-  if (!config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {
-    config.plugins.entries[LONG_TERM_MEMORY_UI_ID] = { enabled: true };
-    changes.push('long-term-memory: ui entry created');
-  } else if (config.plugins.entries[LONG_TERM_MEMORY_UI_ID].enabled !== true) {
-    config.plugins.entries[LONG_TERM_MEMORY_UI_ID].enabled = true;
-    changes.push('long-term-memory: ui enabled -> true');
+  // UI 伞形状态只存在于 Nexora 面板推导；勿写入 openclaw.json（OpenClaw 会告警 plugin not found）
+  if (config.plugins.entries && config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {
+    delete config.plugins.entries[LONG_TERM_MEMORY_UI_ID];
+    changes.push('long-term-memory: removed ui-only entry from openclaw plugins.entries');
   }
   if (Array.isArray(config.plugins.allow)) {
     const before = config.plugins.allow.length;
@@ -168,7 +163,9 @@ function setLongTermMemoryEnabled(config, enabled) {
     config.plugins.entries[id].enabled = on;
     if (on) ensureAllow(config, id);
   }
-  config.plugins.entries[LONG_TERM_MEMORY_UI_ID] = { enabled: on };
+  if (config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {
+    delete config.plugins.entries[LONG_TERM_MEMORY_UI_ID];
+  }
   if (Array.isArray(config.plugins.allow)) {
     config.plugins.allow = config.plugins.allow.filter((x) => x !== LONG_TERM_MEMORY_UI_ID);
   }
@@ -201,10 +198,12 @@ function ensureUiPluginCatalog(config, opts = {}) {
   } catch (e) {}
 
   for (const id of ZERO_CONFIG_PLUGINS) {
-    if (ensureEntry(config, id, true)) {
+    const defaultOn = forceDefaultOn && ZERO_CONFIG_DEFAULT_ON.includes(id);
+    if (ensureEntry(config, id, defaultOn)) {
       changes.push(`${id}: entry created`);
     }
-    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
+    // 仅首次 stamp 强制默认开；之后尊重用户开关，绝不能每次启动把凭证类/渠道类重新打开
+    if (defaultOn && config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
       config.plugins.entries[id].enabled = true;
       changes.push(`${id}: enabled -> true (force default-on)`);
     }
@@ -212,21 +211,10 @@ function ensureUiPluginCatalog(config, opts = {}) {
   }
 
   for (const id of CREDENTIAL_PLUGINS) {
-    if (ensureEntry(config, id, true)) changes.push(`${id}: entry created`);
-    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
-      config.plugins.entries[id].enabled = true;
-      changes.push(`${id}: enabled -> true (force default-on)`);
-    }
+    // 不要预先写入 entries（OpenClaw 会对「有条目但未安装」刷 Config warnings）
+    // 用户在插件页打开时再写入；allow 仍保留方便一键启用
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
   }
-
-  // 确保飞书 (feishu) 默认创建并开启
-  if (ensureEntry(config, 'feishu', true)) changes.push('feishu: entry created');
-  if (config.plugins.entries['feishu'] && config.plugins.entries['feishu'].enabled !== true) {
-    config.plugins.entries['feishu'].enabled = true;
-    changes.push('feishu: enabled -> true (force default-on)');
-  }
-  if (ensureAllow(config, 'feishu')) changes.push('feishu: +allow');
 
   // 长期记忆开箱：强制启用真实插件栈 + UI 伞形卡
   const ltm = ensureLongTermMemoryStack(config);

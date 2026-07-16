@@ -1926,6 +1926,10 @@ function setupIpcListeners() {
 
         // 进行常见启动消息的汉化和修饰
         let cleanedText = text;
+        
+        // 格式化日期显示为：年月日 时分秒
+        cleanedText = cleanedText.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?\s*/gm, '$1 $2 ');
+
         if (text.includes('loading configuration')) {
             cleanedText = cleanedText.replace(/loading configuration[.….]*/, '正在读取与解析Nexora Agent本地配置文件...');
         } else if (text.includes('resolving authentication')) {

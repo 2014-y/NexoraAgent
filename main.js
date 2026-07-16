@@ -47,6 +47,18 @@ const {
     ensureGatewayRuntime
 } = require('./gateway-runtime');
 
+let hardenGatewayBootAgainstPluginNpm = () => ({ notes: ['harden-unavailable'], configChanged: false });
+let softenOpenClawStartupMigrationGuard = () => ({ ok: false, reason: 'harden-unavailable' });
+let ensureSandboxNpmPresent = () => ({ ok: false, reason: 'harden-unavailable' });
+try {
+    const bootHarden = require('./gateway-boot-harden');
+    hardenGatewayBootAgainstPluginNpm = bootHarden.hardenGatewayBootAgainstPluginNpm;
+    softenOpenClawStartupMigrationGuard = bootHarden.softenOpenClawStartupMigrationGuard;
+    ensureSandboxNpmPresent = bootHarden.ensureSandboxNpmPresent;
+} catch (e) {
+    console.warn('[GatewayBoot] gateway-boot-harden.js missing from package; boot harden disabled:', e && e.message);
+}
+
 function safeMainErrorLogPath() {
     try {
         if (typeof CONFIG_DIR === 'string' && CONFIG_DIR) {
@@ -665,7 +677,7 @@ function resolveWritableRuntimeDir() {
 function deployRuntimeArtifacts() {
     const dir = resolveWritableRuntimeDir();
     // 优先拷贝应用内最新补丁（asar/工程），再回退 gateway-runtime（可能是旧解压）
-    const names = ['patch_gateway.js', 'token-usage-parse.js', 'capture-desktop.ps1', 'openclaw-state.js', 'gateway-auth.js'];
+    const names = ['patch_gateway.js', 'token-usage-parse.js', 'capture-desktop.ps1', 'openclaw-state.js', 'gateway-auth.js', 'gateway-boot-harden.js'];
     for (const name of names) {
         const srcCandidates = [path.join(__dirname, name), resolveAppFsPath(name)];
         const src = srcCandidates.find((p) => {
@@ -699,7 +711,8 @@ function pruneStalePluginConfigEntries(config) {
     const existsOnDisk = (id) => {
         if (!id || id.startsWith('.') || id.includes('..')) return false;
         try {
-            if (installs[id] && installs[id].installPath && fs.existsSync(installs[id].installPath)) return true;
+            if (installs[id] && installs[id].installPath
+                && fs.existsSync(path.join(installs[id].installPath, 'package.json'))) return true;
         } catch (e) {}
         try {
             const ext = path.join(CONFIG_DIR, 'extensions', id);
@@ -710,10 +723,17 @@ function pruneStalePluginConfigEntries(config) {
                 if (typeof p === 'string' && p.toLowerCase().includes(String(id).toLowerCase()) && fs.existsSync(p)) return true;
             } catch (e) {}
         }
-        // 内置渠道 / 自定义清单里仍声明的保留
+        // 内置渠道：必须真有包，不能“清单里写了就算存在”（否则 Doctor 会对缺失包强制 npm）
         if (BUNDLED_CUSTOM_PLUGINS.includes(id)) return true;
-        if (BUNDLED_NPM_CHANNEL_PLUGINS.some((e) => e.id === id)) return true;
-        if (id === LONG_TERM_MEMORY_UI_ID) return true;
+        const bundled = BUNDLED_NPM_CHANNEL_PLUGINS.find((e) => e.id === id);
+        if (bundled) {
+            try {
+                if (resolveBundledNpmPluginPath(bundled)) return true;
+            } catch (e) {}
+            return false;
+        }
+        // UI 伞形 id 不是 OpenClaw 插件 —— 下面会删掉，避免 Config warnings
+        if (id === LONG_TERM_MEMORY_UI_ID) return false;
         try {
             if (LONG_TERM_MEMORY_STACK && LONG_TERM_MEMORY_STACK.includes(id)) return true;
         } catch (e) {}
@@ -722,17 +742,38 @@ function pruneStalePluginConfigEntries(config) {
 
     for (const id of Object.keys(entries)) {
         // 安装残留 / 明显无效 id
-        if (id.startsWith('.') || id === 'key-rotator-proxy' || id === 'system-control') {
+        if (id.startsWith('.') || id === 'key-rotator-proxy' || id === 'system-control' || id === 'channel-router') {
             delete entries[id];
             changed = true;
             continue;
         }
-        // UI 伞形 id 可留着给 Nexora Agent 面板，但不要进 OpenClaw allow（下面 allow 再滤）
-        if (id === LONG_TERM_MEMORY_UI_ID) continue;
+        // UI 伞形卡勿留给 OpenClaw（会报 plugin not found）；Nexora 面板用栈状态推导
+        if (id === LONG_TERM_MEMORY_UI_ID) {
+            delete entries[id];
+            changed = true;
+            continue;
+        }
         if (!existsOnDisk(id)) {
-            // 仅删“确定不存在”的告警项；保留常见核心名以免误伤
-            const keepCore = new Set(['feishu', 'qqbot', 'telegram', 'slack', 'whatsapp', 'matrix', 'voice-call', 'webhooks', 'bonjour', 'ollama', 'openclaw-weixin']);
-            if (keepCore.has(id)) continue;
+            const channelIds = new Set([
+                'feishu', 'qqbot', 'telegram', 'slack', 'whatsapp', 'matrix',
+                'voice-call', 'openclaw-weixin'
+            ]);
+            if (channelIds.has(id)) {
+                delete entries[id];
+                if (installs[id]) {
+                    delete installs[id];
+                    changed = true;
+                }
+                if (Array.isArray(config.plugins.allow)) {
+                    const next = config.plugins.allow.filter((x) => x !== id);
+                    if (next.length !== config.plugins.allow.length) {
+                        config.plugins.allow = next;
+                        changed = true;
+                    }
+                }
+                changed = true;
+                continue;
+            }
             delete entries[id];
             changed = true;
         }
@@ -787,13 +828,13 @@ const BUNDLED_CUSTOM_PLUGINS = [
 // 避免无影上残留「别人电脑」的绝对路径 / Program Files 坏入口导致全部加载失败。
 const BUNDLED_NPM_CHANNEL_PLUGINS = [
     { id: 'openclaw-weixin', viaLoadPaths: true, candidates: [path.join('node_modules', '@tencent-weixin', 'openclaw-weixin')] },
-    { id: 'qqbot', viaLoadPaths: false, packageName: '@openclaw/qqbot', candidates: [path.join('node_modules', '@openclaw', 'qqbot')] },
-    { id: 'feishu', viaLoadPaths: false, packageName: '@openclaw/feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
+    { id: 'qqbot', viaLoadPaths: true, packageName: '@openclaw/qqbot', candidates: [path.join('node_modules', '@openclaw', 'qqbot')] },
+    { id: 'feishu', viaLoadPaths: true, packageName: '@openclaw/feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
     // voice-call 绝不能进 load.paths（trusted store）
     { id: 'voice-call', viaLoadPaths: false, packageName: '@openclaw/voice-call', candidates: [path.join('node_modules', '@openclaw', 'voice-call')] },
-    { id: 'slack', viaLoadPaths: false, packageName: '@openclaw/slack', candidates: [path.join('node_modules', '@openclaw', 'slack')] },
-    { id: 'whatsapp', viaLoadPaths: false, packageName: '@openclaw/whatsapp', candidates: [path.join('node_modules', '@openclaw', 'whatsapp')] },
-    { id: 'matrix', viaLoadPaths: false, packageName: '@openclaw/matrix', candidates: [path.join('node_modules', '@openclaw', 'matrix')] }
+    { id: 'slack', viaLoadPaths: true, packageName: '@openclaw/slack', candidates: [path.join('node_modules', '@openclaw', 'slack')] },
+    { id: 'whatsapp', viaLoadPaths: true, packageName: '@openclaw/whatsapp', candidates: [path.join('node_modules', '@openclaw', 'whatsapp')] },
+    { id: 'matrix', viaLoadPaths: true, packageName: '@openclaw/matrix', candidates: [path.join('node_modules', '@openclaw', 'matrix')] }
 ];
 
 function pathLooksLikeOfficialOpenClawChannel(p) {
@@ -832,8 +873,9 @@ function resolveBundledNpmPluginPath(entry) {
         const abs = path.join(__dirname, rel);
         if (fs.existsSync(abs)) return abs;
     }
-    // 开发树缺包时，回退到已安装产品目录（用户当前卡在 Install Weixin? 的常见原因）
+    // 开发树缺包时，回退到网关解压目录及已安装产品目录
     const fallbackRoots = [
+        getGatewayRuntimeRoot(require('electron').app),
         path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Nexora Agent', 'resources', 'app.asar.unpacked'),
         path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Nexora Agent', 'resources', 'app'),
         path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Nexora Agent', 'resources', 'app.asar.unpacked'),
@@ -1284,6 +1326,18 @@ const DEFAULT_MEMORY_MD_TEMPLATE = `# MEMORY.md
 - 由 Nexora Agent「长期记忆」插件栈自动维护（摘要 / 旋转归档 / 压缩护栏）。
 `;
 
+/** 本地小模型专用短模板：官方 AGENTS.md 过长会直接撑爆 8k 上下文 */
+const SHORT_WORKSPACE_AGENTS_MD = `# AGENTS.md
+
+Be helpful and concise. Prefer short answers.
+
+## Memory
+- Use MEMORY.md for lasting facts only.
+
+## Tools
+- Prefer minimal tools. Skip heavy desktop actions unless asked.
+`;
+
 function seedDefaultMemoryFile(memFile) {
     try {
         const dir = path.dirname(memFile);
@@ -1306,6 +1360,223 @@ function seedDefaultMemoryFile(memFile) {
         console.warn('[PluginSeed] seedDefaultMemoryFile failed:', e.message);
     }
     return false;
+}
+
+/**
+ * 保证 workspace/AGENTS.md 存在且不会撑爆本地小模型上下文。
+ * - 缺失：种短模板
+ * - 已是官方长模板（>2.5KB）且当前主模型是 ollama/小窗：自动换成短模板（备份 .bak）
+ */
+function ensureCompactWorkspaceAgentsMd(wsDir) {
+    try {
+        const agentsWs = path.join(wsDir, 'AGENTS.md');
+        const shortLocal = [
+            path.join(__dirname, 'config', 'openclaw-templates', 'AGENTS.local.md'),
+            resolveAppFsPath('config', 'openclaw-templates', 'AGENTS.local.md')
+        ].find((p) => {
+            try { return fs.existsSync(p); } catch (e) { return false; }
+        });
+        const shortBody = shortLocal
+            ? fs.readFileSync(shortLocal, 'utf8')
+            : SHORT_WORKSPACE_AGENTS_MD;
+
+        let preferShort = true;
+        try {
+            if (fs.existsSync(CONFIG_PATH)) {
+                const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+                const primary = cfg.agents && cfg.agents.defaults && cfg.agents.defaults.model
+                    && (typeof cfg.agents.defaults.model === 'string'
+                        ? cfg.agents.defaults.model
+                        : cfg.agents.defaults.model.primary);
+                if (typeof primary === 'string' && !primary.startsWith('ollama/')) {
+                    // 云端模型可用完整模板；仍保证文件存在
+                    preferShort = false;
+                }
+            }
+        } catch (e) {}
+
+        if (!fs.existsSync(agentsWs)) {
+            fs.writeFileSync(agentsWs, preferShort ? shortBody : SHORT_WORKSPACE_AGENTS_MD, 'utf8');
+            console.log('[PluginSeed] Seeded workspace AGENTS.md (compact)');
+            return true;
+        }
+
+        if (!preferShort) return false;
+
+        const cur = fs.readFileSync(agentsWs, 'utf8');
+        // 官方模板特征：很长，或含 First Run / Session Startup 大段
+        const tooFat = cur.length > 2500
+            || /## First Run/i.test(cur)
+            || /## Session Startup/i.test(cur);
+        if (tooFat) {
+            try {
+                fs.copyFileSync(agentsWs, agentsWs + '.bak-fat-' + Date.now());
+            } catch (e) {}
+            fs.writeFileSync(agentsWs, shortBody, 'utf8');
+            console.log('[PluginSeed] Replaced fat workspace AGENTS.md with compact local template');
+            return true;
+        }
+    } catch (e) {
+        console.warn('[PluginSeed] ensureCompactWorkspaceAgentsMd:', e.message);
+    }
+    return false;
+}
+
+/**
+ * 本地小模型：若 main session 转录过大，截断尾部，避免每轮 Preflight compaction 必挂。
+ * 同时清理「已压缩但仍溢出」的卡死会话（already_compacted_recently）。
+ */
+function trimOversizedMainSessionTranscript() {
+    try {
+        const sessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
+        if (!fs.existsSync(sessionsDir)) return false;
+        const MAX_BYTES = 120 * 1024;
+        let trimmed = 0;
+        let reset = 0;
+        for (const name of fs.readdirSync(sessionsDir)) {
+            if (!/\.(jsonl|json)$/i.test(name)) continue;
+            const full = path.join(sessionsDir, name);
+            let st;
+            try { st = fs.statSync(full); } catch (e) { continue; }
+            if (!st.isFile()) continue;
+
+            // 卡死标志：compaction checkpoint / 超大 / 近期 overflow
+            let forceReset = false;
+            try {
+                if (st.size > MAX_BYTES) forceReset = true;
+                else if (st.size > 4 * 1024) {
+                    const fd = fs.openSync(full, 'r');
+                    try {
+                        const buf = Buffer.alloc(8000);
+                        const n = fs.readSync(fd, buf, 0, 8000, 0);
+                        const head = buf.slice(0, n).toString('utf8');
+                        if (/compaction|checkpoint|COMPACTED|context.?overflow/i.test(head)) forceReset = true;
+                    } finally {
+                        try { fs.closeSync(fd); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+
+            if (forceReset) {
+                try {
+                    fs.copyFileSync(full, full + '.bak-reset-' + Date.now());
+                    fs.writeFileSync(full, '', 'utf8');
+                    reset += 1;
+                    continue;
+                } catch (e) {}
+            }
+
+            if (st.size <= MAX_BYTES) continue;
+            try {
+                const buf = fs.readFileSync(full);
+                const keep = buf.slice(Math.max(0, buf.length - Math.floor(MAX_BYTES * 0.5)));
+                const nl = keep.indexOf(0x0a);
+                const out = nl >= 0 ? keep.slice(nl + 1) : keep;
+                fs.copyFileSync(full, full + '.bak-trim-' + Date.now());
+                fs.writeFileSync(full, out);
+                trimmed += 1;
+            } catch (e) {}
+        }
+        // sessions.json 里可能记着旧 token 估算，一并清掉 overflow 状态
+        try {
+            const store = path.join(sessionsDir, 'sessions.json');
+            if (fs.existsSync(store)) {
+                const raw = JSON.parse(fs.readFileSync(store, 'utf8').replace(/^\uFEFF/, ''));
+                let changed = false;
+                const walk = (obj) => {
+                    if (!obj || typeof obj !== 'object') return;
+                    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+                    for (const k of Object.keys(obj)) {
+                        if (/token|compaction|overflow|checkpoint/i.test(k) && (typeof obj[k] === 'number' || typeof obj[k] === 'string')) {
+                            // 不乱删结构，只清明显的估算字段
+                            if (/estimated|overflow|compactionCount|lastCompaction/i.test(k)) {
+                                delete obj[k];
+                                changed = true;
+                            }
+                        } else if (typeof obj[k] === 'object') walk(obj[k]);
+                    }
+                };
+                walk(raw);
+                if (changed) {
+                    fs.copyFileSync(store, store + '.bak-reset-' + Date.now());
+                    fs.writeFileSync(store, JSON.stringify(raw, null, 2), 'utf8');
+                    reset += 1;
+                }
+            }
+        } catch (e) {}
+
+        if (trimmed || reset) {
+            console.log(`[PluginSeed] Session heal: trimmed=${trimmed} reset=${reset}`);
+        }
+        return trimmed > 0 || reset > 0;
+    } catch (e) {
+        console.warn('[PluginSeed] trimOversizedMainSessionTranscript:', e.message);
+    }
+    return false;
+}
+
+/** 启动时：主模型是 ollama 则强制重置卡死会话 + 压短 workspace */
+function healOllamaContextOverflowOnBoot() {
+    try {
+        if (!fs.existsSync(CONFIG_PATH)) return;
+        const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+        const primary = cfg.agents && cfg.agents.defaults && cfg.agents.defaults.model
+            && (typeof cfg.agents.defaults.model === 'string'
+                ? cfg.agents.defaults.model
+                : cfg.agents.defaults.model.primary);
+        if (typeof primary !== 'string' || !primary.startsWith('ollama/')) return;
+        ensureCompactWorkspaceAgentsMd(path.join(CONFIG_DIR, 'workspace'));
+
+        const sessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
+        const healStamp = path.join(CONFIG_DIR, '.ollama-session-heal-v5');
+        const needHardReset = !fs.existsSync(healStamp);
+        let resetCount = 0;
+
+        // 升级后一次性硬重置：清掉 already_compacted_recently / 错误 token 估算
+        if (needHardReset && fs.existsSync(sessionsDir)) {
+            for (const name of fs.readdirSync(sessionsDir)) {
+                if (!/\.(jsonl|json)$/i.test(name)) continue;
+                if (/^sessions\.json$/i.test(name)) continue;
+                const full = path.join(sessionsDir, name);
+                try {
+                    if (!fs.statSync(full).isFile()) continue;
+                    fs.copyFileSync(full, full + '.bak-heal-v5-' + Date.now());
+                    if (/\.jsonl$/i.test(name)) fs.writeFileSync(full, '', 'utf8');
+                    else fs.renameSync(full, full + '.bak-dead-' + Date.now());
+                    resetCount += 1;
+                } catch (e) {}
+            }
+            // sessions.json：去掉 compaction / token 估算，打断卡死映射
+            try {
+                const store = path.join(sessionsDir, 'sessions.json');
+                if (fs.existsSync(store)) {
+                    const raw = JSON.parse(fs.readFileSync(store, 'utf8').replace(/^\uFEFF/, ''));
+                    const scrub = (obj) => {
+                        if (!obj || typeof obj !== 'object') return;
+                        if (Array.isArray(obj)) { obj.forEach(scrub); return; }
+                        for (const k of Object.keys(obj)) {
+                            if (/compaction|overflow|checkpoint|estimatedTokens|totalTokens|inputTokens|promptTokens|contextTokens|lastCompaction/i.test(k)) {
+                                delete obj[k];
+                            } else if (typeof obj[k] === 'object') scrub(obj[k]);
+                        }
+                    };
+                    scrub(raw);
+                    fs.copyFileSync(store, store + '.bak-heal-v5-' + Date.now());
+                    fs.writeFileSync(store, JSON.stringify(raw, null, 2), 'utf8');
+                    resetCount += 1;
+                }
+            } catch (e) {}
+            try {
+                fs.writeFileSync(healStamp, new Date().toISOString() + '\n', 'utf8');
+            } catch (e) {}
+            console.log(`[PluginSeed] ollama hard session reset (v5): files=${resetCount}`);
+        } else {
+            trimOversizedMainSessionTranscript();
+        }
+        console.log('[PluginSeed] ollama context overflow heal applied');
+    } catch (e) {
+        console.warn('[PluginSeed] healOllamaContextOverflowOnBoot:', e.message);
+    }
 }
 
 function seedBundledPlugins() {
@@ -1477,21 +1748,16 @@ function prepareChannelPluginsBeforeGateway() {
     }
 
     // 仅微信等非官方包写入 load.paths；飞书/QQ 等一律走下方 installs 种子
+    // 注意：viaLoadPaths=false 时绝不能无条件 enabled=true（缺包会触发 Doctor npm install 并阻断 Gateway ready）
     for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
-        if (entry.viaLoadPaths === false) {
-            if (!config.plugins.entries[entry.id]) {
-                config.plugins.entries[entry.id] = { enabled: true };
-                needsSave = true;
-            }
-            if (config.plugins.entries[entry.id].enabled === true && !config.plugins.allow.includes(entry.id)) {
-                config.plugins.allow.push(entry.id);
-                needsSave = true;
-            }
-            continue;
-        }
+        if (entry.viaLoadPaths === false) continue;
         const abs = resolveBundledNpmPluginPath(entry);
         if (!abs) {
             console.warn(`[PluginSeed] Pre-gateway missing bundled: ${entry.id}`);
+            if (config.plugins.entries[entry.id] && config.plugins.entries[entry.id].enabled !== false) {
+                config.plugins.entries[entry.id].enabled = false;
+                needsSave = true;
+            }
             continue;
         }
         // 即便 bundled 在 Program Files，也优先种到本机 installs 再用；load.paths 仅保留本机可用路径
@@ -1545,6 +1811,21 @@ function prepareChannelPluginsBeforeGateway() {
             });
             if (!seed.seeded) {
                 console.warn(`[PluginSeed] Pre-gateway ${entry.id}:`, seed.reason);
+                // 种不进去就关闭，避免 Doctor 在沙箱缺 npm 时卡死启动
+                if (!config.plugins.entries[entry.id]) {
+                    config.plugins.entries[entry.id] = { enabled: false };
+                    needsSave = true;
+                } else if (config.plugins.entries[entry.id].enabled !== false) {
+                    config.plugins.entries[entry.id].enabled = false;
+                    needsSave = true;
+                }
+                if (Array.isArray(config.plugins.allow)) {
+                    const nextAllow = config.plugins.allow.filter((x) => x !== entry.id);
+                    if (nextAllow.length !== config.plugins.allow.length) {
+                        config.plugins.allow = nextAllow;
+                        needsSave = true;
+                    }
+                }
                 continue;
             }
             const ver = seed.version || (prev && prev.resolvedVersion) || '0.0.0';
@@ -1564,6 +1845,18 @@ function prepareChannelPluginsBeforeGateway() {
                 config.plugins.installs[entry.id] = next;
                 needsSave = true;
             }
+            // 有包：与本机一致，默认启用并进 allow（Doctor 认 installs 后不会再去 npm）
+            if (!config.plugins.entries[entry.id]) {
+                config.plugins.entries[entry.id] = { enabled: true };
+                needsSave = true;
+            } else if (config.plugins.entries[entry.id].enabled !== true) {
+                config.plugins.entries[entry.id].enabled = true;
+                needsSave = true;
+            }
+            if (!config.plugins.allow.includes(entry.id)) {
+                config.plugins.allow.push(entry.id);
+                needsSave = true;
+            }
         } catch (e) {
             console.warn(`[PluginSeed] Pre-gateway ${entry.id} failed:`, e.message);
         }
@@ -1572,6 +1865,23 @@ function prepareChannelPluginsBeforeGateway() {
     // 已配置凭证的渠道必须 enabled+allow，否则 Gateway 不加载、发消息控制台无日志也不回复
     try {
         const forceOn = (pluginId) => {
+            const bundled = BUNDLED_NPM_CHANNEL_PLUGINS.find((e) => e.id === pluginId);
+            if (bundled) {
+                if (bundled.viaLoadPaths === true) {
+                    if (!resolveBundledNpmPluginPath(bundled)) {
+                        console.warn(`[PluginSeed] Cannot force-enable ${pluginId}: bundled package missing`);
+                        return;
+                    }
+                } else {
+                    const inst = config.plugins.installs && config.plugins.installs[pluginId];
+                    const ok = inst && inst.installPath
+                        && fs.existsSync(path.join(inst.installPath, 'package.json'));
+                    if (!ok) {
+                        console.warn(`[PluginSeed] Cannot force-enable ${pluginId}: install seed missing`);
+                        return;
+                    }
+                }
+            }
             if (!config.plugins.entries[pluginId]) config.plugins.entries[pluginId] = {};
             if (config.plugins.entries[pluginId].enabled !== true) {
                 config.plugins.entries[pluginId].enabled = true;
@@ -1627,6 +1937,17 @@ function prepareChannelPluginsBeforeGateway() {
     if (needsSave) {
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
         console.log('[PluginSeed] Pre-gateway channel trust records synced');
+        
+        // 关键安全重置：如果发生了配置保存（通常意味着清除了跨机错乱的 installPath，或者初次写 installs），
+        // 那么缓存的 SQLite 插件状态可能也是脏的。我们直接清除 sqlite 数据库，逼迫 OpenClaw 下次启动
+        // 从干净的 config 中重新读取 installs 并重建 plugin index。
+        const dbPath = path.join(CONFIG_DIR, 'openclaw.sqlite');
+        const dbWal = path.join(CONFIG_DIR, 'openclaw.sqlite-wal');
+        const dbShm = path.join(CONFIG_DIR, 'openclaw.sqlite-shm');
+        try { if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath); } catch (e) {}
+        try { if (fs.existsSync(dbWal)) fs.unlinkSync(dbWal); } catch (e) {}
+        try { if (fs.existsSync(dbShm)) fs.unlinkSync(dbShm); } catch (e) {}
+        console.log('[PluginSeed] Cleared stale SQLite database cache due to config update');
     }
 }
 
@@ -1639,6 +1960,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
     app.on('second-instance', () => {
         if (mainWindow) {
+            try { mainWindow.setBackgroundColor('#0d0b18'); } catch (e) {}
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.show();
             mainWindow.focus();
@@ -1677,6 +1999,7 @@ function createWindow(existingSplash) {
         ? existingSplash
         : createSplashWindow();
     // 主窗口保持隐藏，待渲染完成后一次性弹出
+    const WINDOW_BG = '#0d0b18';
     mainWindow = new BrowserWindow({
         width: 1120,
         height: 760,
@@ -1686,7 +2009,10 @@ function createWindow(existingSplash) {
         resizable: true,
         maximizable: true,
         show: false,
-        backgroundColor: '#0d0b18',
+        backgroundColor: WINDOW_BG,
+        // 明确不透明，避免还原时透出系统白底
+        transparent: false,
+        hasShadow: true,
         icon: path.join(__dirname, 'config', 'icon.png'),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -1694,7 +2020,8 @@ function createWindow(existingSplash) {
             nodeIntegration: false,
             webSecurity: false,
             allowRunningInsecureContent: true,
-            webviewTag: true
+            webviewTag: true,
+            backgroundThrottling: false
         }
     });
     // 开发态才清缓存；安装包每次 clearCache 会明显拖慢首屏
@@ -1708,8 +2035,21 @@ function createWindow(existingSplash) {
     // 当渲染进程首次绘制完成后，关闭 splash 并展示主窗口
     mainWindow.once('ready-to-show', () => {
         splash.destroy();
+        try { mainWindow.setBackgroundColor(WINDOW_BG); } catch (e) {}
         mainWindow.show();
     });
+
+    // 最小化/托盘还原时再刷一次底色，压住 Windows 白闪
+    const paintDarkBg = () => {
+        try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.setBackgroundColor(WINDOW_BG);
+            }
+        } catch (e) {}
+    };
+    mainWindow.on('restore', paintDarkBg);
+    mainWindow.on('show', paintDarkBg);
+    mainWindow.on('focus', paintDarkBg);
 
     // 拦截本地Nexora Agent面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -1761,6 +2101,8 @@ function createTray() {
         { 
             label: '显示主界面', 
             click: () => {
+                try { mainWindow.setBackgroundColor('#0d0b18'); } catch (e) {}
+                if (mainWindow.isMinimized()) mainWindow.restore();
                 mainWindow.show();
                 mainWindow.focus();
             } 
@@ -1791,6 +2133,8 @@ function createTray() {
     tray.setToolTip('Nexora Agent');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
+        try { mainWindow.setBackgroundColor('#0d0b18'); } catch (e) {}
+        if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.show();
         mainWindow.focus();
     });
@@ -1950,30 +2294,59 @@ async function startGatewayProcess() {
                 } catch (e) {}
             });
 
-            // workspace 模板：缺 HEARTBEAT.md 会拖慢/报 Missing workspace template
+            // workspace 模板：缺文件会报 Missing workspace template；本地小模型必须用短 AGENTS.md
             try {
                 const ws = path.join(CONFIG_DIR, 'workspace');
                 fs.mkdirSync(ws, { recursive: true });
                 const hb = path.join(ws, 'HEARTBEAT.md');
                 if (!fs.existsSync(hb)) {
-                    fs.writeFileSync(hb, '# HEARTBEAT.md\n\n- 健康检查：保持简短\n- 无需对外发言时保持沉默\n', 'utf8');
+                    fs.writeFileSync(hb, '<!-- empty heartbeat; skip scheduled calls -->\n', 'utf8');
                 }
                 seedDefaultMemoryFile(path.join(ws, 'MEMORY.md'));
+                ensureCompactWorkspaceAgentsMd(ws);
             } catch (e) {}
 
-            // 部署内置自定义插件到用户状态目录, 确保打包后在别人电脑上插件也能被 openclaw 发现并加载
-            seedBundledPlugins();
+            // 部署补丁到可写目录（Doctor 迁移 / harden 依赖最新脚本）
+            try { deployRuntimeArtifacts(); } catch (e) {}
 
             // 确保在网关启动前，openclaw.json 已经初始化了必需的插件 allow 列表
             ensureOpenClawConfigInitialized();
 
             // 每次启动 Gateway 前强制同步渠道插件信任记录（load.paths + plugins.installs），
-            // 避免仅打开状态页不读配置时仍卡在「* Install Weixin plugin?」
             try {
                 prepareChannelPluginsBeforeGateway();
             } catch (e) {
                 console.warn('[PluginSeed] pre-gateway prepare skipped:', e.message);
             }
+
+            // 硬修复：软化 migration + npm + 模板 + 同步渠道插件配置
+            try {
+                const runtimeRoot = resolveAppFsRoot();
+                let cfg = null;
+                if (fs.existsSync(CONFIG_PATH)) {
+                    cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+                }
+                const hard = hardenGatewayBootAgainstPluginNpm({
+                    runtimeRoot,
+                    projectRoot: __dirname,
+                    config: cfg,
+                    templateSources: [
+                        path.join(__dirname, 'config', 'openclaw-templates'),
+                        resolveAppFsPath('config', 'openclaw-templates'),
+                        path.join(runtimeRoot, 'config', 'openclaw-templates')
+                    ]
+                });
+                console.log('[GatewayBoot] harden:', (hard.notes || []).join(', '));
+                if (cfg && hard.configChanged) {
+                    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+                    try { prepareChannelPluginsBeforeGateway(); } catch (e2) {}
+                }
+            } catch (e) {
+                console.warn('[GatewayBoot] harden skipped:', e.message);
+            }
+
+            // 部署内置自定义插件到用户状态目录
+            seedBundledPlugins();
 
             // 启动Nexora Agent前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
             try {
@@ -1985,6 +2358,10 @@ async function startGatewayProcess() {
                         fs.writeFileSync(CONFIG_PATH, JSON.stringify(tuned.config, null, 2), 'utf8');
                         console.log('[LatencyTune] Pre-gateway:', tuned.changes.join(' | '));
                     }
+                    // 小窗口：再压一次 workspace AGENTS.md + 过大会话 / 卡死 compaction
+                    try {
+                        healOllamaContextOverflowOnBoot();
+                    } catch (e2) {}
                 }
             } catch (e) {
                 console.warn('[LatencyTune] pre-gateway skipped:', e.message);
@@ -2548,20 +2925,14 @@ function ensureOpenClawConfigInitialized() {
 
         // 仅微信等 viaLoadPaths=true 写入 load.paths；飞书/QQ 等走官方 installs
         for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
-            if (entry.viaLoadPaths === false) {
-                if (!config.plugins.entries[entry.id]) {
-                    config.plugins.entries[entry.id] = { enabled: true };
-                    needsSave = true;
-                }
-                if (config.plugins.entries[entry.id].enabled === true && !config.plugins.allow.includes(entry.id)) {
-                    config.plugins.allow.push(entry.id);
-                    needsSave = true;
-                }
-                continue;
-            }
+            if (entry.viaLoadPaths === false) continue;
             const abs = resolveBundledNpmPluginPath(entry);
             if (!abs || !pluginPathUsableOnThisMachine(abs)) {
                 console.warn(`[PluginSeed] Bundled npm plugin missing/unusable: ${entry.id}`);
+                if (config.plugins.entries[entry.id] && config.plugins.entries[entry.id].enabled !== false) {
+                    config.plugins.entries[entry.id].enabled = false;
+                    needsSave = true;
+                }
                 continue;
             }
             const resolvedPath = path.resolve(abs);
@@ -2582,6 +2953,13 @@ function ensureOpenClawConfigInitialized() {
 
         // 官方渠道：直接使用打包目录，不再拷贝到 ~/.openclaw/npm/projects/ 导致丢失 hoisted node_modules
         for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
+            if (entry.viaLoadPaths === true) {
+                if (config.plugins.installs && config.plugins.installs[entry.id]) {
+                    delete config.plugins.installs[entry.id];
+                    needsSave = true;
+                }
+                continue;
+            }
             const packageName = entry.packageName
                 || (entry.id === 'openclaw-weixin' ? '@tencent-weixin/openclaw-weixin' : null);
             if (!packageName) continue;
@@ -2598,6 +2976,13 @@ function ensureOpenClawConfigInitialized() {
                 });
                 if (!seed.seeded) {
                     console.warn(`[PluginSeed] ${entry.id} official seed skipped:`, seed.reason);
+                    if (!config.plugins.entries[entry.id]) {
+                        config.plugins.entries[entry.id] = { enabled: false };
+                        needsSave = true;
+                    } else if (config.plugins.entries[entry.id].enabled !== false) {
+                        config.plugins.entries[entry.id].enabled = false;
+                        needsSave = true;
+                    }
                     continue;
                 }
                 const ver = seed.version || '0.0.0';
@@ -2615,6 +3000,17 @@ function ensureOpenClawConfigInitialized() {
                 };
                 if (JSON.stringify(config.plugins.installs[entry.id] || {}) !== JSON.stringify(next)) {
                     config.plugins.installs[entry.id] = next;
+                    needsSave = true;
+                }
+                if (!config.plugins.entries[entry.id]) {
+                    config.plugins.entries[entry.id] = { enabled: true };
+                    needsSave = true;
+                } else if (config.plugins.entries[entry.id].enabled !== true) {
+                    config.plugins.entries[entry.id].enabled = true;
+                    needsSave = true;
+                }
+                if (!config.plugins.allow.includes(entry.id)) {
+                    config.plugins.allow.push(entry.id);
                     needsSave = true;
                 }
             } catch (e) {
@@ -2648,7 +3044,16 @@ function ensureOpenClawConfigInitialized() {
         } catch (e) {}
 
         if (needsSave) {
-            try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8'); } catch(e) {}
+            try {
+                fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+                const dbPath = path.join(CONFIG_DIR, 'openclaw.sqlite');
+                const dbWal = path.join(CONFIG_DIR, 'openclaw.sqlite-wal');
+                const dbShm = path.join(CONFIG_DIR, 'openclaw.sqlite-shm');
+                try { if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath); } catch (e) {}
+                try { if (fs.existsSync(dbWal)) fs.unlinkSync(dbWal); } catch (e) {}
+                try { if (fs.existsSync(dbShm)) fs.unlinkSync(dbShm); } catch (e) {}
+                console.log('[PluginSeed] Cleared stale SQLite database cache due to config initialization/update');
+            } catch(e) {}
         }
         
         // Return initialized config for callers if needed
@@ -4861,6 +5266,34 @@ app.whenReady().then(async () => {
         console.log(
             `[GatewayRuntime] mode=${runtimeInfo && runtimeInfo.mode} extracted=${runtimeInfo && runtimeInfo.extracted} root=${runtimeInfo && runtimeInfo.root}`
         );
+        try {
+            if (runtimeInfo && runtimeInfo.root) {
+                deployRuntimeArtifacts();
+                try {
+                    const deployedHarden = path.join(process.env.NEXORA_AGENT_RUNTIME_DIR || '', 'gateway-boot-harden.js');
+                    if (deployedHarden && fs.existsSync(deployedHarden)) {
+                        const bootHarden = require(deployedHarden);
+                        softenOpenClawStartupMigrationGuard = bootHarden.softenOpenClawStartupMigrationGuard;
+                        ensureSandboxNpmPresent = bootHarden.ensureSandboxNpmPresent;
+                        hardenGatewayBootAgainstPluginNpm = bootHarden.hardenGatewayBootAgainstPluginNpm;
+                    }
+                } catch (e) {}
+                const soft = softenOpenClawStartupMigrationGuard(runtimeInfo.root);
+                const npm = ensureSandboxNpmPresent(runtimeInfo.root, __dirname);
+                let tpl = { ok: false };
+                try {
+                    if (typeof require('./gateway-boot-harden').ensureOpenClawWorkspaceTemplates === 'function') {
+                        tpl = require('./gateway-boot-harden').ensureOpenClawWorkspaceTemplates(runtimeInfo.root, [
+                            path.join(__dirname, 'config', 'openclaw-templates'),
+                            path.join(runtimeInfo.root, 'config', 'openclaw-templates')
+                        ]);
+                    }
+                } catch (e) {}
+                console.log(`[GatewayBoot] post-extract soft=${JSON.stringify(soft)} npm=${JSON.stringify(npm)} templates=${JSON.stringify(tpl)}`);
+            }
+        } catch (e) {
+            console.warn('[GatewayBoot] post-extract harden:', e.message);
+        }
         if (runtimeInfo && runtimeInfo.extracted) {
             updateSplashStatus(bootSplash, '运行时就绪，正在启动…', 100);
         }

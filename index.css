@@ -85,10 +85,22 @@ input, select, option, textarea {
   user-select: text !important;
 }
 
+html, body {
+  /* 禁止透明：Windows 最小化/还原时透明 body 会先闪系统白底 */
+  background: #0d0b18 !important;
+}
+body.theme-black {
+  background: #000000 !important;
+}
+body.theme-aurora {
+  background: #050d0e !important;
+}
+body.theme-light {
+  background: #e9e7f3 !important;
+}
 body {
   font-family: var(--font-sans);
   color: var(--text-primary);
-  background: transparent !important; /* 完全透明以透出 app-container 的精致圆角 */
   height: 100vh;
   overflow: hidden;
   display: flex;
