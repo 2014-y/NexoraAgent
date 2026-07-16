@@ -1,7 +1,8 @@
 # Fix: Re-sync ~/.openclaw/openclaw.json plugin entries from the project repo config
 # This resolves the "plugins not loading on new machine" issue.
 
-$repoConfig = 'C:\Users\Yuan\Desktop\ClawAI\ClawAI\openclaw.json'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoConfig = Join-Path $repoRoot 'openclaw.json'
 $runtimeConfig = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.openclaw\openclaw.json'
 
 if (-not (Test-Path $runtimeConfig)) {
@@ -59,7 +60,7 @@ for (const [id, entry] of Object.entries(config.plugins.entries)) {
 }
 
 // 3. Fix load.paths: remove stale Program Files paths if running from Desktop dev copy
-const desktopAppRoot = path.resolve('C:\\\\Users\\\\Yuan\\\\Desktop\\\\ClawAI\\\\ClawAI');
+const desktopAppRoot = process.argv[3] || path.resolve(__dirname, '..');
 const cleanPaths = config.plugins.load.paths.filter(p => {
     // Keep paths that exist
     try { return fs.existsSync(p); } catch { return false; }
@@ -109,5 +110,5 @@ console.log('Load paths:', config.plugins.load.paths.join('\n  '));
 # Write the node script to a temp file and run it
 $scriptPath = Join-Path $PSScriptRoot 'fix_runtime_plugins.js'
 Set-Content -Path $scriptPath -Value $nodeScript -Encoding UTF8
-node $scriptPath $runtimeConfig
+node $scriptPath $runtimeConfig $repoRoot
 Remove-Item $scriptPath -ErrorAction SilentlyContinue

@@ -3,7 +3,7 @@ const path = require('path');
 
 const markers = [
   path.join(process.env.USERPROFILE || '', '.openclaw', 'home-health.json'),
-  path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw', 'home-health.json')
+  path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw', 'home-health.json')
 ];
 
 for (const m of markers) {
@@ -26,7 +26,7 @@ for (const m of markers) {
   }
 }
 
-const localCfg = path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw', 'openclaw.json');
+const localCfg = path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw', 'openclaw.json');
 if (fs.existsSync(localCfg)) {
   const j = JSON.parse(fs.readFileSync(localCfg, 'utf8'));
   const tok = String((j.gateway && j.gateway.auth && j.gateway.auth.token) || '');

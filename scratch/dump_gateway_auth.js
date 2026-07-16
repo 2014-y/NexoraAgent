@@ -3,7 +3,7 @@ const path = require('path');
 
 const dirs = [
   path.join(process.env.USERPROFILE || '', '.openclaw'),
-  path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw')
+  path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw')
 ];
 
 for (const dir of dirs) {

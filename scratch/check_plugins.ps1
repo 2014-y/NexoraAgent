@@ -25,7 +25,7 @@ if (Test-Path $np) {
 }
 
 # Check node_modules for bundled channel plugins
-$nodeModules = Join-Path $up 'Desktop\ClawAI\ClawAI\node_modules'
+$nodeModules = Join-Path (Split-Path -Parent $PSScriptRoot) 'node_modules'
 Write-Output ""
 Write-Output "=== Bundled npm channel plugins ==="
 $plugins = @(

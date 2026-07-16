@@ -93,8 +93,8 @@ const checkBundled = [
     ['@tencent-weixin/openclaw-weixin', path.join(appRoot, 'node_modules', '@tencent-weixin', 'openclaw-weixin')],
     ['@openclaw/feishu', path.join(appRoot, 'node_modules', '@openclaw', 'feishu')],
     ['@openclaw/qqbot', path.join(appRoot, 'node_modules', '@openclaw', 'qqbot')],
-    ['@openclaw/feishu (ProgramFiles)', path.join('C:\\Program Files\\ClawAI\\resources\\app\\node_modules\\@openclaw\\feishu')],
-    ['@openclaw/qqbot (ProgramFiles)', path.join('C:\\Program Files\\ClawAI\\resources\\app\\node_modules\\@openclaw\\qqbot')],
+    ['@openclaw/feishu (ProgramFiles)', path.join('C:\\Program Files\\Nexora Agent\\resources\\app\\node_modules\\@openclaw\\feishu')],
+    ['@openclaw/qqbot (ProgramFiles)', path.join('C:\\Program Files\\Nexora Agent\\resources\\app\\node_modules\\@openclaw\\qqbot')],
 ];
 for (const [name, p] of checkBundled) {
     const exists = fs.existsSync(p);

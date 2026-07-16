@@ -3,9 +3,9 @@
  * OpenClaw 家目录解析（兼容：家用电脑 + 各类云电脑 + 极端锁盘）
  *
  * 降级链（从前到后）：
- *  真实用户目录 → Local/Roaming AppData\ClawAI → D/E:\ClawAI-data
- *  → 安装目录\data（便携） → ProgramData\ClawAI\<用户> → Public\ClawAI
- *  → Temp\ClawAI-home（最后手段，会标 critical 并提示用户）
+ *  真实用户目录 → Local/Roaming AppData\NexoraAgent → D/E:\NexoraAgent-data
+ *  → 安装目录\data（便携） → ProgramData\NexoraAgent\<用户> → Public\NexoraAgent
+ *  → Temp\NexoraAgent-home（最后手段，会标 critical 并提示用户）
  */
 const path = require('path');
 const fs = require('fs');
@@ -40,7 +40,7 @@ function detectRestrictedDesktop(env = process.env) {
     if (env.CLIENTNAME) hints.push('thin-client');
     // session-temp：仅当 TEMP 含会话编号后缀（\Temp\1、\Temp\2）时才计入。
     // 标准 Windows TEMP（%USERPROFILE%\AppData\Local\Temp）几乎所有电脑都有，
-    // 不应触发 restricted，否则会导致 HOME 被错误重定向到 AppData\Local\ClawAI，
+    // 不应触发 restricted，否则会导致 HOME 被错误重定向到 AppData\Local\NexoraAgent，
     // 进而引发 token 不同步、EPERM、渠道插件全不加载等连锁故障。
     const tempVal = String(env.TEMP || env.TMP || '').toLowerCase().replace(/\//g, '\\');
     if (isSessionTempPath(tempVal)) hints.push('session-temp');
@@ -127,10 +127,10 @@ function buildExtremeFallbacks(env = process.env, opts = {}) {
     const list = [];
     const user = safeUsername(env);
     if (opts.installDir) list.push(path.join(opts.installDir, 'data'));
-    if (env.ProgramData) list.push(path.join(env.ProgramData, 'ClawAI', user));
+    if (env.ProgramData) list.push(path.join(env.ProgramData, 'NexoraAgent', user));
     // 公共目录：部分锁屏策略仍允许
-    list.push(path.join('C:\\Users\\Public', 'ClawAI', user));
-    if (env.PUBLIC) list.push(path.join(env.PUBLIC, 'ClawAI', user));
+    list.push(path.join('C:\\Users\\Public', 'NexoraAgent', user));
+    if (env.PUBLIC) list.push(path.join(env.PUBLIC, 'NexoraAgent', user));
     return list;
 }
 
@@ -144,20 +144,20 @@ function buildHomeCandidates(preferredHome, opts = {}) {
     } = opts;
 
     const stableAppData = [];
-    if (env.LOCALAPPDATA) stableAppData.push(path.join(env.LOCALAPPDATA, 'ClawAI'));
-    if (appPaths.appData) stableAppData.push(path.join(appPaths.appData, 'ClawAI'));
-    if (env.APPDATA) stableAppData.push(path.join(env.APPDATA, 'ClawAI'));
+    if (env.LOCALAPPDATA) stableAppData.push(path.join(env.LOCALAPPDATA, 'NexoraAgent'));
+    if (appPaths.appData) stableAppData.push(path.join(appPaths.appData, 'NexoraAgent'));
+    if (env.APPDATA) stableAppData.push(path.join(env.APPDATA, 'NexoraAgent'));
     if (appPaths.userData) stableAppData.push(appPaths.userData);
 
     const dataDisks = [];
     for (const root of ['D:\\', 'E:\\', 'F:\\']) {
         try {
-            if (fs.existsSync(root)) dataDisks.push(path.join(root, 'ClawAI-data'));
+            if (fs.existsSync(root)) dataDisks.push(path.join(root, 'NexoraAgent-data'));
         } catch (e) {}
     }
 
     const extreme = buildExtremeFallbacks(env, { installDir });
-    const lastResort = path.join(tmpdir, 'ClawAI-home');
+    const lastResort = path.join(tmpdir, 'NexoraAgent-home');
 
     const ordered = [];
     const push = (p) => {
@@ -186,7 +186,7 @@ function buildHomeCandidates(preferredHome, opts = {}) {
 
 /**
  * 评估存储健康度，供 UI/日志提示
- * - ok: 正常家目录或 AppData\ClawAI
+ * - ok: 正常家目录或 AppData\NexoraAgent
  * - degraded: 便携目录 / ProgramData / Public（能跑，但建议放宽权限）
  * - critical: 仍在 Temp 或探测失败（高概率会话冲突/不回复）
  */
@@ -201,11 +201,11 @@ function assessStorageHealth(homePath, opts = {}) {
             code: 'NOT_WRITABLE',
             title: '数据目录不可写',
             message:
-                '当前系统策略导致 ClawAI 无法稳定写入数据目录，微信可能无法回复。\n\n请将 ClawAI / node.exe 加入「受控文件夹访问」允许列表，或关闭相关安全软件对用户目录的锁定后重启。',
+                '当前系统策略导致 Nexora Agent 无法稳定写入数据目录，微信可能无法回复。\n\n请将 Nexora Agent / node.exe 加入「受控文件夹访问」允许列表，或关闭相关安全软件对用户目录的锁定后重启。',
             actions: [
                 'Windows 安全中心 → 病毒和威胁防护 → 管理勒索软件保护 → 受控文件夹访问',
-                '允许 ClawAI.exe、内置 node.exe 通过',
-                '重启 ClawAI'
+                '允许 Nexora Agent.exe、内置 node.exe 通过',
+                '重启 Nexora Agent'
             ]
         };
     }
@@ -218,18 +218,18 @@ function assessStorageHealth(homePath, opts = {}) {
             message:
                 `检测到数据目录位于临时路径：\n${homePath}\n\n这在云电脑/锁屏环境下极易导致会话冲突、微信不回复。请按提示放宽目录写入权限后重启。`,
             actions: [
-                '允许写入 %LOCALAPPDATA%\\ClawAI 或用户主目录',
-                '将 ClawAI 加入受控文件夹访问排除项',
-                '重启 ClawAI 使目录自动迁出 Temp'
+                '允许写入 %LOCALAPPDATA%\\NexoraAgent 或用户主目录',
+                '将 Nexora Agent 加入受控文件夹访问排除项',
+                '重启 Nexora Agent 使目录自动迁出 Temp'
             ]
         };
     }
 
     const degraded =
-        n.includes('\\programdata\\clawai') ||
-        n.includes('\\users\\public\\clawai') ||
+        n.includes('\\programdata\\nexoraagent') ||
+        n.includes('\\users\\public\\nexoraagent') ||
         n.endsWith('\\data') ||
-        n.includes('\\clawai\\data');
+        n.includes('\\nexoraagent\\data');
 
     if (degraded) {
         return {
@@ -239,8 +239,8 @@ function assessStorageHealth(homePath, opts = {}) {
             message:
                 `系统用户目录写入受限，已自动切换到兼容目录：\n${homePath}\n\n一般可正常使用。若仍出现不回复，请放宽对用户目录/AppData 的写入限制。`,
             actions: [
-                '优先允许 %LOCALAPPDATA%\\ClawAI',
-                '云电脑可放行 D:\\ClawAI-data'
+                '优先允许 %LOCALAPPDATA%\\NexoraAgent',
+                '云电脑可放行 D:\\NexoraAgent-data'
             ]
         };
     }

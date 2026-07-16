@@ -289,8 +289,8 @@ const {
         return require('./openclaw-state');
     } catch (e) {
         try {
-            const alt = process.env.CLAWAI_RUNTIME_DIR
-                ? path.join(process.env.CLAWAI_RUNTIME_DIR, 'openclaw-state.js')
+            const alt = process.env.NEXORA_AGENT_RUNTIME_DIR
+                ? path.join(process.env.NEXORA_AGENT_RUNTIME_DIR, 'openclaw-state.js')
                 : '';
             if (alt && fs.existsSync(alt)) return require(alt);
         } catch (e2) {}
@@ -333,7 +333,7 @@ try {
     worker_threads.Worker = function(filename, options) {
         let newOptions = options || {};
         let execArgv = Array.isArray(newOptions.execArgv) ? [...newOptions.execArgv] : [];
-        const injected = (process.env.CLAWAI_PATCH_PATH
+        const injected = (process.env.NEXORA_AGENT_PATCH_PATH
             || (typeof __filename === 'string' ? __filename : '')
             || require('path').join(process.env.OPENCLAW_STATE_DIR || '', 'patch_gateway.js')
         ).replace(/\\/g, '/');
@@ -367,13 +367,13 @@ function resolveCaptureDesktopScriptPath() {
     const pathMod = require('path');
     const fsMod = require('fs');
     const candidates = [
-        process.env.CLAWAI_RUNTIME_DIR && pathMod.join(process.env.CLAWAI_RUNTIME_DIR, 'capture-desktop.ps1'),
+        process.env.NEXORA_AGENT_RUNTIME_DIR && pathMod.join(process.env.NEXORA_AGENT_RUNTIME_DIR, 'capture-desktop.ps1'),
         pathMod.join(process.env.OPENCLAW_STATE_DIR || '', 'capture-desktop.ps1'),
         pathMod.join(process.env.OPENCLAW_HOME || '', '.openclaw', 'capture-desktop.ps1'),
         pathMod.join(process.env.OPENCLAW_HOME || '', 'capture-desktop.ps1'),
         pathMod.join(process.env.REAL_USER_HOME || '', '.openclaw', 'capture-desktop.ps1'),
-        pathMod.join(process.env.ProgramData || 'C:\\ProgramData', 'ClawAI', 'runtime', 'capture-desktop.ps1'),
-        pathMod.join(process.env.PUBLIC || 'C:\\Users\\Public', 'ClawAI', 'runtime', 'capture-desktop.ps1'),
+        pathMod.join(process.env.ProgramData || 'C:\\ProgramData', 'Nexora Agent', 'runtime', 'capture-desktop.ps1'),
+        pathMod.join(process.env.PUBLIC || 'C:\\Users\\Public', 'NexoraAgent', 'runtime', 'capture-desktop.ps1'),
         pathMod.join(__dirname, 'capture-desktop.ps1')
     ];
     // When patch is loaded via --require, also try beside the resolved patch file.
@@ -381,8 +381,8 @@ function resolveCaptureDesktopScriptPath() {
         if (typeof __filename === 'string' && __filename) {
             candidates.unshift(pathMod.join(pathMod.dirname(__filename), 'capture-desktop.ps1'));
         }
-        if (process.env.CLAWAI_PATCH_PATH) {
-            candidates.unshift(pathMod.join(pathMod.dirname(process.env.CLAWAI_PATCH_PATH), 'capture-desktop.ps1'));
+        if (process.env.NEXORA_AGENT_PATCH_PATH) {
+            candidates.unshift(pathMod.join(pathMod.dirname(process.env.NEXORA_AGENT_PATCH_PATH), 'capture-desktop.ps1'));
         }
     } catch (e) {}
     for (const p of candidates) {
@@ -434,7 +434,7 @@ function defensiveCommandFilter(cmdStr) {
 const originalSpawn = child_process.spawn;
 const originalSpawnSync = child_process.spawnSync;
 const originalFork = child_process.fork;
-const patchPath = (process.env.CLAWAI_PATCH_PATH
+const patchPath = (process.env.NEXORA_AGENT_PATCH_PATH
     || (typeof __filename === 'string' ? __filename : '')
     || require('path').join(process.env.OPENCLAW_STATE_DIR || '', 'patch_gateway.js')
 ).replace(/\\/g, '/');
@@ -1362,7 +1362,7 @@ if (fs.promises && fs.promises.writeFile) {
 // ─── Surgical Virtual Memory FS for skills-prompts ───
 // 热路径默认静默：每次 ENOENT 都 console.warn 会堵日志管道并拖慢 Gateway Ready
 globalThis.__SURGICAL_CACHE__ = globalThis.__SURGICAL_CACHE__ || {};
-const __VMFS_DEBUG__ = process.env.CLAWAI_VMFS_DEBUG === '1';
+const __VMFS_DEBUG__ = process.env.NEXORA_AGENT_VMFS_DEBUG === '1';
 function vmfsLog() {
     if (!__VMFS_DEBUG__) return;
     try { console.warn.apply(console, arguments); } catch (e) {}

@@ -1,10 +1,10 @@
-# ClawAI npm sandbox repair script
+# Nexora Agent npm sandbox repair script
 # Right-click this file -> "Run with PowerShell" (as Administrator if needed)
 
-$src = "c:\Users\Yuan\Desktop\ClawAI\ClawAI\.node-sandbox\node_modules"
-$dst = "C:\Program Files\ClawAI\resources\app\.node-sandbox\node_modules"
+$src = Join-Path $PSScriptRoot ".node-sandbox\node_modules"
+$dst = "C:\Program Files\Nexora Agent\resources\app\.node-sandbox\node_modules"
 
-Write-Host "=== ClawAI npm Sandbox Repair ===" -ForegroundColor Cyan
+Write-Host "=== Nexora Agent npm Sandbox Repair ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path $src)) {
@@ -27,7 +27,7 @@ try {
     Copy-Item -Path $src -Destination $dst -Recurse -Force -ErrorAction Stop
     Write-Host ""
     Write-Host "SUCCESS! npm node_modules has been restored." -ForegroundColor Green
-    Write-Host "Please restart ClawAI now." -ForegroundColor Cyan
+    Write-Host "Please restart Nexora Agent now." -ForegroundColor Cyan
 } catch {
     Write-Host ""
     Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red

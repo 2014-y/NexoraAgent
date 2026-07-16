@@ -66,8 +66,8 @@ function getLatestVersionFromRedirect(url) {
 }
 
 async function test() {
-    const repoUrl = 'https://api.github.com/repos/2014-y/ClawAI/releases/latest';
-    const redirectUrl = 'https://github.com/2014-y/ClawAI/releases/latest';
+    const repoUrl = 'https://api.github.com/repos/2014-y/Nexora-Agent/releases/latest';
+    const redirectUrl = 'https://github.com/2014-y/Nexora-Agent/releases/latest';
     console.log('Testing API...');
     try {
         const data = await httpsGetJson(repoUrl);

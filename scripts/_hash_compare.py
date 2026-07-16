@@ -1,7 +1,7 @@
 ﻿import hashlib
 from pathlib import Path
-SRC = Path(r"C:\Users\Yuan\Desktop\ClawAI\ClawAI")
-DST = Path(r"C:\Program Files\ClawAI\resources\app")
+SRC = Path(__file__).resolve().parent.parent
+DST = Path(r"C:\Program Files\Nexora Agent\resources\app")
 FILES = ["index.html","renderer.js","index.css","plugin-catalog.js","preload.js","main.js","locales.js","latency-tune.js","token-usage-parse.js","home-resolve.js"]
 def sha(p):
     if not p.exists():

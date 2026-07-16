@@ -1,187 +1,209 @@
-# ClawAI 安装指南
+# 安装说明与排错
 
-> 从零开始，一步步把 ClawAI 跑起来。
+> 先看 [新手入门](./getting-started.md)。  
+> **本文解决两件事**：怎么装稳妥、装好之后出了问题怎么排。
 
 ---
 
 ## 目录
 
-- [前置条件](#前置条件)
-- [第一步：安装 Node.js](#第一步安装-nodejs)
-- [第二步：下载项目](#第二步下载项目)
-- [第三步：运行 init.bat](#第三步运行-initbat)
-- [第四步：配置 API Key](#第四步配置-api-key)
-- [第五步：启动 Gateway](#第五步启动-gateway)
-- [第六步：安装 openclaw（如果提示找不到）](#第六步安装-openclaw如果提示找不到)
-- [常见问题](#常见问题)
+1. [适合普通人的安装方式（推荐）](#1-适合普通人的安装方式推荐)
+2. [电脑要求](#2-电脑要求)
+3. [Windows 安全提示怎么点](#3-windows-安全提示怎么点)
+4. [装好后第一次启动检查](#4-装好后第一次启动检查)
+5. [常见问题排错](#5-常见问题排错)
+6. [数据存在哪里（备份 / 换电脑）](#6-数据存在哪里备份--换电脑)
+7. [开发者：从源码安装与打包](#7-开发者从源码安装与打包)
 
 ---
 
-## 前置条件
+## 1. 适合普通人的安装方式（推荐）
+
+你**不要**去装 Node.js、也不用敲命令。直接用官方安装包：
+
+1. 打开：https://github.com/2014-y/Nexora-Agent/releases  
+2. 下载最新：`Nexora Agent Setup x.x.x.exe`  
+3. 双击安装  
+4. 从桌面启动 **Nexora Agent**
+
+安装包里已经带了运行所需的环境（绿色沙箱），白机（干净电脑）也能用。
+
+---
+
+## 2. 电脑要求
+
+| 项目 | 最低建议 |
+| :--- | :--- |
+| 系统 | Windows 10 / 11（64 位） |
+| 内存 | 4GB 及以上（推荐 8GB） |
+| 硬盘 | 至少 1～2GB 可用空间 |
+| 网络 | 需要联网（调用云端大模型） |
+
+> 如果你只用本地模型（如 Ollama），对显卡/内存要求会更高，那是进阶玩法。新手先用云端 API 更省心。
+
+---
+
+## 3. Windows 安全提示怎么点
+
+未签名软件常会被 Windows SmartScreen 拦一下，**不等于病毒**。
+
+出现「Windows 已保护你的电脑」时：
+
+1. 点左侧或下方的 **「更多信息」**  
+2. 点 **「仍要运行」**  
+3. 继续安装
+
+部分杀毒软件也可能拦截：
+
+- 先暂时允许 / 加入白名单  
+- 路径可优先放行安装目录（如 `C:\Program Files\Nexora Agent`）  
+- 以及数据目录：`%LOCALAPPDATA%\NexoraAgent`
+
+---
+
+## 4. 装好后第一次启动检查
+
+按这个清单打勾：
+
+- [ ] 能打开软件界面  
+- [ ] 能点「启动 Nexora Agent」  
+- [ ] 状态灯最终变成 **绿色**  
+- [ ] 「模型配置」里已填入可用 API Key  
+- [ ] 「模型会话」里能收到一句回复  
+
+五项都过了，安装就算成功。接着去绑微信：[微信接入](./wechat-guide.md)。
+
+---
+
+## 5. 常见问题排错
+
+### 5.1 双击安装包没反应 / 被拦截
+
+- 右键安装包 → **以管理员身份运行**  
+- 检查杀毒是否隔离了该文件，从隔离区恢复并允许  
+- 换一个目录再下一次安装包（例如下到桌面再装）
+
+### 5.2 软件能开，但一直红灯、启不动
+
+按顺序试：
+
+1. 点一次「启动」，等 30～60 秒（黄灯时别狂点）。  
+2. 完全退出 Nexora Agent（托盘图标也退出）。  
+3. 打开「任务管理器」→ 结束多余的 **`node.exe`**（如果有）。  
+4. 再打开 Nexora Agent，重新点启动。
+
+仍不行：看控制台 / 系统日志有没有红色报错；把关键几行记下来便于排查。
+
+### 5.3 提示端口 18789 被占用
+
+说明有旧服务还在占端口。
+
+**傻瓜做法：**
+
+1. 退出 Nexora Agent  
+2. 任务管理器结束相关 `node.exe`  
+3. 再启动一次  
+
+**进阶做法（可选）：** 在 PowerShell 中查看占用端口的进程（装完若仍失败再研究）：
+
+```powershell
+netstat -ano | findstr 18789
+```
+
+记下最后一列 PID，再到任务管理器按 PID 结束对应进程。
+
+### 5.4 绿灯了，但 AI 不回答
+
+优先查：
+
+1. **API Key** 是否正确、是否欠费 / 额度用尽  
+2. 电脑网络是否正常（能否打开模型厂商网页）  
+3. 若在「模型会话」能回、微信不回 → 问题在渠道绑定，见 [微信接入](./wechat-guide.md)  
+4. 若两边都不回 → 多半是模型或网络配置问题  
+
+### 5.5 云电脑 / 虚拟机里疯狂报错
+
+部分云桌面会和「局域网发现」类插件冲突。
+
+处理：
+
+1. 左侧打开 **「内置插件」**  
+2. 关闭 **Bonjour**（局域网发现）一类插件  
+3. **停止** 服务，再 **启动** 一次  
+
+### 5.6 更新后打不开或行为异常
+
+1. 卸载旧版前，可先备份数据目录（见下一节）  
+2. 安装新版 `Setup`  
+3. 启动后仍异常时：停止服务 → 重启电脑 → 再开软件  
+
+---
+
+## 6. 数据存在哪里（备份 / 换电脑）
+
+普通人记住两个位置即可（资源管理器地址栏可粘贴）：
+
+| 内容 | 常见路径 |
+| :--- | :--- |
+| OpenClaw 配置与工作区（含记忆等） | `%USERPROFILE%\.openclaw` |
+| Nexora Agent 本地数据 / 运行时 | `%LOCALAPPDATA%\NexoraAgent` |
+
+换电脑时：
+
+1. 在新电脑安装 Nexora Agent  
+2. 把上面两个文件夹（或其中关键文件如 `openclaw.json`、`workspace`）拷过去  
+3. 启动后再检查模型 Key 与渠道绑定  
+
+> 不要把含 API Key 的配置文件发到公网或发给陌生人。
+
+---
+
+## 7. 开发者：从源码安装与打包
+
+> 不会写代码请**跳过**本节。日常用户只用上面的安装包即可。
+
+### 7.1 环境
 
 | 项目 | 要求 |
-|------|------|
-| 操作系统 | Windows 10 或 Windows 11 |
-| 内存 | 4GB 以上 |
-| 硬盘 | 2GB 可用空间 |
-| 网络 | 需要联网（用于调用 AI API） |
+| :--- | :--- |
+| 系统 | Windows 10 / 11（64 位） |
+| Node.js | **v24.x**（只开发机需要） |
+| 磁盘 / 内存 | 建议预留数 GB；内存建议 ≥ 8GB |
+| Git | 可选 |
 
----
+### 7.2 拉取与本地调试
 
-## 第一步：安装 Node.js
+```bash
+git clone https://github.com/2014-y/Nexora-Agent.git
+cd Nexora-Agent
+npm install
+npm run app:start
+```
 
-ClawAI 需要 Node.js v24.x 才能运行。
+只调网关、不启桌面壳时，可用仓库里的 `start-gateway.js`（或对应 bat），以当前脚本为准。
 
-### 方法一：nvm-windows（推荐）
+### 7.3 打出给用户的安装包
 
-nvm 可以让你管理多个 Node.js 版本，互不干扰。
+```bash
+npm run app:dist
+```
 
-**1. 下载 nvm-windows**
+在 `dist/` 得到类似：
 
-浏览器访问：https://github.com/coreybutler/nvm-windows/releases
+`Nexora Agent Setup 2.0.1.exe`
 
-下载最新的 
-vm-setup.exe。
+发给用户双击即可：无需全局 Node；首次启动会准备本地运行时（含 `%LOCALAPPDATA%\NexoraAgent` 等）。
 
-**2. 安装**
+### 7.4 可选：本机 Ollama
 
-双击 
-vm-setup.exe，一路点击"下一步"完成安装。
+1. 安装：https://ollama.com/download/windows  
+2. `ollama pull <模型名>`  
+3. 在 Nexora Agent「模型配置」添加本地通道  
 
-**3. 安装 Node.js v24**
+### 7.5 打包 / 开发常见问题
 
-打开 CMD（命令提示符），依次运行：
-
-`ash
-nvm install 24
-nvm use 24
-`
-
-**4. 验证**
-
-`ash
-node -v
-`
-
-应显示 24.x.x。
-
-### 方法二：官方安装包
-
-**1. 下载**
-
-浏览器访问：https://nodejs.org
-
-选择 LTS 版本，点击下载。
-
-**2. 安装**
-
-双击安装包，一路"下一步"完成安装。
-
-**3. 验证**
-
-打开 CMD：
-
-`ash
-node -v
-npm -v
-`
-
-应分别显示版本号。
-
----
-
-## 第二步：下载项目
-
-### 方式一：下载 ZIP
-
-1. 浏览器访问：https://github.com/2014-y/ClawAI
-2. 点击绿色 **"Code"** 按钮
-3. 选择 **"Download ZIP"**
-4. 解压到任意目录（如 D:\ai\ClawAI）
-
-### 方式二：Git clone
-
-` ash
-git clone https://github.com/2014-y/ClawAI.git
-cd ClawAI
-`
-
----
-
-## 第三步：运行 init.bat
-
-1. 打开项目文件夹
-2. **双击 init.bat**
-
-等待完成，看到 "Setup complete!" 即成功。
-
-init.bat 会自动完成：
-- 检测本机 Node.js
-- 创建 .node-sandbox/ 目录
-- 生成配置文件 C:\Users\<你的用户名>\.openclaw\openclaw.json
-
----
-
-## 第四步：配置 API Key
-
-1. 打开文件管理器，进入 C:\Users\<你的用户名>\.openclaw\
-2. 用记事本打开 openclaw.json
-3. 按 Ctrl + H 搜索并替换：
-
-| 搜索 | 替换为 | 说明 |
-|------|--------|------|
-| YOUR_AGNES_API_KEY_HERE | 你的 Agnes AI Key | 必填 |
-| YOUR_YITONG_API_KEY_HERE | 你的阿里云 Key | 选填 |
-| YOUR_ZHIPU_API_KEY_HERE | 你的智谱 Key | 选填 |
-
-4. 按 Ctrl + S 保存。
-
-**获取 API Key：**
-- Agnes AI：https://agnes-ai.com/zh-Hans/docs/agnes-video-v20
-- 阿里云百炼：https://dashscope.console.aliyun.com/
-- 智谱 AI：https://open.bigmodel.cn/
-
----
-
-## 第五步：启动 Gateway
-
-1. 打开项目文件夹
-2. **双击 start-gateway.bat**
-3. 看到 "http server listening on port 18789" 即启动成功
-
----
-
-## 第六步：安装 openclaw（如果提示找不到）
-
-如果启动时报错 openclaw not found，说明你的电脑上没有安装 openclaw。
-
-**手动安装方法：**
-
-打开 CMD，进入项目目录：
-
-`ash
-cd D:\ai\ClawAI
-npm install -g openclaw@2026.6.11
-`
-
-等待安装完成（可能需要几分钟），然后重新双击 start-gateway.bat。
-
----
-
-## 常见问题
-
-### Q: 双击 init.bat 没反应？
-**A:** 右键 → 以管理员身份运行。
-
-### Q: 提示 "Node.js not found"？
-**A:** 先安装 Node.js，见第一步。
-
-### Q: 提示 "openclaw not found"？
-**A:** 运行 
-pm install -g openclaw@2026.6.11 安装。
-
-### Q: npm 命令找不到？
-**A:** 说明 Node.js 没装好，重新安装 Node.js。
-
-### Q: 端口 18789 被占用？
-**A:** 先关闭占用该端口的程序，再启动 Gateway。
+| 问题 | 处理 |
+| :--- | :--- |
+| `npm run app:dist` 失败 | 确认 Node 24.x；重装依赖；看完整报错 |
+| 用户机装完启不动 | 回看本文第 5 节排错 |
+| 想自检本机服务 | 启动后访问 `http://127.0.0.1:18789`（或 `/v1/models`） |

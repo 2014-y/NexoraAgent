@@ -5,7 +5,7 @@ $builtinPlugins = @(
 )
 
 # Check which plugin-like packages exist in node_modules
-$nmPath = 'c:\Users\Yuan\Desktop\ClawAI\ClawAI\node_modules'
+$nmPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'node_modules'
 $dirs = Get-ChildItem $nmPath -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
 
 # Also check @openclaw scoped packages

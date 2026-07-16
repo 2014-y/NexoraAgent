@@ -18,7 +18,7 @@ const LONG_TERM_MEMORY_STACK = [
   'compaction-memory-guard'
 ];
 
-/** UI 伞形卡 ID（仅用于 ClawAI 插件菜单，不写入 OpenClaw plugins.allow） */
+/** UI 伞形卡 ID（仅用于 Nexora Agent 插件菜单，不写入 OpenClaw plugins.allow） */
 const LONG_TERM_MEMORY_UI_ID = 'long-term-memory';
 
 /** A：零配置（随 OpenClaw 或我们 seed） */
@@ -135,7 +135,7 @@ function ensureLongTermMemoryStack(config) {
     }
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
   }
-  // UI 伞形状态（仅 ClawAI 使用，OpenClaw 忽略未知条目也无害，但不进 allow）
+  // UI 伞形状态（仅 Nexora Agent 使用，OpenClaw 忽略未知条目也无害，但不进 allow）
   if (!config.plugins) config.plugins = {};
   if (!config.plugins.entries) config.plugins.entries = {};
   if (!config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {

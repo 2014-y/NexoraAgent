@@ -34,8 +34,8 @@ Get-Process -Name 'node','openclaw' -ErrorAction SilentlyContinue |
     Format-Table -AutoSize
 
 Write-Output ""
-Write-Output "=== Current ClawAI status ==="
+Write-Output "=== Current Nexora Agent status ==="
 # Check if Electron app is running
-Get-Process | Where-Object { $_.MainWindowTitle -like '*ClawAI*' -or $_.Name -like '*ClawAI*' -or $_.Name -like '*electron*' } |
+Get-Process | Where-Object { $_.MainWindowTitle -like '*Nexora Agent*' -or $_.Name -like '*Nexora Agent*' -or $_.Name -like '*electron*' } |
     Select-Object Id, Name, MainWindowTitle, StartTime |
     Format-Table -AutoSize

@@ -701,20 +701,20 @@ const LONG_TERM_MEMORY_STACK = ['auto-summary', 'memory-rotate', 'compaction-mem
 
 const pluginMetadata = {
     'dual-model-trainer': { name: '🧠 双模型教学', desc: '利用主备模型对比，自动本地收集并训练属于你的专属模型', tier: 'zero' },
-    'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将ClawAI接入微信聊天，支持私聊、群聊和图片理解', tier: 'zero' },
+    'openclaw-weixin': { name: '💬 微信渠道', desc: '一键将Nexora Agent接入微信聊天，支持私聊、群聊和图片理解', tier: 'zero' },
     'long-term-memory': { name: '📚 长期记忆', desc: '开箱即用：自动摘要、记忆旋转与压缩护栏，将关键信息持久写入 MEMORY.md，对话压缩后仍可召回。', tier: 'zero' },
     'feishu': { name: '🦆 飞书渠道', desc: '接入飞书/Lark 机器人：支持扫码创建应用或手动填写 App ID/Secret，处理私聊与群聊消息', tier: 'credentials' },
-    'qqbot': { name: '🐧 QQ机器人', desc: '将ClawAI接入 QQ 开放平台机器人（QQ Bot）消息通道，实现 QQ 群聊及私聊交互。', tier: 'credentials' },
+    'qqbot': { name: '🐧 QQ机器人', desc: '将Nexora Agent接入 QQ 开放平台机器人（QQ Bot）消息通道，实现 QQ 群聊及私聊交互。', tier: 'credentials' },
     'voice-call': { name: '📞 语音通话', desc: '开启实时语音对话服务，支持通过微信向 AI 拨打电话', tier: 'credentials' },
-    'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI ClawAI对话', tier: 'credentials' },
-    'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地ClawAI作为应用机器人接入到您的团队 Slack 频道中', tier: 'credentials' },
+    'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI Nexora Agent对话', tier: 'credentials' },
+    'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地Nexora Agent作为应用机器人接入到您的团队 Slack 频道中', tier: 'credentials' },
     'whatsapp': { name: '🟢 WhatsApp', desc: '接入全球 WhatsApp 消息服务，支持媒体及文本处理', tier: 'credentials' },
     'auto-summary': { name: '📝 自动摘要', desc: '每日自动总结聊天与训练数据写入记忆；亦可配合长文摘要能力', tier: 'zero' },
     'llm-task': { name: '📝 长文摘要任务', desc: '向 AI 发送超长链接或长文本，自动提炼要点', tier: 'zero' },
-    'matrix': { name: '🛡️ Matrix 通道', desc: '将ClawAI挂载到去中心化的加密通信 Matrix 消息信道上', tier: 'credentials' },
+    'matrix': { name: '🛡️ Matrix 通道', desc: '将Nexora Agent挂载到去中心化的加密通信 Matrix 消息信道上', tier: 'credentials' },
     'duckduckgo': { name: '🔍 DuckDuckGo 搜索', desc: '允许 AI 调用搜索引擎进行网页实时检索，获取最新资讯', tier: 'zero' },
-    'webhooks': { name: '🔌 Webhooks', desc: '支持外部系统通过标准的 Webhook 事件触发ClawAI的定制指令', tier: 'zero' },
-    'bonjour': { name: '📡 Bonjour 发现', desc: '启用本地零配置组网，自动发布ClawAI局域网服务广播', tier: 'zero' },
+    'webhooks': { name: '🔌 Webhooks', desc: '支持外部系统通过标准的 Webhook 事件触发Nexora Agent的定制指令', tier: 'zero' },
+    'bonjour': { name: '📡 Bonjour 发现', desc: '启用本地零配置组网，自动发布Nexora Agent局域网服务广播', tier: 'zero' },
     'workboard': { name: '📋 任务看板', desc: '提供待办任务的可视化任务跟踪面板，帮助有序规划工作', tier: 'zero' },
     'auto-start-codex': { name: '🤖 自动唤醒 Codex', desc: '接收微信消息时自动唤醒本地 Codex 桌面 AI 助手（若不需电脑操控可关闭）', tier: 'software' }
 };
@@ -836,8 +836,8 @@ function setGatewayFullyReadyUI() {
     gatewayStatus = 'running';
     stopGatewayReadyProbe();
     updateGatewayStatusUI('running');
-    try { updateProgressUI(100, '本地 AI ClawAI服务就绪！'); } catch (e) {}
-    try { sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已成功启动运行！'); } catch (e) {}
+    try { updateProgressUI(100, '本地 AI Nexora Agent服务就绪！'); } catch (e) {}
+    try { sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已成功启动运行！'); } catch (e) {}
     __openclawPanelLastUrl = '';
 }
 
@@ -1388,7 +1388,7 @@ async function init() {
                 const btn = e.target;
                 if (btn.disabled) return;
                 
-                const confirmClear = confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的ClawAI，并在下次启动ClawAI时重新生成二维码供您扫码登录！');
+                const confirmClear = confirm('确定要解绑当前微信并清空微信登录凭证吗？\n\n这将会停止运行中的Nexora Agent，并在下次启动Nexora Agent时重新生成二维码供您扫码登录！');
                 if (!confirmClear) return;
 
                 const oldHtml = btn.innerHTML;
@@ -1482,7 +1482,7 @@ async function init() {
         });
     }
 
-    // 监听整个ClawAI配置表单的变化，实时更新 JSON 预览并标记 Dirty
+    // 监听整个Nexora Agent配置表单的变化，实时更新 JSON 预览并标记 Dirty
     const configForm = document.getElementById('openclaw-config-form');
     if (configForm) {
         configForm.addEventListener('input', () => {
@@ -1517,7 +1517,7 @@ async function init() {
         });
     }
 
-    // ClawAI开关按钮监听
+    // Nexora Agent开关按钮监听
     gatewayToggleBtn.addEventListener('click', () => {
         if (window.isTogglingGateway) return;
         if (gatewayStatus === 'starting' || gatewayStatus === 'upgrading' || gatewayStatus === 'stopping') return;
@@ -1647,27 +1647,27 @@ async function init() {
         }
     }
 
-    // 点击顶部状态面板快速启停ClawAI
+    // 点击顶部状态面板快速启停Nexora Agent
     const statusPanel = document.getElementById('tour-status');
     if (statusPanel) {
         statusPanel.addEventListener('click', () => {
             if (gatewayStatus === 'stopped') {
-                showToast('正在启动ClawAI核心服务...');
+                showToast('正在启动Nexora Agent核心服务...');
                 window.api.gatewayAction('start');
             } else if (gatewayStatus === 'running') {
-                showToast('正在关闭ClawAI核心服务...');
+                showToast('正在关闭Nexora Agent核心服务...');
                 window.api.gatewayAction('stop');
             } else if (gatewayStatus === 'starting') {
-                showToast('ClawAI正在启动中，请稍候...');
+                showToast('Nexora Agent正在启动中，请稍候...');
             }
         });
     }
 
-    // 自动启用ClawAI逻辑
+    // 自动启用Nexora Agent逻辑
     if (localStorage.getItem('setting_auto_launch_gateway') === 'true') {
         setTimeout(() => {
             if (gatewayStatus === 'stopped') {
-                logTerminal.innerText += '\n[System] 正在根据系统设置自动启用本地ClawAI...\n';
+                logTerminal.innerText += '\n[System] 正在根据系统设置自动启用本地Nexora Agent...\n';
                 window.api.gatewayAction('start');
             }
         }, 1500);
@@ -1686,7 +1686,7 @@ async function init() {
     updateWeChatStatusUI();
     setInterval(updateWeChatStatusUI, 10000);
 
-    // 页面初始化时，主动向主进程拉齐一次当前ClawAI的最真实运行状态
+    // 页面初始化时，主动向主进程拉齐一次当前Nexora Agent的最真实运行状态
     if (window.api && window.api.gatewayAction) {
         window.api.gatewayAction('query-status');
     }
@@ -1695,7 +1695,7 @@ async function init() {
     clearTimeout(loadingFailsafe);
     dismissLoading();
     } catch (initErr) {
-        console.error('[ClawAI] init failed:', initErr);
+        console.error('[Nexora Agent] init failed:', initErr);
         clearTimeout(loadingFailsafe);
         dismissLoading();
     }
@@ -1781,7 +1781,7 @@ function setupIpcListeners() {
             systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
         }
 
-        // 🌟 拦截ClawAI后台模型的常规预热探针错误日志（不影响正常对话，防止打扰用户）
+        // 🌟 拦截Nexora Agent后台模型的常规预热探针错误日志（不影响正常对话，防止打扰用户）
         if (text.includes('[model-fetch]') && text.includes('ERROR') && (text.includes('ECONNRESET') || text.includes('fetch failed') || text.includes('ETIMEDOUT'))) {
             return;
         }
@@ -1827,7 +1827,7 @@ function setupIpcListeners() {
             || readyHaystack.includes('agent runtime plugins pre-warmed')
         ) {
             const wasReady = gatewayFullyReady;
-            markGatewayReadyFromLog('本地 AI ClawAI服务就绪！');
+            markGatewayReadyFromLog('本地 AI Nexora Agent服务就绪！');
             if (!wasReady) {
                 const pane = document.getElementById('openclaw-panel-view');
                 if (pane && pane.classList.contains('active')) {
@@ -1845,7 +1845,7 @@ function setupIpcListeners() {
                 updateProgressUI(Math.max(currentProgress, 85), '正在绑定端口并装载渠道插件…');
             }
         }
-        // 仅在ClawAI真正运行中，且越过ClawAI刚启动时的 5 秒历史控制台日志喷吐垃圾冷区，才对全新实时流量记账
+        // 仅在Nexora Agent真正运行中，且越过Nexora Agent刚启动时的 5 秒历史控制台日志喷吐垃圾冷区，才对全新实时流量记账
         if (gatewayStatus === 'running' && (Date.now() - gatewayRunningTime > 5000)) {
             if (text.includes('[model-fetch] response')) {
                 const provMatch = text.match(/provider=([^\s]+)/);
@@ -1883,7 +1883,7 @@ function setupIpcListeners() {
             
             if (text.includes('loading configuration') || text.includes('Doctor') || text.includes('migration')) {
                 targetProgress = 25;
-                targetText = '正在校验ClawAI配置文件与诊断系统...';
+                targetText = '正在校验Nexora Agent配置文件与诊断系统...';
                 updated = true;
             } else if (text.includes('Failed to install missing configured plugin')) {
                 targetProgress = 60;
@@ -1905,11 +1905,11 @@ function setupIpcListeners() {
                 updated = true;
             } else if (text.includes('[gateway] ready') || text.includes('gateway] ready')) {
                 targetProgress = 100;
-                targetText = '本地 AI ClawAI服务就绪！';
+                targetText = '本地 AI Nexora Agent服务就绪！';
                 updated = true;
             } else if (text.includes('agent runtime plugins pre-warmed')) {
                 targetProgress = 100;
-                targetText = '本地 AI ClawAI服务就绪！';
+                targetText = '本地 AI Nexora Agent服务就绪！';
                 updated = true;
             } else if (text.includes('starting HTTP server') || text.includes('force: no listeners') || text.includes('started (interval:')) {
                 targetProgress = 78;
@@ -1930,19 +1930,19 @@ function setupIpcListeners() {
         // 进行常见启动消息的汉化和修饰
         let cleanedText = text;
         if (text.includes('loading configuration')) {
-            cleanedText = cleanedText.replace(/loading configuration[.….]*/, '正在读取与解析ClawAI本地配置文件...');
+            cleanedText = cleanedText.replace(/loading configuration[.….]*/, '正在读取与解析Nexora Agent本地配置文件...');
         } else if (text.includes('resolving authentication')) {
             cleanedText = cleanedText.replace(/resolving authentication[.….]*/, '正在与云端服务器进行开发者授权密钥安全核验...');
         } else if (text.includes('force: no listeners on port')) {
             cleanedText = cleanedText.replace(/force: no listeners on port (\d+)/, '检测到通信端口 $1 空闲，准备占用侦听...');
         } else if (text.includes('starting...')) {
-            cleanedText = cleanedText.replace('starting...', '正在拉起ClawAI核心引擎，初始化网络钩子...');
+            cleanedText = cleanedText.replace('starting...', '正在拉起Nexora Agent核心引擎，初始化网络钩子...');
         } else if (text.includes('started (interval:')) {
             cleanedText = cleanedText.replace(/started \(interval: [^)]+\)/, '健康状态监控已上线 ✅');
         } else if (text.includes('provider auth state pre-warmed')) {
             cleanedText = cleanedText.replace(/provider auth state pre-warmed in (\d+)ms/, '内置模型云端鉴权通道安全预热就绪 (耗时 $1ms) ✅');
         } else if (text.includes('agent runtime plugins pre-warmed')) {
-            cleanedText = cleanedText.replace(/agent runtime plugins pre-warmed in (\d+)ms/, 'ClawAI运行时全部核心业务插件装载完毕 (耗时 $1ms) 🚀');
+            cleanedText = cleanedText.replace(/agent runtime plugins pre-warmed in (\d+)ms/, 'Nexora Agent运行时全部核心业务插件装载完毕 (耗时 $1ms) 🚀');
         } else if (/http server listening/i.test(text)) {
             cleanedText = cleanedText.replace(/http server listening[^\n]*/i, 'HTTP 本地服务已监听，面板可打开 ✅');
         } else if (text.includes('HTTP server listening on')) {
@@ -1950,9 +1950,9 @@ function setupIpcListeners() {
         } else if (text.includes('Webhook server listening on')) {
             cleanedText = cleanedText.replace(/Webhook server listening on http:\/\/([^\s]+)/, '微信/语音 Webhook 本地服务在 http://$1 上监听就绪！');
         } else if (text.includes('heartbeat] started')) {
-            cleanedText = cleanedText.replace('[heartbeat] started', '在线心跳监控守护已开启，ClawAI连接保持正常 💓');
+            cleanedText = cleanedText.replace('[heartbeat] started', '在线心跳监控守护已开启，Nexora Agent连接保持正常 💓');
         } else if (text.includes('ready') && text.includes('[gateway]')) {
-            cleanedText = cleanedText.replace('ready', 'ClawAI全部引擎启动就绪，正在静候业务请求传入...');
+            cleanedText = cleanedText.replace('ready', 'Nexora Agent全部引擎启动就绪，正在静候业务请求传入...');
         }
 
         // --- 开始：前端终端下载进度注入 ---
@@ -1988,7 +1988,7 @@ function setupIpcListeners() {
         }
         // --- 结束：前端终端下载进度注入 ---
 
-        // 不在「ClawAI状态」页时：别往可视控制台刷 DOM（这是菜单切换卡顿的主因之一）
+        // 不在「Nexora Agent状态」页时：别往可视控制台刷 DOM（这是菜单切换卡顿的主因之一）
         if (currentTab !== 'console-view' && currentTab !== null) {
             if (!window.__deferredConsoleLogs) window.__deferredConsoleLogs = [];
             window.__deferredConsoleLogs.push(cleanedText);
@@ -2001,7 +2001,7 @@ function setupIpcListeners() {
         // 追加日志并做中文翻译及着色
         const span = document.createElement('span');
         let coloredText = cleanedText
-            .replace(/\[gateway\]/g, '<span style="color: #64b5f6;">[ClawAI核心]</span>')
+            .replace(/\[gateway\]/g, '<span style="color: #64b5f6;">[Nexora Agent核心]</span>')
             .replace(/\[System\]/g, '<span style="color: #f06292;">[系统监控]</span>')
             .replace(/\[plugins\]/g, '<span style="color: #ba68c8;">[插件模块]</span>')
             .replace(/\[hooks\]/g, '<span style="color: #4db6ac;">[钩子机制]</span>')
@@ -2039,7 +2039,7 @@ function setupIpcListeners() {
         });
     }
 
-    // ClawAI状态同步
+    // Nexora Agent状态同步
     window.api.onStatusChanged((status) => {
         const oldStatus = gatewayStatus;
         
@@ -2060,7 +2060,7 @@ function setupIpcListeners() {
             stopGatewayReadyProbe();
             updateGatewayStatusUI('stopped');
             if (oldStatus === 'running') {
-                sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已停止运行。');
+                sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已停止运行。');
             }
             __openclawPanelLastUrl = '';
         } 
@@ -2077,7 +2077,7 @@ function setupIpcListeners() {
                 stopGatewayReadyProbe();
                 updateGatewayStatusUI('running');
                 if (oldStatus !== 'running') {
-                    sendDesktopNotification('ClawAI状态变更', 'OpenClaw 本地智能ClawAI已成功启动运行！');
+                    sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已成功启动运行！');
                     __openclawPanelLastUrl = '';
                 }
             }
@@ -2371,7 +2371,7 @@ async function loadAndRenderConfig() {
         if (studentEl) studentEl.value = dmtCfg.studentModel || '';
     }
 
-    // 优先从本地 localStorage 加载自定义的视频/图片生成配置（不写盘入 openclaw.json 以免损坏ClawAI配置格式）
+    // 优先从本地 localStorage 加载自定义的视频/图片生成配置（不写盘入 openclaw.json 以免损坏Nexora Agent配置格式）
     const storedVideoConfig = localStorage.getItem('client_pref_video_generator');
     if (storedVideoConfig) {
         try {
@@ -4216,7 +4216,7 @@ const handleSaveConfigAction = async () => {
     localStorage.setItem('client_pref_video_generator', JSON.stringify(configData.videoGenerator));
     localStorage.setItem('client_pref_image_generator', JSON.stringify(configData.imageGenerator));
 
-    // 彻底从 configData 中删除非法字段以防止ClawAI启动 Schema 校验崩溃闪退
+    // 彻底从 configData 中删除非法字段以防止Nexora Agent启动 Schema 校验崩溃闪退
     if (configData.agents && configData.agents.defaults) {
         delete configData.agents.defaults.imageGenerationModel;
         delete configData.agents.defaults.videoGenerationModel;
@@ -4244,7 +4244,7 @@ const handleSaveConfigAction = async () => {
         });
         statPort.innerText = configData.gateway.port;
         if (gatewayStatus === 'running') {
-            const restart = await confirm(t('ClawAI正在运行中，是否立即重启ClawAI以使新配置生效？', 'Gateway is running. Do you want to restart it now to apply the new configuration?', 'ClawAI正在運行中，是否立即重啟ClawAI以使新配置生效？'));
+            const restart = await confirm(t('Nexora Agent正在运行中，是否立即重启Nexora Agent以使新配置生效？', 'Gateway is running. Do you want to restart it now to apply the new configuration?', 'Nexora Agent正在運行中，是否立即重啟Nexora Agent以使新配置生效？'));
             if (restart) {
                 window.api.gatewayAction('stop');
                 setTimeout(() => window.api.gatewayAction('start'), 1000);
@@ -4609,7 +4609,7 @@ function updateProgressUI(val, textLabel = '') {
 
     // 启动就绪：轻提示即可，避免 modal alert 打断
     if (gatewayStatus === 'starting' && oldProgress < 100 && val === 100) {
-        try { showToast(t('ClawAI 已就绪', 'ClawAI is ready', 'ClawAI 已就緒')); } catch (e) {}
+        try { showToast(t('Nexora Agent 已就绪', 'Nexora Agent is ready', 'Nexora Agent 已就緒')); } catch (e) {}
     }
 
     // 🌟 就绪 3 秒后优雅渐隐进度条
@@ -4842,7 +4842,7 @@ function updateGatewayStatusUI(status) {
 
         if (chatWelcomeText) {
             chatWelcomeText.setAttribute('data-i18n', 'status.running_hint');
-            chatWelcomeText.innerText = isEn ? 'I have successfully connected to your local OpenClaw gateway!' : '我已经与您本地的 OpenClaw ClawAI成功对接！';
+            chatWelcomeText.innerText = isEn ? 'I have successfully connected to your local OpenClaw gateway!' : '我已经与您本地的 OpenClaw Nexora Agent成功对接！';
             chatWelcomeText.style.color = '#00e676';
         }
 
@@ -4871,14 +4871,14 @@ function updateGatewayStatusUI(status) {
         if (currentProgress === 0) {
             // 说明是一打开程序就已经是运行状态（非手动点击启动），直接拉满到 100%
             if (progressContainer) progressContainer.style.display = 'flex';
-            updateProgressUI(100, '本地 AI ClawAI服务就绪！');
+            updateProgressUI(100, '本地 AI Nexora Agent服务就绪！');
         } else {
             // 否则，说明是通过 starting 刚点启动的，此时我们等 handleReceivedLog 匹配完毕来置 100%
             // 设定 12 秒的保底拉满延时器
             progressTimeout = setTimeout(() => {
                 if (gatewayStatus === 'running' && currentProgress < 100) {
                     if (progressContainer) progressContainer.style.display = 'flex';
-                    updateProgressUI(100, '本地 AI ClawAI服务就绪！');
+                    updateProgressUI(100, '本地 AI Nexora Agent服务就绪！');
                 }
             }, 12000);
         }
@@ -4908,7 +4908,7 @@ function updateGatewayStatusUI(status) {
 
         // 清除所有定时器并隐藏进度条
         if (progressInterval) clearInterval(progressInterval);
-        updateProgressUI(0, 'ClawAI已停止运行');
+        updateProgressUI(0, 'Nexora Agent已停止运行');
         if (progressContainer) {
             progressContainer.style.display = 'none';
         }
@@ -4947,13 +4947,13 @@ function updateGatewayStatusUI(status) {
 
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
-            systemLogsArea.value += `\n>>> [系统消息] ClawAI核心服务于 ${new Date().toLocaleString()} 开始拉起运行...\n`;
+            systemLogsArea.value += `\n>>> [系统消息] Nexora Agent核心服务于 ${new Date().toLocaleString()} 开始拉起运行...\n`;
             systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
         }
 
         if (chatWelcomeText) {
             chatWelcomeText.setAttribute('data-i18n', 'status.starting_hint');
-            chatWelcomeText.innerText = isEn ? 'Connecting to the local OpenClaw gateway, please wait...' : '正在连接本地的 OpenClaw ClawAI，请稍候...';
+            chatWelcomeText.innerText = isEn ? 'Connecting to the local OpenClaw gateway, please wait...' : '正在连接本地的 OpenClaw Nexora Agent，请稍候...';
             chatWelcomeText.style.color = '#ffd54f';
         }
 
@@ -4981,7 +4981,7 @@ function updateGatewayStatusUI(status) {
 
 // 模拟内存指标变化，增添科幻动态效果
 function updateMemoryMock() {
-    // 1. 右侧的ClawAI内存看板 statMem (只有ClawAI运行时才显示其自身内存，未运行显示 -- MB)
+    // 1. 右侧的Nexora Agent内存看板 statMem (只有Nexora Agent运行时才显示其自身内存，未运行显示 -- MB)
     if (gatewayStatus !== 'running') {
         statMem.innerText = '-- MB';
     } else {
@@ -4990,7 +4990,7 @@ function updateMemoryMock() {
     }
 
     // 2. 左下角负载卡片代表“应用负载”（整个客户端程序占用的总内存）
-    // 无论ClawAI是否运行，客户端本身一直在运行，故应用负载图表应持续波动更新
+    // 无论Nexora Agent是否运行，客户端本身一直在运行，故应用负载图表应持续波动更新
     const memValEl = document.getElementById('sidebar-chart-mem-val');
     
     let appMemVal;
@@ -5028,9 +5028,9 @@ function setupTabSwitching() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (gatewayStatus === 'starting' || gatewayStatus === 'running') {
-                        showToast('ClawAI 正在启动，约十几秒后可打开 OpenClaw…');
+                        showToast('Nexora Agent 正在启动，约十几秒后可打开 OpenClaw…');
                     } else {
-                        showToast('请先在左上角启动 ClawAI 服务');
+                        showToast('请先在左上角启动 Nexora Agent 服务');
                     }
                     return;
                 }
@@ -5195,7 +5195,7 @@ async function renderUsageCharts() {
     const waveBox = document.getElementById('stats-wave-chart-box');
     if (!waveBox) return;
 
-    // A. 异步从主进程拉取ClawAI真实本地数据库累计使用统计数据
+    // A. 异步从主进程拉取Nexora Agent真实本地数据库累计使用统计数据
     try {
         const result = await window.api.getStatsData();
         if (result && result.success && result.data) {
@@ -5211,7 +5211,7 @@ async function renderUsageCharts() {
 
     if ((!sessionStats.logs || sessionStats.logs.length === 0) && Number(sessionStats.total_requests || 0) === 0) {
         // 引导：无数据通常是补丁未记账或尚未产生对话，不是筛选器问题
-        console.warn('[UsageStats] real_tokens.json 为空或不存在 — 需在ClawAI下完成至少一轮对话后才会出现用量');
+        console.warn('[UsageStats] real_tokens.json 为空或不存在 — 需在Nexora Agent下完成至少一轮对话后才会出现用量');
     }
 
     const stats = sessionStats;
@@ -5295,7 +5295,7 @@ async function renderUsageCharts() {
     };
     lineData = processedLineData;
 
-    // 计算属于今天的请求总数并同步到ClawAI状态界面
+    // 计算属于今天的请求总数并同步到Nexora Agent状态界面
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayTimestamp = todayStart.getTime();
@@ -5646,7 +5646,7 @@ function applyStatsFilters() {
     // 3. 下拉来源过滤
     if (selectedSource !== 'all') {
         if (selectedSource === 'gateway') {
-            // 目前全部算作ClawAI入口日志，不作进一步过滤
+            // 目前全部算作Nexora Agent入口日志，不作进一步过滤
         } else if (selectedSource === 'plugins') {
             // 目前没有插件管道日志，直接过滤为空
             logs = logs.filter(log => log.isPlugin === true);
@@ -5890,7 +5890,7 @@ const guideSteps = [
     {
         target: 'tour-nav-console',
         title: '🏠 步骤一: 控制台首页',
-        content: '这是您的本地ClawAI调度中心。ClawAI服务已经自动在后台无缝为您启动。如果您需要接入微信聊天助手，点击中间的“绑定微信”扫描二维码即可一键登入！'
+        content: '这是您的本地Nexora Agent调度中心。Nexora Agent服务已经自动在后台无缝为您启动。如果您需要接入微信聊天助手，点击中间的“绑定微信”扫描二维码即可一键登入！'
     },
     {
         target: 'btn-nav-openclaw-web',
@@ -6259,7 +6259,7 @@ function applyLanguage(lang) {
         }
     });
 
-    // 5. 对话欢迎语和特殊ClawAI连接状态的翻译
+    // 5. 对话欢迎语和特殊Nexora Agent连接状态的翻译
     const statusTextEl = document.getElementById('gateway-connection-status-text');
     if (statusTextEl) {
         const useBuiltIn = getUseBuiltIn();
@@ -6652,7 +6652,7 @@ function clearChatHistory() {
         <div style="display: flex; gap: 12px; max-width: 80%; align-self: flex-start;">
             <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #8c52ff, #00d2ff); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: white; flex-shrink: 0; box-shadow: 0 0 10px rgba(140,82,255,0.3);">AI</div>
             <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 12px 16px; color: var(--text-primary); font-size: 13px; line-height: 1.5; border-top-left-radius: 2px;">
-                <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw ClawAI未启动，请前往【控制台】启动ClawAI。</span>
+                <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw Nexora Agent未启动，请前往【控制台】启动Nexora Agent。</span>
                 <br><br>
                 <span data-i18n="chat.welcome.functions">在这里您可以：</span>
                 <br>💬 <span data-i18n="chat.welcome.chat_mode">与当前选中的大模型进行实时对话；</span>
@@ -6677,7 +6677,7 @@ function clearChatHistory() {
     const inputArea = document.getElementById('chat-text-input');
     if (inputArea) inputArea.value = '';
 
-    // 更新ClawAI连接状态文本
+    // 更新Nexora Agent连接状态文本
     const statusText = document.getElementById('gateway-connection-status-text');
     if (statusText) {
         const isEn = (localStorage.getItem('setting_language') || 'zh-CN') === 'en-US';
@@ -6704,7 +6704,7 @@ function clearChatHistory() {
     showToast('🗑️ 会话缓存已清除');
 }
 
-// 处理发送消息（直连各厂家服务，不依赖ClawAI）
+// 处理发送消息（直连各厂家服务，不依赖Nexora Agent）
 async function handleSendMessage() {
     const inputArea = document.getElementById('chat-text-input');
     const text = inputArea.value.trim();
@@ -6763,25 +6763,25 @@ async function handleSendMessage() {
     try {
         const messages = [];
         
-        // 自动注入 ClawAI / OpenClaw 智能系统帮助提示词，专门解惑系统应用内的疑难杂症
-        const systemPrompt = `你是一个专业的 ClawAI 系统应用智能客服小助手。当前运行的底层大语言模型技术为：【提供商: ${providerKey}, 模型ID: ${modelId}】。
-【重要要求】：若用户问及你的模型身份、你是什么模型、你的底层技术、来自哪家公司等信息，请务必【如实且诚实】地告知你的真实底层模型身份是【${providerKey} / ${modelId}】（例如，你应该说明你是 ${modelId} 模型，由提供商 ${providerKey} ${providerKey === 'ollama' ? '在本地运行' : '提供云端API服务'}，并诚实说明你原本的模型技术背景，如Qwen、Llama、Gemini等），绝对不要隐瞒或误导用户；当用户提问其他关于本ClawAI客户端的软件使用和排查故障问题时，你再扮演智能客服小助手进行解答。
+        // 自动注入 Nexora Agent / OpenClaw 智能系统帮助提示词，专门解惑系统应用内的疑难杂症
+        const systemPrompt = `你是一个专业的 Nexora Agent 系统应用智能客服小助手。当前运行的底层大语言模型技术为：【提供商: ${providerKey}, 模型ID: ${modelId}】。
+【重要要求】：若用户问及你的模型身份、你是什么模型、你的底层技术、来自哪家公司等信息，请务必【如实且诚实】地告知你的真实底层模型身份是【${providerKey} / ${modelId}】（例如，你应该说明你是 ${modelId} 模型，由提供商 ${providerKey} ${providerKey === 'ollama' ? '在本地运行' : '提供云端API服务'}，并诚实说明你原本的模型技术背景，如Qwen、Llama、Gemini等），绝对不要隐瞒或误导用户；当用户提问其他关于本Nexora Agent客户端的软件使用和排查故障问题时，你再扮演智能客服小助手进行解答。
 请根据以下真实的产品设计与常见问题排查方案，给出极其详尽、专业、条理清晰且温暖亲切的解答：
 
-1. **什么是内置模型？与本地ClawAI的关系是什么？**
+1. **什么是内置模型？与本地Nexora Agent的关系是什么？**
    - 内置模型（Agnes AI）是官方提供的高速直连大模型通道。
-   - 当在【系统设置】中开启“内置模型启用”时，所有的对话和连通性测试直接走官方云端接口，**此时无需点击启动本地ClawAI，也可以直接使用【模型会话】与 AI 对话！**
-   - 只有在使用本地机器人（如微信、Slack 等渠道）或者本地挂载 MCP 插件等本地深度ClawAI生态时，才需要点击“启动ClawAI”拉起本地后台ClawAI。
+   - 当在【系统设置】中开启“内置模型启用”时，所有的对话和连通性测试直接走官方云端接口，**此时无需点击启动本地Nexora Agent，也可以直接使用【模型会话】与 AI 对话！**
+   - 只有在使用本地机器人（如微信、Slack 等渠道）或者本地挂载 MCP 插件等本地深度Nexora Agent生态时，才需要点击“启动Nexora Agent”拉起本地后台Nexora Agent。
 
 2. **如何配置多个 API Key 进行轮询与负载均衡？**
    - **操作步骤**：首先前往【系统设置】**关闭“内置模型启用”**，随后前往【模型配置】，在您需要使用的模型提供商（如 SiliconFlow、DeepSeek、Agnes AI 等）的“API 密钥”输入框中，输入多个以英文逗号 \`,\` 分割的密钥，例如：\`sk-key1,sk-key2,sk-key3\`，然后点击“保存配置”。
    - **轮询原理**：程序网络拦截层会在实际大模型通信时进行自动去重并在各个 Key 之间进行 Round-Robin 轮询（且前端在测试时会自动提取第一个 Key 进行测试防报错）。
    - **内置模型自动轮询**：若您开启了“内置模型启用”，系统已内置了 4 个官方高速通道 Key，系统将全自动在这 4 个高速 Key 之间进行请求轮询分配，无需您任何配置！
 
-3. **点击“启动ClawAI”按钮出现闪退、EADDRINUSE 报错怎么解决？**
-   - **主要成因**：ClawAI通信所需的 18789 端口被残留的其他 Node 进程占用，或是上次ClawAI退出时进程没有清理干净。
+3. **点击“启动Nexora Agent”按钮出现闪退、EADDRINUSE 报错怎么解决？**
+   - **主要成因**：Nexora Agent通信所需的 18789 端口被残留的其他 Node 进程占用，或是上次Nexora Agent退出时进程没有清理干净。
    - **排查步骤**：
-     1. 应用自带了安全端口占用查询。在您点击“启动ClawAI”时，会首先运行 \`netstat\` 定位并安全精准杀死占用 18789 的残留进程（且不误杀其它无关 Node 进程，不会连带导致应用闪退）。
+     1. 应用自带了安全端口占用查询。在您点击“启动Nexora Agent”时，会首先运行 \`netstat\` 定位并安全精准杀死占用 18789 的残留进程（且不误杀其它无关 Node 进程，不会连带导致应用闪退）。
      2. 如果依然提示冲突，您可以手动打开电脑的“任务管理器”，在进程中找到并“结束”所有的 \`node.exe\` 进程，然后重新在客户端点击启动即可。
      3. 确保不要以管理员身份拉起 npm 却以普通用户运行本应用，这会导致跨权限清理失败。
 
@@ -7856,12 +7856,12 @@ async function loadAndRenderSystemLogs() {
 }
 
 // ==========================================
-// 🔄 内置ClawAI核心包热更新（拦截 OpenClaw WebUI 的更新横幅）
+// 🔄 内置Nexora Agent核心包热更新（拦截 OpenClaw WebUI 的更新横幅）
 // ==========================================
 let _webviewUpdateInjected = false;
 
 // ==========================================
-// ClawAI核心更新 - 进度 / 状态弹窗
+// Nexora Agent核心更新 - 进度 / 状态弹窗
 // ==========================================
 let _gwUpdateOverlay = null;
 let _gwUpdateBar = null;
@@ -7878,13 +7878,13 @@ const GW_UPDATE_STEPS = [
     { keys: ['查询 npm', '查询版本'], label: '查询最新版本', pct: 6 },
     { keys: ['目标版本'], label: '确定目标版本', pct: 12 },
     { keys: ['正在检查 Node', '版本兼容', '新版要求'], label: '检查运行时兼容性', pct: 20 },
-    { keys: ['停止ClawAI'], label: '停止当前ClawAI', pct: 30 },
+    { keys: ['停止Nexora Agent'], label: '停止当前Nexora Agent', pct: 30 },
     { keys: ['正在下载 Node', 'Node 运行时已升级', '将自动升级', '匹配可用版本'], label: '升级 Node 运行时', pct: 38, creepTo: 50 },
     { keys: ['正在安装'], label: '下载并安装核心包', pct: 55, creepTo: 74 },
     { keys: ['install 完成', '已安装版本'], label: '核心包安装完成', pct: 80 },
     { keys: ['package.json'], label: '锁定版本号', pct: 86 },
-    { keys: ['正在重启', '重启ClawAI'], label: '重启ClawAI', pct: 92 },
-    { keys: ['重启成功', '重启完成'], label: 'ClawAI重启成功', pct: 100 },
+    { keys: ['正在重启', '重启Nexora Agent'], label: '重启Nexora Agent', pct: 92 },
+    { keys: ['重启成功', '重启完成'], label: 'Nexora Agent重启成功', pct: 100 },
 ];
 
 function _ensureGwUpdateKeyframes() {
@@ -7937,7 +7937,7 @@ function showGatewayUpdateProgress() {
     modal.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;">
             <div id="gw-up-spinner" style="width:22px; height:22px; border:3px solid rgba(var(--accent-rgb),0.25); border-top-color: var(--accent-color); border-radius:50%; animation: gwUpSpin 0.8s linear infinite; flex-shrink:0;"></div>
-            <h3 style="margin:0; font-size:16px; font-weight:600; color: var(--accent-color);">ClawAI核心更新</h3>
+            <h3 style="margin:0; font-size:16px; font-weight:600; color: var(--accent-color);">Nexora Agent核心更新</h3>
         </div>
         <div id="gw-up-status" style="font-size:13px; color: var(--text-primary); margin-bottom:10px; min-height:18px;">正在准备更新...</div>
         <div style="position:relative; height:8px; border-radius:6px; background: var(--bg-input); overflow:hidden; margin-bottom:6px;">
@@ -8055,7 +8055,7 @@ async function loadOpenclawControlUi(forceReload = false) {
         if (!forceReload && currentSrc && (currentSrc === url || __openclawPanelLastUrl === url)) {
             return;
         }
-        showToast(forceReload ? '正在重新免密登录控制台…' : '正在连接ClawAI控制台面板…');
+        showToast(forceReload ? '正在重新免密登录控制台…' : '正在连接Nexora Agent控制台面板…');
         // 首次进入或强制重载：清掉 guest 里过期 token，避免「失败尝试过多」
         if ((forceReload || !currentSrc) && window.api.clearOpenclawPanelSession) {
             try { await window.api.clearOpenclawPanelSession(); } catch (e) {}
@@ -8076,14 +8076,14 @@ async function loadOpenclawControlUi(forceReload = false) {
 function injectWebviewUpdateInterceptor(webview) {
     if (!webview) return;
 
-    const MAGIC_PREFIX = '__CLAWAI_UPDATE__:';
+    const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
 
     // 每次 webview 加载完毕后注入拦截脚本
     const onDomReady = () => {
         webview.executeJavaScript(`
             (function() {
-                if (window.__clawai_update_injected) return;
-                window.__clawai_update_injected = true;
+                if (window.__nexora_agent_update_injected) return;
+                window.__nexora_agent_update_injected = true;
 
                 const MAGIC = '${MAGIC_PREFIX}';
 
@@ -8101,8 +8101,8 @@ function injectWebviewUpdateInterceptor(webview) {
                     document.querySelectorAll('button, a, [role="button"], span').forEach(function(el) {
                         var text = (el.textContent || '').trim();
                         if ((text === '立即更新' || text === 'Update Now' || text === 'update now')
-                            && !el.__clawai_intercepted) {
-                            el.__clawai_intercepted = true;
+                            && !el.__nexora_agent_intercepted) {
+                            el.__nexora_agent_intercepted = true;
                             el.addEventListener('click', function(e) {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -8148,13 +8148,13 @@ function injectWebviewUpdateInterceptor(webview) {
             const targetVersion = payload.version || '';
 
             const confirmed = await confirm(
-                `检测到ClawAI核心有新版本${targetVersion ? ' v' + targetVersion : ''}。\n\n` +
+                `检测到Nexora Agent核心有新版本${targetVersion ? ' v' + targetVersion : ''}。\n\n` +
                 '将为您执行以下操作：\n' +
-                '  1. 停止当前ClawAI\n' +
+                '  1. 停止当前Nexora Agent\n' +
                 '  2. 下载并安装新版本核心包\n' +
-                '  3. 自动重启ClawAI\n\n' +
+                '  3. 自动重启Nexora Agent\n\n' +
                 '是否立即更新？',
-                'ClawAI核心更新'
+                'Nexora Agent核心更新'
             );
             if (!confirmed) return;
 
@@ -8175,7 +8175,7 @@ function injectWebviewUpdateInterceptor(webview) {
                     finishGatewayUpdateProgress(false, result.message);
                 }
             } catch (err) {
-                finishGatewayUpdateProgress(false, `ClawAI更新失败: ${err.message}`);
+                finishGatewayUpdateProgress(false, `Nexora Agent更新失败: ${err.message}`);
             }
         });
 
@@ -8211,7 +8211,7 @@ async function triggerUpdateCheck(isManual = false) {
             if (isManual) {
                 showToast(result.message || '无法连接更新服务器，请稍后重试或手动前往 Releases 页面');
                 if (window.api && window.api.openExternal) {
-                    window.api.openExternal(result.downloadUrl || 'https://github.com/2014-y/ClawAI/releases');
+                    window.api.openExternal(result.downloadUrl || 'https://github.com/2014-y/Nexora-Agent/releases');
                 }
             } else {
                 showToast(t('toast.auto_update.failed'));
@@ -8314,7 +8314,7 @@ function setupUpdateModal() {
                 
                 // 自动打开浏览器到 GitHub Releases 页面
                 if (window.api && window.api.openExternal) {
-                    window.api.openExternal('https://github.com/2014-y/ClawAI/releases');
+                    window.api.openExternal('https://github.com/2014-y/Nexora-Agent/releases');
                 }
                 
                 // 恢复按钮状态

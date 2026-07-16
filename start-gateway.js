@@ -1,5 +1,5 @@
 // start-gateway.js
-// ClawAI - Node.js 启动入口
+// Nexora Agent - Node.js 启动入口
 // 用法: node start-gateway.js
 
 const { execSync } = require('child_process');
@@ -75,7 +75,7 @@ function checkPrerequisites() {
   }
   
   console.log('\n========================================');
-  console.log('  ClawAI - 启动中...');
+  console.log('  Nexora Agent - 启动中...');
   console.log('========================================\n');
 }
 

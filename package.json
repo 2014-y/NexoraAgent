@@ -1,7 +1,7 @@
 {
   "name": "ai-assistant",
   "version": "2.0.1",
-  "description": "ClawAI",
+  "description": "Nexora Agent",
   "keywords": [
     "ai",
     "assistant",
@@ -13,11 +13,11 @@
     "whatsapp",
     "agnes-ai"
   ],
-  "author": "ClawAI",
+  "author": "Nexora Agent",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/2014-y/ClawAI"
+    "url": "https://github.com/2014-y/Nexora-Agent"
   },
   "main": "main.js",
   "engines": {
@@ -34,7 +34,7 @@
     "app:start": "electron .",
     "preapp:dist": "node scripts/pack-gateway-runtime.js && node patch_nsis.js",
     "app:dist": "electron-builder --windows nsis",
-    "app:pack": "electron-packager . \"ClawAI\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "app:pack": "electron-packager . \"Nexora Agent\" --platform=win32 --arch=x64 --out=dist --overwrite",
     "pack:runtime": "node scripts/pack-gateway-runtime.js"
   },
   "dependencies": {
@@ -59,7 +59,7 @@
   },
   "build": {
     "appId": "com.2014y.aigateway",
-    "productName": "ClawAI",
+    "productName": "Nexora Agent",
     "asar": true,
     "compression": "store",
     "npmRebuild": false,
@@ -75,7 +75,7 @@
     },
     "win": {
       "icon": "config/icon.ico",
-      "publisherName": "ClawAI",
+      "publisherName": "Nexora Agent",
       "target": [
         "nsis"
       ]
@@ -85,7 +85,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "ClawAI",
+      "shortcutName": "Nexora Agent",
       "runAfterFinish": false,
       "include": "config/installer.nsh",
       "installerIcon": "config/icon.ico",

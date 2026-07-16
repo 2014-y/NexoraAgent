@@ -1,9 +1,9 @@
 ﻿$ErrorActionPreference = "Continue"
-$src = "C:\Users\Yuan\Desktop\ClawAI\ClawAI"
-$dst = "C:\Program Files\ClawAI\resources\app"
+$src = Split-Path -Parent $PSScriptRoot
+$dst = "C:\Program Files\Nexora Agent\resources\app"
 $files = @("index.html","renderer.js","index.css","plugin-catalog.js","preload.js","main.js","locales.js","latency-tune.js","token-usage-parse.js","home-resolve.js")
 Write-Output "=== STOP ==="
-try { Get-Process -Name "ClawAI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch {}
+try { Get-Process -Name "Nexora Agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch {}
 Write-Output "stop-done"
 Write-Output "=== COPY ==="
 $fail = $false
@@ -23,10 +23,10 @@ if ($fail) {
 `$files=@('index.html','renderer.js','index.css','plugin-catalog.js','preload.js','main.js','locales.js','latency-tune.js','token-usage-parse.js','home-resolve.js')
 foreach(`$f in `$files){ Copy-Item -LiteralPath (Join-Path `$src `$f) -Destination (Join-Path `$dst `$f) -Force }
 "@
-  $ep = Join-Path $env:TEMP "clawai-elev-copy.ps1"
+  $ep = Join-Path $env:TEMP "nexora-agent-elev-copy.ps1"
   Set-Content -Path $ep -Value $elev -Encoding UTF8
   Start-Process powershell -Verb RunAs -Wait -ArgumentList "-ExecutionPolicy Bypass -NoProfile -File `"$ep`""
   Write-Output "elev-finished"
 }
 Write-Output "=== VERIFY ==="
-python "C:\Users\Yuan\Desktop\ClawAI\ClawAI\scripts\_verify_ids.py"
+python (Join-Path $PSScriptRoot "_verify_ids.py")

@@ -15,7 +15,7 @@ function getDevProjectRoot() {
 
 function getPackagedRuntimeRoot(app) {
     const localBase = process.env.LOCALAPPDATA
-        ? path.join(process.env.LOCALAPPDATA, 'ClawAI')
+        ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent')
         : null;
     if (localBase) return path.join(localBase, 'gateway-runtime');
     try {

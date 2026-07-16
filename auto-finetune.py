@@ -2,7 +2,7 @@
 """
 OpenClaw Auto-FineTune Pipeline
 Collects training data from learning_log.jsonl,
-runs QLoRA fine-tuning, exports to Ollama as clawai-finetuned.
+runs QLoRA fine-tuning, exports to Ollama as nexora-agent-finetuned.
 """
 
 import os
@@ -240,7 +240,7 @@ ADAPTER {adapter_path}
 
     ollama_bin = (shutil.which("ollama") or r"C:\\Program Files\\Ollama\\ollama.exe")
     result = subprocess.run(
-        [ollama_bin, "create", "clawai-finetuned", "-f", str(modelfile_path)],
+        [ollama_bin, "create", "nexora-agent-finetuned", "-f", str(modelfile_path)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -250,7 +250,7 @@ ADAPTER {adapter_path}
         print(f"Ollama export failed:\n{result.stderr}")
         return False
 
-    print("Model exported as 'clawai-finetuned' in Ollama!")
+    print("Model exported as 'nexora-agent-finetuned' in Ollama!")
     return True
 
 
@@ -284,8 +284,8 @@ def main():
             state["conversation_count"] = len(conversations)
             state["trained_until"] = datetime.now().isoformat()
             save_state(state)
-            print("\nDone! New model: clawai-finetuned")
-            print("To use it, set studentModel to 'ollama/clawai-finetuned' in model settings")
+            print("\nDone! New model: nexora-agent-finetuned")
+            print("To use it, set studentModel to 'ollama/nexora-agent-finetuned' in model settings")
         else:
             print("Export failed.")
     else:

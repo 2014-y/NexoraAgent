@@ -187,7 +187,7 @@ function httpGetBuffer(url, { json = false, timeout = 30000 } = {}) {
     return new Promise((resolve, reject) => {
         const https = require('https');
         const doReq = (u, redirects) => {
-            const req = https.get(u, { headers: { 'User-Agent': 'ClawAI-Updater' } }, (res) => {
+            const req = https.get(u, { headers: { 'User-Agent': 'NexoraAgent-Updater' } }, (res) => {
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                     if (redirects > 5) { res.resume(); return reject(new Error('重定向次数过多')); }
                     res.resume();
@@ -292,7 +292,7 @@ async function checkAndHealSandboxNode() {
                 const https = require('https');
                 const fs = require('fs');
                 const doReq = (u, redirects) => {
-                    const req = https.get(u, { headers: { 'User-Agent': 'ClawAI-Updater' } }, (res) => {
+                    const req = https.get(u, { headers: { 'User-Agent': 'NexoraAgent-Updater' } }, (res) => {
                         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                             if (redirects > 5) { res.resume(); return reject(new Error('重定向次数过多')); }
                             res.resume();
@@ -471,17 +471,17 @@ function startGatewayHttpReadyWatch(port) {
 }
 
 // 与 open-external / 示例配置一致的桌面端默认网关令牌（仅本机 loopback）
-const CLAWAI_DEFAULT_GATEWAY_TOKEN = DEFAULT_GATEWAY_TOKEN;
+const NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN = DEFAULT_GATEWAY_TOKEN;
 
 /** 从 openclaw.json 组装 Control UI 免密 URL（优先 #token=，并保留 ?token= 兼容旧版） */
 function buildGatewayDashboardUrl() {
     let port = 18789;
-    let token = CLAWAI_DEFAULT_GATEWAY_TOKEN;
+    let token = NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN;
     try {
         const configPath = CONFIG_PATH || path.join(CONFIG_DIR, 'openclaw.json');
         if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
-            const norm = normalizeGatewayAuthConfig(config, CLAWAI_DEFAULT_GATEWAY_TOKEN);
+            const norm = normalizeGatewayAuthConfig(config, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN);
             port = norm.port;
             token = norm.token;
         }
@@ -495,12 +495,12 @@ function buildGatewayDashboardUrl() {
  */
 function lockGatewayAuthBeforeStart() {
     ensureOpenClawConfigInitialized();
-    let token = CLAWAI_DEFAULT_GATEWAY_TOKEN;
+    let token = NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN;
     let port = 18789;
     try {
         if (fs.existsSync(CONFIG_PATH)) {
             const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
-            const norm = normalizeGatewayAuthConfig(parsed, CLAWAI_DEFAULT_GATEWAY_TOKEN);
+            const norm = normalizeGatewayAuthConfig(parsed, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN);
             token = norm.token;
             port = norm.port;
             if (norm.changed) {
@@ -511,10 +511,10 @@ function lockGatewayAuthBeforeStart() {
     } catch (e) {
         console.warn('[TokenGuard] Primary config normalize failed:', e.message);
         try {
-            const minimal = normalizeGatewayAuthConfig({}, CLAWAI_DEFAULT_GATEWAY_TOKEN).config;
+            const minimal = normalizeGatewayAuthConfig({}, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN).config;
             fs.mkdirSync(CONFIG_DIR, { recursive: true });
             fs.writeFileSync(CONFIG_PATH, JSON.stringify(minimal, null, 2) + '\n', 'utf8');
-            token = CLAWAI_DEFAULT_GATEWAY_TOKEN;
+            token = NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN;
         } catch (e2) {
             console.error('[TokenGuard] Failed to write emergency auth config:', e2.message);
         }
@@ -592,7 +592,7 @@ function warnStorageHealthIfNeeded(health, homePath) {
         try {
             dialog.showMessageBox(mainWindow || undefined, {
                 type: health.level === 'critical' ? 'error' : 'warning',
-                title: health.title || 'ClawAI 存储提醒',
+                title: health.title || 'Nexora Agent 存储提醒',
                 message: health.title || '存储目录异常',
                 detail,
                 buttons: ['知道了']
@@ -645,8 +645,8 @@ function resolveWritableRuntimeDir() {
         typeof CONFIG_DIR === 'string' ? CONFIG_DIR : null,
         process.env.OPENCLAW_STATE_DIR,
         process.env.OPENCLAW_HOME && path.join(process.env.OPENCLAW_HOME, '.openclaw'),
-        path.join(process.env.ProgramData || 'C:\\ProgramData', 'ClawAI', 'runtime'),
-        path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'ClawAI', 'runtime'),
+        path.join(process.env.ProgramData || 'C:\\ProgramData', 'NexoraAgent', 'runtime'),
+        path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'NexoraAgent', 'runtime'),
         path.join(resolveOpenClawStateDir(), 'runtime')
     ].filter(Boolean);
     for (const dir of candidates) {
@@ -680,8 +680,8 @@ function deployRuntimeArtifacts() {
     }
     const patchAbs = path.join(dir, 'patch_gateway.js');
     const patchPath = patchAbs.replace(/\\/g, '/');
-    process.env.CLAWAI_PATCH_PATH = patchPath;
-    process.env.CLAWAI_RUNTIME_DIR = dir;
+    process.env.NEXORA_AGENT_PATCH_PATH = patchPath;
+    process.env.NEXORA_AGENT_RUNTIME_DIR = dir;
     return { runtimeDir: dir, patchPath, patchAbs };
 }
 
@@ -727,7 +727,7 @@ function pruneStalePluginConfigEntries(config) {
             changed = true;
             continue;
         }
-        // UI 伞形 id 可留着给 ClawAI 面板，但不要进 OpenClaw allow（下面 allow 再滤）
+        // UI 伞形 id 可留着给 Nexora Agent 面板，但不要进 OpenClaw allow（下面 allow 再滤）
         if (id === LONG_TERM_MEMORY_UI_ID) continue;
         if (!existsOnDisk(id)) {
             // 仅删“确定不存在”的告警项；保留常见核心名以免误伤
@@ -834,10 +834,10 @@ function resolveBundledNpmPluginPath(entry) {
     }
     // 开发树缺包时，回退到已安装产品目录（用户当前卡在 Install Weixin? 的常见原因）
     const fallbackRoots = [
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ClawAI', 'resources', 'app.asar.unpacked'),
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ClawAI', 'resources', 'app'),
-        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'ClawAI', 'resources', 'app.asar.unpacked'),
-        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'ClawAI', 'resources', 'app')
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Nexora Agent', 'resources', 'app.asar.unpacked'),
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Nexora Agent', 'resources', 'app'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Nexora Agent', 'resources', 'app.asar.unpacked'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Nexora Agent', 'resources', 'app')
     ];
     for (const root of fallbackRoots) {
         for (const rel of candidates) {
@@ -1096,9 +1096,9 @@ function sanitizeFeishuConfig(config) {
     return changed;
 }
 
-// 通过 NODE_OPTIONS 把 patch_gateway.js 传播到ClawAI及其 spawn 出的所有子进程/worker。
+// 通过 NODE_OPTIONS 把 patch_gateway.js 传播到Nexora Agent及其 spawn 出的所有子进程/worker。
 function buildPatchedNodeOptions(patchPath) {
-    const targetPath = String(patchPath || process.env.CLAWAI_PATCH_PATH || '')
+    const targetPath = String(patchPath || process.env.NEXORA_AGENT_PATCH_PATH || '')
         .replace(/\\/g, '/');
     if (!targetPath) return (process.env.NODE_OPTIONS || '').trim();
     const injected = `--require "${targetPath}" --dns-result-order=ipv4first --no-warnings`;
@@ -1281,7 +1281,7 @@ const DEFAULT_MEMORY_MD_TEMPLATE = `# MEMORY.md
 
 ## 重要约定
 - 本文件是长期记忆；对话压缩后仍会优先读取这里的信息。
-- 由 ClawAI「长期记忆」插件栈自动维护（摘要 / 旋转归档 / 压缩护栏）。
+- 由 Nexora Agent「长期记忆」插件栈自动维护（摘要 / 旋转归档 / 压缩护栏）。
 `;
 
 function seedDefaultMemoryFile(memFile) {
@@ -1616,7 +1616,7 @@ function prepareChannelPluginsBeforeGateway() {
 
     // 持久化 gateway auth token，避免每次启动临时 token + 控制台刷屏
     try {
-        const norm = normalizeGatewayAuthConfig(config, CLAWAI_DEFAULT_GATEWAY_TOKEN);
+        const norm = normalizeGatewayAuthConfig(config, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN);
         config = norm.config;
         if (norm.changed) {
             needsSave = true;
@@ -1711,7 +1711,7 @@ function createWindow(existingSplash) {
         mainWindow.show();
     });
 
-    // 拦截本地ClawAI面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
+    // 拦截本地Nexora Agent面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         const responseHeaders = { ...details.responseHeaders };
         const headersToDelete = [
@@ -1742,7 +1742,7 @@ function createWindow(existingSplash) {
         if (!isQuitting) {
             event.preventDefault();
             mainWindow.hide(); // 隐藏窗口到托盘
-            showNotification('ClawAI助手已最小化', 'ClawAI服务在后台持续运行，可通过右下角托盘图标唤醒。');
+            showNotification('Nexora Agent助手已最小化', 'Nexora Agent服务在后台持续运行，可通过右下角托盘图标唤醒。');
         }
     });
 
@@ -1767,13 +1767,13 @@ function createTray() {
         },
         { type: 'separator' },
         { 
-            label: '启动ClawAI', 
+            label: '启动Nexora Agent', 
             click: () => {
                 if (mainWindow) mainWindow.webContents.send('gateway-control-trigger', 'start');
             } 
         },
         { 
-            label: '停止ClawAI', 
+            label: '停止Nexora Agent', 
             click: () => {
                 if (mainWindow) mainWindow.webContents.send('gateway-control-trigger', 'stop');
             } 
@@ -1788,7 +1788,7 @@ function createTray() {
             } 
         }
     ]);
-    tray.setToolTip('ClawAI');
+    tray.setToolTip('Nexora Agent');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
         mainWindow.show();
@@ -1813,14 +1813,14 @@ function execAsync(cmd) {
     });
 }
 
-// 停止后台ClawAI子进程
+// 停止后台Nexora Agent子进程
 async function stopGatewayProcess() {
     if (gatewayProcess) {
         gatewayProcess.isIntentionallyStopped = true; // 标记为主动停止，避免触发意外退出警报
         if (process.platform === 'win32') {
             try {
                 // 精准物理强杀所有可能遗留的旧沙箱 node.exe 僵尸进程，彻底杜绝多实例抢占和日志刷屏
-                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*ClawAI*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
+                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*Nexora Agent*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
                 await execAsync(killCmd);
                 await execAsync(`taskkill /pid ${gatewayProcess.pid} /T /F`);
             } catch (err) {
@@ -1848,7 +1848,7 @@ async function stopGatewayProcess() {
         gatewayHttpReadyNotified = false;
         if (mainWindow) {
             mainWindow.webContents.send('gateway-status', 'stopped');
-            mainWindow.webContents.send('gateway-log', '\n[System] ClawAI服务已停止。\n');
+            mainWindow.webContents.send('gateway-log', '\n[System] Nexora Agent服务已停止。\n');
         }
     }
 }
@@ -1876,7 +1876,7 @@ ipcMain.on('window-action', (event, action) => {
     }
 });
 
-// 启动后台ClawAI进程
+// 启动后台Nexora Agent进程
 async function startGatewayProcess() {
         if (gatewayProcess) {
             if (mainWindow) {
@@ -1897,11 +1897,11 @@ async function startGatewayProcess() {
             return;
         }
 
-        // 每次拉起ClawAI前，先物理强制杀掉任何霸占 18789 端口的残留进程，确保新实例完美就绪
+        // 每次拉起Nexora Agent前，先物理强制杀掉任何霸占 18789 端口的残留进程，确保新实例完美就绪
         if (process.platform === 'win32') {
             try {
                 // 精准物理强杀所有可能遗留的旧沙箱 node.exe 僵尸进程，彻底杜绝多实例抢占和日志刷屏
-                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*ClawAI*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
+                const killCmd = `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { $_.ExecutablePath -like '*Nexora Agent*' -or $_.CommandLine -like '*openclaw*' -or $_.ExecutablePath -like '*.node-sandbox*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force } } catch {}; exit 0"`;
                 await execAsync(killCmd);
 
                 const currentPid = process.pid;
@@ -1975,7 +1975,7 @@ async function startGatewayProcess() {
                 console.warn('[PluginSeed] pre-gateway prepare skipped:', e.message);
             }
 
-            // 启动ClawAI前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
+            // 启动Nexora Agent前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
             try {
                 if (fs.existsSync(CONFIG_PATH)) {
                     const raw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
@@ -2026,9 +2026,9 @@ async function startGatewayProcess() {
                 token: lockedAuth.token
             });
             childEnv.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-            childEnv.CLAWAI_PATCH_PATH = patchPath;
+            childEnv.NEXORA_AGENT_PATCH_PATH = patchPath;
             childEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
-            childEnv.CLAWAI_RUNTIME_DIR = process.env.CLAWAI_RUNTIME_DIR || path.dirname(patchPath);
+            childEnv.NEXORA_AGENT_RUNTIME_DIR = process.env.NEXORA_AGENT_RUNTIME_DIR || path.dirname(patchPath);
             // 打包后依赖在 gateway-runtime/node_modules（不在 asar），显式注入便于解析
             try {
                 const runtimeNm = resolveAppFsPath('node_modules');
@@ -2036,7 +2036,7 @@ async function startGatewayProcess() {
                     childEnv.NODE_PATH = childEnv.NODE_PATH
                         ? `${runtimeNm}${path.delimiter}${childEnv.NODE_PATH}`
                         : runtimeNm;
-                    childEnv.CLAWAI_GATEWAY_RUNTIME = resolveAppFsRoot();
+                    childEnv.NEXORA_AGENT_GATEWAY_RUNTIME = resolveAppFsRoot();
                 }
             } catch (e) {}
 
@@ -2056,11 +2056,11 @@ async function startGatewayProcess() {
 
             console.log(`[TokenGuard] Fork gateway home=${lockedAuth.homePath} state=${lockedAuth.stateDir} token_len=${String(lockedAuth.token).length}`);
 
-            // 启动子进程运行ClawAI
+            // 启动子进程运行Nexora Agent
             gatewayProcess = fork(openclawEntry, ['gateway', 'run', '--force', '--allow-unconfigured'], forkOptions);
 
             mainWindow.webContents.send('gateway-status', 'running');
-            showNotification('ClawAI已成功启动', 'AI 本地ClawAI已在后台运行，开始监听 18789 端口。');
+            showNotification('Nexora Agent已成功启动', 'AI 本地Nexora Agent已在后台运行，开始监听 18789 端口。');
 
             let watchPort = 18789;
             try {
@@ -2138,7 +2138,7 @@ async function startGatewayProcess() {
                 if (mainWindow) {
                     mainWindow.webContents.send('gateway-status', 'stopped');
                     if (!wasIntentionallyStopped) {
-                        console.error(`[System] ClawAI核心进程意外退出，退出码: ${code}`);
+                        console.error(`[System] Nexora Agent核心进程意外退出，退出码: ${code}`);
                     }
                 }
             });
@@ -2146,7 +2146,7 @@ async function startGatewayProcess() {
         } catch (e) {
             if (mainWindow) {
                 mainWindow.webContents.send('gateway-status', 'stopped');
-                mainWindow.webContents.send('gateway-log', `[System] [ERROR] 无法找到内置ClawAI模块: ${e.message}\n`);
+                mainWindow.webContents.send('gateway-log', `[System] [ERROR] 无法找到内置Nexora Agent模块: ${e.message}\n`);
             }
         }
 }
@@ -2174,13 +2174,13 @@ ipcMain.on('open-sandbox-terminal', () => {
         `$env:Path = "${sandboxDir.replace(/\\/g, '\\\\')};" + $env:Path`,
         `Clear-Host`,
         `Write-Host "==========================================================" -ForegroundColor Green`,
-        `Write-Host "         ClawAI 绿色沙箱开发终端 (PowerShell)             " -ForegroundColor Green`,
+        `Write-Host "         Nexora Agent 绿色沙箱开发终端 (PowerShell)             " -ForegroundColor Green`,
         `Write-Host "==========================================================" -ForegroundColor Green`,
         `Write-Host "  * 内置 Node 运行时已成功注入环境变量 PATH 最前面。" -ForegroundColor Cyan`,
         `Write-Host "  * 您可以直接在此处执行以下命令：" -ForegroundColor Cyan`,
         `Write-Host "      - node -v            (查看内置沙箱 Node 版本)" -ForegroundColor White`,
         `Write-Host "      - npm -v             (查看内置沙箱 npm 版本)" -ForegroundColor White`,
-        `Write-Host "      - npx openclaw doctor (执行ClawAI CLI 诊断自检)" -ForegroundColor White`,
+        `Write-Host "      - npx openclaw doctor (执行Nexora Agent CLI 诊断自检)" -ForegroundColor White`,
         `Write-Host "==========================================================" -ForegroundColor Green`,
         `Write-Host ""`
     ].join('\r\n');
@@ -2203,7 +2203,7 @@ let ptyProcess = null;
 function resolveBuiltinTerminalCwd() {
     const candidates = [
         resolveAppFsPath('.node-sandbox'),
-        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ClawAI') : null,
+        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent') : null,
         CONFIG_DIR,
         process.env.USERPROFILE || process.env.HOME || null
     ].filter(Boolean);
@@ -2243,8 +2243,8 @@ ipcMain.handle('builtin-terminal-start', (event, lang) => {
         const isTw = lang === 'zh-TW';
 
         const bannerTitle = isEn
-            ? "         ClawAI Built-in Sandbox Terminal (node-pty)      "
-            : (isTw ? "         ClawAI 內置沙箱開發終端 (node-pty)               " : "         ClawAI 内置沙箱开发终端 (node-pty)               ");
+            ? "         Nexora Agent Built-in Sandbox Terminal (node-pty)      "
+            : (isTw ? "         Nexora Agent 內置沙箱開發終端 (node-pty)               " : "         Nexora Agent 内置沙箱开发终端 (node-pty)               ");
 
         const bannerCmds = isEn
             ? "  * You can execute the following commands directly here:"
@@ -2313,7 +2313,7 @@ ipcMain.handle('builtin-terminal-start', (event, lang) => {
             const initScript = [
                 `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
                 `$env:Path = "${String(sandboxDir).replace(/\\/g, '\\\\')};" + $env:Path`,
-                `Write-Host "ClawAI 外部沙箱终端（内置终端启动失败时的后备）" -ForegroundColor Yellow`
+                `Write-Host "Nexora Agent 外部沙箱终端（内置终端启动失败时的后备）" -ForegroundColor Yellow`
             ].join('\r\n');
             const encodedCmd = Buffer.from(initScript, 'utf16le').toString('base64');
             spawn('cmd.exe', ['/c', `start powershell -NoExit -ExecutionPolicy Bypass -EncodedCommand ${encodedCmd}`], {
@@ -2362,12 +2362,12 @@ function ensureOpenClawConfigInitialized() {
         if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
         if (!config.ui.assistant.avatar) {
             config.ui.assistant.avatar = '🤖';
-            config.ui.assistant.name = config.ui.assistant.name || 'ClawAI';
+            config.ui.assistant.name = config.ui.assistant.name || 'Nexora Agent';
             needsSave = true;
         }
         // 统一规范化 gateway.auth / controlUi / port（禁止 SecretRef/空值/随机令牌导致面板永登不上）
         {
-            const norm = normalizeGatewayAuthConfig(config, CLAWAI_DEFAULT_GATEWAY_TOKEN);
+            const norm = normalizeGatewayAuthConfig(config, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN);
             config = norm.config;
             if (norm.changed) {
                 needsSave = true;
@@ -2700,7 +2700,7 @@ ipcMain.handle('config-save', async (event, newConfig) => {
 
         // 保存时禁止把 gateway.auth 抹掉（否则下次启动又会变成 runtime token）
         try {
-            cleanConfig = normalizeGatewayAuthConfig(cleanConfig, CLAWAI_DEFAULT_GATEWAY_TOKEN).config;
+            cleanConfig = normalizeGatewayAuthConfig(cleanConfig, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN).config;
         } catch (e) {}
 
         // 保存时强制补齐压缩预留等安全默认，避免 Auto-compaction could not recover
@@ -2835,7 +2835,7 @@ ipcMain.handle('plugin-prompt-credentials', async (event, pluginId) => {
 // 清理微信登录态凭证实现彻底解绑
 ipcMain.handle('wechat-clear', async () => {
     try {
-        // 1. 如果ClawAI运行中，先停止以解除文件夹句柄锁
+        // 1. 如果Nexora Agent运行中，先停止以解除文件夹句柄锁
         stopGatewayProcess();
 
         // 2. 物理清除微信缓存目录 openclaw-weixin
@@ -3110,7 +3110,7 @@ function ensureWeixinDirectLoginScript() {
 
     // 打包遗漏时内嵌写出，避免再报「缺少 weixin-direct-login.mjs」
     const embedded = `/**
- * 直接调用 @tencent-weixin/openclaw-weixin 扫码登录 API（ClawAI 运行时自动落盘）
+ * 直接调用 @tencent-weixin/openclaw-weixin 扫码登录 API（Nexora Agent 运行时自动落盘）
  */
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -3205,12 +3205,12 @@ function startDirectWeixinChannelLogin(spec) {
         } catch (e) {}
     }
     if (!pluginRoot || !fs.existsSync(path.join(pluginRoot, 'dist', 'src', 'auth', 'login-qr.js'))) {
-        return { success: false, error: '未找到内置微信插件登录模块，请重装 ClawAI' };
+        return { success: false, error: '未找到内置微信插件登录模块，请重装 Nexora Agent' };
     }
 
     const scriptPath = ensureWeixinDirectLoginScript();
     if (!scriptPath || !fs.existsSync(scriptPath)) {
-        return { success: false, error: '缺少微信直连登录脚本，请更新/重装 ClawAI' };
+        return { success: false, error: '缺少微信直连登录脚本，请更新/重装 Nexora Agent' };
     }
 
     const nodeExePath = getAvailableNodePath() || process.execPath;
@@ -3439,7 +3439,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
     const cleanEnv = {
         ...process.env,
         NODE_TLS_REJECT_UNAUTHORIZED: '0',
-        CLAWAI_PATCH_PATH: patchPath
+        NEXORA_AGENT_PATCH_PATH: patchPath
     };
     for (const key of Object.keys(cleanEnv)) {
         if (key.toLowerCase().includes('proxy')) delete cleanEnv[key];
@@ -3451,7 +3451,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
             cleanEnv.NODE_PATH = cleanEnv.NODE_PATH
                 ? `${runtimeNm}${path.delimiter}${cleanEnv.NODE_PATH}`
                 : runtimeNm;
-            cleanEnv.CLAWAI_GATEWAY_RUNTIME = resolveAppFsRoot();
+            cleanEnv.NEXORA_AGENT_GATEWAY_RUNTIME = resolveAppFsRoot();
         }
     } catch (e) {}
     const forkOptions = {
@@ -3547,7 +3547,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
             if (wechatLoginProcess === sess.process) wechatLoginProcess = null;
             sess.process = null;
             emitChannelLoginFailed(sess,
-                `${sess.label}渠道当前无法登录（插件未正确加载）。请停止后再启动 ClawAI，然后重试扫码绑定。`);
+                `${sess.label}渠道当前无法登录（插件未正确加载）。请停止后再启动 Nexora Agent，然后重试扫码绑定。`);
             if (activeChannelLogin === sess) activeChannelLogin = null;
             return;
         }
@@ -4009,7 +4009,7 @@ ipcMain.handle('stats-get', async () => {
             process.env.OPENCLAW_STATE_DIR ? path.join(process.env.OPENCLAW_STATE_DIR, 'persistent_logs', 'real_tokens.json') : null,
             process.env.OPENCLAW_HOME ? path.join(process.env.OPENCLAW_HOME, '.openclaw', 'persistent_logs', 'real_tokens.json') : null,
             path.join(process.env.USERPROFILE || process.env.HOME || '', '.openclaw', 'persistent_logs', 'real_tokens.json'),
-            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ClawAI', '.openclaw', 'persistent_logs', 'real_tokens.json') : null
+            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent', '.openclaw', 'persistent_logs', 'real_tokens.json') : null
         ].filter((p, i, arr) => Boolean(p) && String(p).includes('real_tokens.json') && arr.indexOf(p) === i);
 
         let realTokensPath = null;
@@ -4117,7 +4117,7 @@ ipcMain.handle('stats-append', async (event, logEntry) => {
             process.env.OPENCLAW_STATE_DIR ? path.join(process.env.OPENCLAW_STATE_DIR, 'persistent_logs', 'real_tokens.json') : null,
             process.env.OPENCLAW_HOME ? path.join(process.env.OPENCLAW_HOME, '.openclaw', 'persistent_logs', 'real_tokens.json') : null,
             path.join(process.env.USERPROFILE || process.env.HOME || '', '.openclaw', 'persistent_logs', 'real_tokens.json'),
-            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ClawAI', '.openclaw', 'persistent_logs', 'real_tokens.json') : null
+            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent', '.openclaw', 'persistent_logs', 'real_tokens.json') : null
         ].filter((p, i, arr) => Boolean(p) && String(p).includes('real_tokens.json') && arr.indexOf(p) === i);
 
         let realTokensPath = null;
@@ -4165,7 +4165,7 @@ ipcMain.handle('stats-append', async (event, logEntry) => {
     }
 });
 
-// 获取本地最新的带 token 的ClawAI面板 URL（始终按当前 openclaw.json 组装，保证默认免密登入）
+// 获取本地最新的带 token 的Nexora Agent面板 URL（始终按当前 openclaw.json 组装，保证默认免密登入）
 ipcMain.handle('get-dashboard-url', async () => {
     return rememberDashboardUrl(global.latestAcpDashboardUrl || buildGatewayDashboardUrl());
 });
@@ -4173,7 +4173,7 @@ ipcMain.handle('get-dashboard-url', async () => {
 // 清除内置 Control UI webview 的持久化会话（过期 token / 限流后重建）
 ipcMain.handle('clear-openclaw-panel-session', async () => {
     try {
-        const ses = session.fromPartition('persist:clawai-openclaw-panel');
+        const ses = session.fromPartition('persist:nexora-agent-openclaw-panel');
         await ses.clearStorageData({
             storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers', 'cachestorage']
         });
@@ -4210,7 +4210,7 @@ ipcMain.handle('get-app-start-time', () => {
 });
 
 // ─── 软件更新：多通道探测 (直连 GitHub API → 镜像代理 → 页面重定向解析) ───
-const UPDATE_REPO = '2014-y/ClawAI';
+const UPDATE_REPO = '2014-y/Nexora-Agent';
 const UPDATE_RELEASES_PAGE = `https://github.com/${UPDATE_REPO}/releases`;
 const UPDATE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -4401,7 +4401,7 @@ ipcMain.handle('check-update', async (event, isManual) => {
             if (!downloadUrl) downloadUrl = data.html_url || UPDATE_RELEASES_PAGE;
         } else {
             releaseNotes = '已通过镜像通道确认版本号，但未能拉取完整更新日志。可继续尝试应用内升级，或前往 Releases 页面手动下载。';
-            fileName = `ClawAI.Setup.${latestVersion}.exe`;
+            fileName = `Nexora Agent.Setup.${latestVersion}.exe`;
             const tag = redirectTag || `v${latestVersion}`;
             downloadUrl = `https://github.com/${UPDATE_REPO}/releases/download/${tag}/${fileName}`;
         }
@@ -4458,7 +4458,7 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
     pushUnique(downloadUrl);
 
     const tempDir = app.getPath('temp');
-    const savePath = path.join(tempDir, fileName || 'ClawAI-Setup-Latest.exe');
+    const savePath = path.join(tempDir, fileName || 'NexoraAgent-Setup-Latest.exe');
 
     const downloadOnce = (url) => new Promise((resolve, reject) => {
         let receivedBytes = 0;
@@ -4492,7 +4492,7 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
                 hostname: parsed.hostname,
                 port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
                 path: parsed.pathname + parsed.search,
-                headers: { 'User-Agent': 'ClawAI-Updater' },
+                headers: { 'User-Agent': 'NexoraAgent-Updater' },
                 timeout: 30000,
                 rejectUnauthorized: false
             }, (res) => {
@@ -4562,7 +4562,7 @@ ipcMain.handle('install-update', async (event, savePath) => {
     }
 });
 
-// 4. 内置ClawAI核心包更新（openclaw npm 包热更新）
+// 4. 内置Nexora Agent核心包更新（openclaw npm 包热更新）
 ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
     const { execFile } = require('child_process');
     const path = require('path');
@@ -4642,8 +4642,8 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
             log('兼容性检查跳过: ' + e.message);
         }
 
-        // 3) 停止ClawAI（同时释放 node.exe 文件句柄，便于随后替换）
-        log('正在停止ClawAI...');
+        // 3) 停止Nexora Agent（同时释放 node.exe 文件句柄，便于随后替换）
+        log('正在停止Nexora Agent...');
         stopGatewayProcess();
         gatewayProcess = null;
         await new Promise(r => setTimeout(r, 1500));
@@ -4721,8 +4721,8 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
             log('锁定 package.json 版本失败（非致命）: ' + e.message);
         }
 
-        // 7) 自动重启ClawAI（直接在主进程内拉起并校验，避免 IPC 往返 + 端口/文件句柄未释放导致的重启失败）
-        log('正在重启ClawAI...');
+        // 7) 自动重启Nexora Agent（直接在主进程内拉起并校验，避免 IPC 往返 + 端口/文件句柄未释放导致的重启失败）
+        log('正在重启Nexora Agent...');
 
         // 确保上一实例已被彻底回收：Windows 释放 18789 端口与 node_modules 文件句柄需要更充裕的时间
         gatewayProcess = null;
@@ -4736,19 +4736,19 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
             } catch (e) {
                 log(`启动尝试 ${attempt}/${maxAttempts} 异常: ${e.message}`);
             }
-            // 等待ClawAI进程真正就绪（若入口缺失或崩溃，exit 回调会把 gatewayProcess 复位为 null）
+            // 等待Nexora Agent进程真正就绪（若入口缺失或崩溃，exit 回调会把 gatewayProcess 复位为 null）
             await new Promise(r => setTimeout(r, 2500));
             if (gatewayProcess) { restarted = true; break; }
             if (attempt < maxAttempts) {
-                log(`ClawAI尚未就绪，正在重试 (${attempt}/${maxAttempts})...`);
+                log(`Nexora Agent尚未就绪，正在重试 (${attempt}/${maxAttempts})...`);
                 await new Promise(r => setTimeout(r, 1500));
             }
         }
 
         if (restarted) {
-            log('ClawAI已重启成功');
+            log('Nexora Agent已重启成功');
         } else {
-            log('ClawAI自动重启失败，请手动点击右侧「启动ClawAI」按钮');
+            log('Nexora Agent自动重启失败，请手动点击右侧「启动Nexora Agent」按钮');
             // 兜底：再通过渲染层触发一次，双保险
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('gateway-control-trigger', 'start');
@@ -4760,8 +4760,8 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
             installedVersion,
             restarted,
             message: restarted
-                ? `ClawAI核心已成功更新到 openclaw@${installedVersion}，ClawAI已重启完成。`
-                : `ClawAI核心已更新到 openclaw@${installedVersion}，但自动重启失败，请手动点击「启动ClawAI」。`
+                ? `Nexora Agent核心已成功更新到 openclaw@${installedVersion}，Nexora Agent已重启完成。`
+                : `Nexora Agent核心已更新到 openclaw@${installedVersion}，但自动重启失败，请手动点击「启动Nexora Agent」。`
         };
 
     } catch (err) {
@@ -4775,11 +4775,11 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
 
 // 初始化应用
 app.whenReady().then(async () => {
-    // 家目录矫正：优先真实用户目录；不可写时改走 AppData\ClawAI，禁止落到裸 Temp
+    // 家目录矫正：优先真实用户目录；不可写时改走 AppData\NexoraAgent，禁止落到裸 Temp
     try {
         // 保留改写前的真实用户目录，供鉴权双目录同步 / 排障
-        if (!process.env.CLAWAI_ORIGINAL_USERPROFILE) {
-            process.env.CLAWAI_ORIGINAL_USERPROFILE =
+        if (!process.env.NEXORA_AGENT_ORIGINAL_USERPROFILE) {
+            process.env.NEXORA_AGENT_ORIGINAL_USERPROFILE =
                 process.env.USERPROFILE || process.env.HOME || app.getPath('home') || '';
         }
         let preferredHome = app.getPath('home');
@@ -4831,7 +4831,7 @@ app.whenReady().then(async () => {
                 code: 'TEMP_HOME',
                 title: '数据目录落在临时文件夹',
                 message: `检测到数据目录位于临时路径：\n${homePath}`,
-                actions: ['将 ClawAI 加入受控文件夹访问排除项', '重启 ClawAI']
+                actions: ['将 Nexora Agent 加入受控文件夹访问排除项', '重启 Nexora Agent']
             }, homePath));
         }
     } catch (err) {
@@ -4869,7 +4869,7 @@ app.whenReady().then(async () => {
         try {
             dialog.showErrorBox(
                 'OpenClaw 运行时未就绪',
-                `无法解压或定位网关运行时。\n\n${err && err.message ? err.message : err}\n\n请重新安装 ClawAI，或联系支持。`
+                `无法解压或定位网关运行时。\n\n${err && err.message ? err.message : err}\n\n请重新安装 Nexora Agent，或联系支持。`
             );
         } catch (e) {}
     } finally {

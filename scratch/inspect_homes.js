@@ -5,9 +5,9 @@ const { execFileSync } = require('child_process');
 
 const candidates = [
   path.join(process.env.USERPROFILE || '', '.openclaw'),
-  path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw'),
-  path.join(process.env.APPDATA || '', 'ClawAI', '.openclaw'),
-  path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'ClawAI', '.openclaw')
+  path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw'),
+  path.join(process.env.APPDATA || '', 'NexoraAgent', '.openclaw'),
+  path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'NexoraAgent', '.openclaw')
 ];
 
 function canParse(p) {
@@ -65,7 +65,7 @@ $ErrorActionPreference='SilentlyContinue'
 try {
   $procs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
     Where-Object {
-      $_.ExecutablePath -like '*ClawAI*' -or
+      $_.ExecutablePath -like '*Nexora Agent*' -or
       $_.CommandLine -like '*openclaw*' -or
       $_.ExecutablePath -like '*.node-sandbox*'
     }

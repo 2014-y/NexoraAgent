@@ -50,10 +50,10 @@ function isPluginPathStaleOnThisMachine(pluginPath, ctx = {}) {
     if (appRoot) allowedRoots.push(appRoot);
     const pf = process.env.ProgramFiles || 'C:\\Program Files';
     const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
-    allowedRoots.push(path.join(pf, 'ClawAI'));
-    allowedRoots.push(path.join(pf86, 'ClawAI'));
+    allowedRoots.push(path.join(pf, 'Nexora Agent'));
+    allowedRoots.push(path.join(pf86, 'Nexora Agent'));
     // Program Files 通用软件目录下的 resources\app
-    allowedRoots.push(path.join(pf, 'ClawAI', 'resources', 'app'));
+    allowedRoots.push(path.join(pf, 'Nexora Agent', 'resources', 'app'));
 
     if (allowedRoots.some((root) => underRoot(p, root))) return false;
 

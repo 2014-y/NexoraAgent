@@ -43,7 +43,7 @@ function parseConfig(cf) {
 (async () => {
   const homes = [
     ['user_home', path.join(process.env.USERPROFILE || '', '.openclaw')],
-    ['local_clawai', path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw')]
+    ['local_nexora-agent', path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw')]
   ];
   for (const [name, dir] of homes) {
     const cf = path.join(dir, 'openclaw.json');
@@ -66,7 +66,7 @@ $ErrorActionPreference='SilentlyContinue'
 try {
   $all = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'"
   $hit = $all | Where-Object {
-    $_.ExecutablePath -like '*ClawAI*' -or
+    $_.ExecutablePath -like '*Nexora Agent*' -or
     $_.ExecutablePath -like '*.node-sandbox*' -or
     $_.CommandLine -like '*openclaw*' -or
     $_.CommandLine -like '*gateway*'
@@ -77,7 +77,7 @@ try {
     $cmd = [string]$p.CommandLine
     $kind = 'other'
     if ($exe -like '*.node-sandbox*') { $kind = 'sandbox' }
-    elseif ($exe -like '*ClawAI*') { $kind = 'clawai' }
+    elseif ($exe -like '*Nexora Agent*') { $kind = 'nexora-agent' }
     elseif ($cmd -like '*openclaw*') { $kind = 'openclaw_cli_or_global' }
     'KIND=' + $kind
     'PID=' + $p.ProcessId

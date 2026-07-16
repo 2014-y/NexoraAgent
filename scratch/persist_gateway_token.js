@@ -4,7 +4,7 @@ const path = require('path');
 const DEFAULT_TOKEN = 'openclaw-dev-token-998877';
 const targets = [
   path.join(process.env.USERPROFILE || '', '.openclaw', 'openclaw.json'),
-  path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw', 'openclaw.json')
+  path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw', 'openclaw.json')
 ];
 
 for (const cf of targets) {

@@ -94,7 +94,7 @@ assert(
   );
 }
 
-// --- RDP alone must NOT force AppData\ClawAI ---
+// --- RDP alone must NOT force AppData\Nexora Agent ---
 {
   const rdp = {
     USERPROFILE: 'C:\\Users\\NewPC',
@@ -122,7 +122,7 @@ assert(
 
 // --- sync auth across dirs ---
 {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clawai-auth-sync-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexora-agent-auth-sync-'));
   const d1 = path.join(root, 'a', '.openclaw');
   const d2 = path.join(root, 'b', '.openclaw');
   fs.mkdirSync(d1, { recursive: true });

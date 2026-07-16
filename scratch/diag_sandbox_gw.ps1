@@ -3,7 +3,7 @@ try {
     Write-Output '---procs---'
     $procs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.ExecutablePath -like '*ClawAI*' -or
+            $_.ExecutablePath -like '*Nexora Agent*' -or
             $_.CommandLine -like '*openclaw*' -or
             $_.ExecutablePath -like '*.node-sandbox*'
         }

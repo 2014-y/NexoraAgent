@@ -5,7 +5,7 @@ const net = require('net');
 
 const homes = [
   path.join(process.env.USERPROFILE || '', '.openclaw'),
-  path.join(process.env.LOCALAPPDATA || '', 'ClawAI', '.openclaw')
+  path.join(process.env.LOCALAPPDATA || '', 'NexoraAgent', '.openclaw')
 ];
 
 function redactToken(t) {

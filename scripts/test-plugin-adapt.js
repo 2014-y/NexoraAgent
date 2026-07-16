@@ -31,15 +31,15 @@ assert(
   'same-user path ok'
 );
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clawai-adapt-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nexora-agent-adapt-'));
 const realFile = path.join(tmp, 'keep-me');
 fs.writeFileSync(realFile, '1');
 
 assert(
-  isPluginPathStaleOnThisMachine('C:\\Users\\OtherDev\\Desktop\\ClawAI\\node_modules\\@openclaw\\feishu', {
+  isPluginPathStaleOnThisMachine('C:\\Users\\OtherDev\\Desktop\\Nexora Agent\\node_modules\\@openclaw\\feishu', {
     userProfile: 'C:\\Users\\admin',
-    configDir: 'C:\\Users\\admin\\AppData\\Local\\ClawAI\\.openclaw',
-    appRoot: 'C:\\Program Files\\ClawAI\\resources\\app',
+    configDir: 'C:\\Users\\admin\\AppData\\Local\\NexoraAgent\\.openclaw',
+    appRoot: 'C:\\Program Files\\Nexora Agent\\resources\\app',
     isForeignUserPath
   }) === true,
   'other user desktop path is stale'
@@ -69,7 +69,7 @@ const cfg = {
   plugins: {
     load: {
       paths: [
-        'C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\feishu',
+        'C:\\Users\\Yuan\\Desktop\\NexoraAgent\\NexoraAgent\\node_modules\\@openclaw\\feishu',
         'C:\\Users\\Yuan\\Desktop\\old\\openclaw-weixin',
         realFile
       ]

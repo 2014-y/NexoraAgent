@@ -19,7 +19,7 @@ assert.strictEqual(shouldUpdateSessionKey('agent:main:main'), true);
 assert.strictEqual(shouldUpdateSessionKey('agent:main:dashboard:abc'), true);
 assert.strictEqual(shouldUpdateSessionKey('agent:main:openclaw-weixin:x'), false);
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clawai-model-sync-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nexora-agent-model-sync-'));
 const stateA = path.join(tmp, 'a', '.openclaw');
 const stateB = path.join(tmp, 'b', '.openclaw');
 fs.mkdirSync(path.join(stateA, 'agents', 'main', 'sessions'), { recursive: true });

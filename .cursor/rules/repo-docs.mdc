@@ -1,0 +1,25 @@
+---
+description: 用户说「文档」默认指仓库文档，按小白可读标准维护
+alwaysApply: true
+---
+
+# 仓库文档约定
+
+当用户说「文档」「更新文档」「重构文档」时，默认指**仓库文档**，不是应用内文案、SOUL/IDENTITY 模板、或插件 skill 说明（除非用户明确点名那些）。
+
+## 仓库文档范围（保持精简，勿再堆平行重复页）
+
+- `README.md` — 项目首页入口
+- `docs/getting-started.md` — 新手主教程
+- `docs/install-guide.md` — 安装、排错、开发打包（含原 INSTALL 内容）
+- `docs/wechat-guide.md` — 微信/渠道接入
+- `CHANGELOG.md` — 版本变更记录（可选维护）
+
+不要再单独维护根目录 `INSTALL.md`；开发说明统一写在 `docs/install-guide.md` 第 7 节。
+
+## 写作要求
+
+- 面向小白：少术语、多表格、分步骤、先界面后命令行
+- 普通用户路径优先：安装包 → 启动绿灯 → 填 API Key → 通讯管理扫码
+- 品牌名使用 **Nexora Agent**；勿再写 ClawAI
+- 保持文档互相链接，避免同一套流程在多处说法冲突

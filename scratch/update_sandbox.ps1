@@ -1,4 +1,4 @@
-$scriptDir = "c:\Users\Yuan\Desktop\ClawAI\ClawAI"
+$scriptDir = Split-Path -Parent $PSScriptRoot
 $sandboxDir = Join-Path $scriptDir ".node-sandbox"
 $tempZip = Join-Path $scriptDir "node-v24.15.0.zip"
 $tempExtract = Join-Path $scriptDir "node-v24.15.0-temp"

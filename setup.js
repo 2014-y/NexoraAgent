@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ClawAI Setup Script
+ * Nexora Agent Setup Script
  * Run: npm run setup
  */
 
@@ -8,7 +8,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-console.log("\nClawAI Setup\n");
+console.log("\nNexora Agent Setup\n");
 
 // Check Node.js version
 const nodeVersion = process.version;

@@ -72,7 +72,7 @@ $ErrorActionPreference='SilentlyContinue'
 try {
   $procs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
     Where-Object {
-      $_.ExecutablePath -like '*ClawAI*' -or
+      $_.ExecutablePath -like '*Nexora Agent*' -or
       $_.CommandLine -like '*openclaw*' -or
       $_.ExecutablePath -like '*.node-sandbox*'
     }

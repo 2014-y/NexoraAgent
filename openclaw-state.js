@@ -121,16 +121,16 @@ function resolveLockedOpenClawHome(env = process.env, opts = {}) {
 
     const cloudish = detectCloudishEnv(env);
     if (cloudish) {
-        if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'ClawAI'));
-        if (env.APPDATA) push(path.join(env.APPDATA, 'ClawAI'));
-        try { if (fs.existsSync('D:\\')) push('D:\\ClawAI-data'); } catch (e) {}
-        try { if (fs.existsSync('E:\\')) push('E:\\ClawAI-data'); } catch (e) {}
+        if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'NexoraAgent'));
+        if (env.APPDATA) push(path.join(env.APPDATA, 'NexoraAgent'));
+        try { if (fs.existsSync('D:\\')) push('D:\\NexoraAgent-data'); } catch (e) {}
+        try { if (fs.existsSync('E:\\')) push('E:\\NexoraAgent-data'); } catch (e) {}
         try {
             const exeDir = path.dirname(process.execPath || '');
             if (exeDir && !exeDir.toLowerCase().includes('system32')) push(path.join(exeDir, 'data'));
         } catch (e) {}
-        if (env.ProgramData && env.USERNAME) push(path.join(env.ProgramData, 'ClawAI', String(env.USERNAME)));
-        push(path.join('C:\\Users\\Public', 'ClawAI', String(env.USERNAME || 'user')));
+        if (env.ProgramData && env.USERNAME) push(path.join(env.ProgramData, 'NexoraAgent', String(env.USERNAME)));
+        push(path.join('C:\\Users\\Public', 'NexoraAgent', String(env.USERNAME || 'user')));
         push(env.REAL_USER_HOME);
         push(env.USERPROFILE);
         push(env.HOME);
@@ -140,20 +140,20 @@ function resolveLockedOpenClawHome(env = process.env, opts = {}) {
         push(env.USERPROFILE);
         push(env.HOME);
         try { push(originalHomedir()); } catch (e) {}
-        if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'ClawAI'));
-        if (env.APPDATA) push(path.join(env.APPDATA, 'ClawAI'));
-        try { if (fs.existsSync('D:\\')) push('D:\\ClawAI-data'); } catch (e) {}
+        if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'NexoraAgent'));
+        if (env.APPDATA) push(path.join(env.APPDATA, 'NexoraAgent'));
+        try { if (fs.existsSync('D:\\')) push('D:\\NexoraAgent-data'); } catch (e) {}
         try {
             const exeDir = path.dirname(process.execPath || '');
             if (exeDir && !exeDir.toLowerCase().includes('system32')) push(path.join(exeDir, 'data'));
         } catch (e) {}
-        if (env.ProgramData && env.USERNAME) push(path.join(env.ProgramData, 'ClawAI', String(env.USERNAME)));
-        push(path.join('C:\\Users\\Public', 'ClawAI', String(env.USERNAME || 'user')));
+        if (env.ProgramData && env.USERNAME) push(path.join(env.ProgramData, 'NexoraAgent', String(env.USERNAME)));
+        push(path.join('C:\\Users\\Public', 'NexoraAgent', String(env.USERNAME || 'user')));
     }
-    push(path.join(os.tmpdir(), 'ClawAI-home'));
+    push(path.join(os.tmpdir(), 'NexoraAgent-home'));
 
     for (const c of candidates) {
-        if (isTempLikePath(c) && !String(c).toLowerCase().includes('clawai-home')) continue;
+        if (isTempLikePath(c) && !String(c).toLowerCase().includes('nexoraagent-home')) continue;
         if (canWrite(c)) return c;
     }
     for (const c of candidates) {
@@ -175,10 +175,10 @@ function listKnownOpenClawStateDirs(env = process.env, primaryStateDir = null) {
     if (env.OPENCLAW_HOME) push(path.join(env.OPENCLAW_HOME, '.openclaw'));
     if (env.REAL_USER_HOME) push(path.join(env.REAL_USER_HOME, '.openclaw'));
     // 未改写前的真实用户目录（fork 前主进程仍可读）
-    const rawProfile = env.CLAWAI_ORIGINAL_USERPROFILE || '';
+    const rawProfile = env.NEXORA_AGENT_ORIGINAL_USERPROFILE || '';
     if (rawProfile) push(path.join(rawProfile, '.openclaw'));
-    if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'ClawAI', '.openclaw'));
-    if (env.APPDATA) push(path.join(env.APPDATA, 'ClawAI', '.openclaw'));
+    if (env.LOCALAPPDATA) push(path.join(env.LOCALAPPDATA, 'NexoraAgent', '.openclaw'));
+    if (env.APPDATA) push(path.join(env.APPDATA, 'NexoraAgent', '.openclaw'));
     return dirs;
 }
 

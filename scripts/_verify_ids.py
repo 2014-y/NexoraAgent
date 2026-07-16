@@ -1,7 +1,7 @@
 ﻿import re
 from pathlib import Path
-SRC = Path(r"C:\Users\Yuan\Desktop\ClawAI\ClawAI")
-DST = Path(r"C:\Program Files\ClawAI\resources\app")
+SRC = Path(__file__).resolve().parent.parent
+DST = Path(r"C:\Program Files\Nexora Agent\resources\app")
 for label, p in [("SRC", SRC), ("DST", DST)]:
     h = (p / "index.html").read_text(encoding="utf-8", errors="replace")
     j = (p / "renderer.js").read_text(encoding="utf-8", errors="replace")

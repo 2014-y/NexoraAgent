@@ -52,17 +52,17 @@ const extreme = buildExtremeFallbacks(
   { installDir: 'C:\\Program Files\\ai-assistant' }
 );
 assert(extreme.some((p) => p.toLowerCase().includes('\\program files\\ai-assistant\\data')), 'portable install data candidate');
-assert(extreme.some((p) => p.toLowerCase().includes('\\programdata\\clawai\\admin')), 'programdata candidate');
-assert(extreme.some((p) => p.toLowerCase().includes('\\users\\public\\clawai\\admin')), 'public candidate');
+assert(extreme.some((p) => p.toLowerCase().includes('\\programdata\\nexoraagent\\admin')), 'programdata candidate');
+assert(extreme.some((p) => p.toLowerCase().includes('\\users\\public\\nexoraagent\\admin')), 'public candidate');
 
 const probe = (base) => {
   const n = String(base).toLowerCase().replace(/\//g, '\\');
   if (n.includes('blocked')) return false;
-  if (n.includes('\\appdata\\local\\clawai')) return false; // 模拟 AppData 也被锁
-  if (n.includes('\\appdata\\roaming\\clawai')) return false;
-  if (isTempLikePath(base) && !n.includes('clawai-home')) return false;
+  if (n.includes('\\appdata\\local\\nexoraagent')) return false; // 模拟 AppData 也被锁
+  if (n.includes('\\appdata\\roaming\\nexoraagent')) return false;
+  if (isTempLikePath(base) && !n.includes('nexoraagent-home')) return false;
   // 极端：只有 ProgramData 可写
-  return n.includes('\\programdata\\clawai\\admin');
+  return n.includes('\\programdata\\nexoraagent\\admin');
 };
 
 const locked = resolveStableOpenClawHome('C:\\Users\\admin\\blocked-home', {
@@ -85,12 +85,12 @@ const locked = resolveStableOpenClawHome('C:\\Users\\admin\\blocked-home', {
   probe
 });
 assert(
-  String(locked.homePath).toLowerCase().replace(/\//g, '\\') === 'c:\\programdata\\clawai\\admin',
+  String(locked.homePath).toLowerCase().replace(/\//g, '\\') === 'c:\\programdata\\nexoraagent\\admin',
   `extreme fallback to ProgramData, got ${locked.homePath}`
 );
 assert(locked.health && locked.health.level === 'degraded', 'extreme fallback marked degraded');
 
-const critical = assessStorageHealth('C:\\Users\\admin\\AppData\\Local\\Temp\\1\\ClawAI-home', {
+const critical = assessStorageHealth('C:\\Users\\admin\\AppData\\Local\\Temp\\1\\NexoraAgent-home', {
   probe: () => true
 });
 assert(critical.level === 'critical', 'temp home is critical');
@@ -101,14 +101,14 @@ const homePc = resolveStableOpenClawHome('C:\\Users\\Yuan', {
   tmpdir: 'C:\\Users\\Yuan\\AppData\\Local\\Temp',
   probe: (base) => {
     const n = String(base).toLowerCase().replace(/\//g, '\\');
-    return n === 'c:\\users\\yuan' || n.includes('\\clawai');
+    return n === 'c:\\users\\yuan' || n.includes('\\nexoraagent');
   }
 });
 assert(path.resolve(homePc.homePath) === path.resolve('C:\\Users\\Yuan'), 'home PC keeps real home');
 assert(homePc.health.level === 'ok', 'home PC health ok');
 
 const envBag = {};
-applyOpenClawHomeEnv('C:\\Users\\admin\\AppData\\Local\\ClawAI', envBag);
+applyOpenClawHomeEnv('C:\\Users\\admin\\AppData\\Local\\Nexora Agent', envBag);
 assert(envBag.OPENCLAW_HOME && envBag.OPENCLAW_STATE_DIR, 'OPENCLAW env applied');
 
 console.log(`\nALL ${passed} TESTS PASSED`);

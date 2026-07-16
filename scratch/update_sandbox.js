@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const scriptDir = "c:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI";
+const scriptDir = path.resolve(__dirname, '..');
 const sandboxDir = path.join(scriptDir, ".node-sandbox");
 const tempZip = path.join(scriptDir, "node-v24.15.0.zip");
 const tempExtract = path.join(scriptDir, "node-v24.15.0-temp");
