@@ -2489,10 +2489,18 @@ textarea.acc-input {
 .status-indicator-dot.stopped { background: #ff5252; box-shadow: 0 0 8px #ff5252; }
 .status-indicator-dot.running { background: #4caf50; box-shadow: 0 0 8px #4caf50; }
 
-.dashboard-channels-section, .dashboard-activity-section {
+.dashboard-channels-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.dashboard-activity-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0; /* 关键：允许被 flex 父容器限高，内部 stream 才能产生滚动条 */
 }
 
 .dash-section-title {
@@ -2544,12 +2552,12 @@ textarea.acc-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  padding: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 12px 0;
   flex: 1;
-  min-height: 0; /* 允许高度收缩，在内部产生滚动条，避免顶破外层高度 */
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -2566,8 +2574,24 @@ textarea.acc-input {
   line-height: 1.7;
   padding: 6px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-  animation: logFadeIn 0.22s ease-out forwards;
+  position: relative;
 }
+
+/* 打字机闪烁光标 */
+.activity-log-line.typing::after {
+  content: '▌';
+  color: var(--accent-color, #ff9800);
+  animation: blink-cursor 0.5s steps(2) infinite;
+  font-size: 14px;
+  margin-left: 1px;
+  vertical-align: baseline;
+}
+
+@keyframes blink-cursor {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .activity-log-line:last-child {
   border-bottom: none;
 }
@@ -3468,8 +3492,14 @@ input:focus, select:focus, textarea:focus {
 .sidebar.collapsed .status-badge-container {
   background: transparent !important;
   border: none !important;
+  box-shadow: none !important;
   padding: 10px 0 !important;
   justify-content: center !important;
+}
+
+.sidebar.collapsed .status-light-btn-container {
+  background: transparent !important;
+  border: none !important;
 }
 
 .sidebar.collapsed .status-text-zone,

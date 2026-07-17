@@ -1136,7 +1136,7 @@ const qrcodeCloseBtn = document.getElementById('qrcode-close-btn');
 // 侧边栏微型负载趋势图表
 let sidebarChartCanvas = null;
 let sidebarChartCtx = null;
-let sidebarChartData = Array(15).fill(0);
+let sidebarChartData = Array.from({ length: 15 }, () => Math.floor(Math.random() * (125 - 105) + 105));
 
 function initSidebarChart() {
     sidebarChartCanvas = document.getElementById('sidebar-mini-canvas');
@@ -1940,6 +1940,12 @@ async function init() {
                 setTimeout(() => {
                     sidebar.classList.remove('no-transition');
                 }, 50);
+                // 侧边栏展开/收起后 canvas 尺寸变化，需重新初始化图表
+                if (!collapsed) {
+                    setTimeout(() => {
+                        initSidebarChart();
+                    }, 350);
+                }
             });
         }
     }
@@ -2056,7 +2062,7 @@ function formatLogForUser(text) {
     }
 
     // 端口绑定就绪
-    if (cleanLine.includes('HTTP server listening') || cleanLine.includes('HTTP 本地服务已监听') || cleanLine.includes('[gateway] ready') || cleanLine.includes('gateway] ready')) {
+    if (cleanLine.includes('HTTP server listening') || cleanLine.includes('HTTP 本地服务已监听') || cleanLine.includes('[gateway] ready') || cleanLine.includes('gateway] ready') || cleanLine.includes('Fork gateway')) {
         return `[⚙️ 系统核心] 网关本地服务接口就绪，正在监听内部端口`;
     }
 
@@ -2066,7 +2072,7 @@ function formatLogForUser(text) {
     }
 
     // 核心业务件装配就绪
-    if (cleanLine.includes('Runtime initialized') || cleanLine.includes('core server listening') || cleanLine.includes('核心业务件装配完毕') || cleanLine.includes('全部引擎启动就绪')) {
+    if (cleanLine.includes('Runtime initialized') || cleanLine.includes('core server listening') || cleanLine.includes('核心业务件装配完毕') || cleanLine.includes('全部引擎启动就绪') || cleanLine.includes('harden: soft=') || cleanLine.includes('harden:')) {
         return `[⚙️ 系统核心] 所有核心业务组件装配完毕，核心服务已就绪！`;
     }
 
@@ -2212,20 +2218,12 @@ function setupIpcListeners() {
             }
         }
 
-        // 将所有原生日志进行过滤并大白话汉化转换展示
+        // 将原始日志直接写入设置页的系统运行日志面板（不过滤，展示真实原生输出）
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
-            const rawLines = text.split('\n');
-            const processedLines = [];
-            rawLines.forEach(line => {
-                const formatted = formatLogForUser(line);
-                if (formatted) {
-                    const datePrefix = `[${new Date().toLocaleTimeString()}] `;
-                    processedLines.push(datePrefix + formatted);
-                }
-            });
-            if (processedLines.length > 0) {
-                systemLogsArea.value += processedLines.join('\n') + '\n';
+            const trimmed = text.trim();
+            if (trimmed) {
+                systemLogsArea.value += trimmed + '\n';
                 // 限制最大行数防止内存泄漏 (限制在 5000 行)
                 const lines = systemLogsArea.value.split('\n');
                 if (lines.length > 5000) {
@@ -2416,8 +2414,8 @@ function setupIpcListeners() {
                     .replace(/\[💓 健康监测\]/g, '<span style="color: #ffd54f; font-weight: bold; margin-right: 4px;">💓 [健康监测]</span>')
                     .replace(/\[📊 对话账单\]/g, '<span style="color: #81c784; font-weight: bold; margin-right: 4px;">📊 [对话账单]</span>');
 
-                const styledTime = `<span style="color: #6a6f8a; font-family: var(--font-mono); opacity: 0.55; margin-right: 8px;">${displayTime}</span>`;
-                processedLines.push(styledTime + coloredText);
+                const styledTime = `<span style="color: #6a6f8a; font-family: var(--font-mono); opacity: 0.45; font-size: 11px; margin-left: 12px; white-space: nowrap;">${displayTime}</span>`;
+                processedLines.push(coloredText + styledTime);
             }
         });
 
@@ -2514,26 +2512,43 @@ function setupIpcListeners() {
                         emptyTips.remove();
                     }
                     
-                    // 智能吸附：判定新追加前用户是否已经停留在底部附近（容差放宽至80px，支持更好吸附）
-                    const isAtBottom = streamList.scrollHeight - streamList.scrollTop - streamList.clientHeight < 80;
-                    
                     const item = document.createElement('div');
-                    item.className = 'activity-log-line';
+                    item.className = 'activity-log-line typing';
                     item.innerHTML = lineHtml;
                     streamList.appendChild(item);
                     
-                    // 最多保留最近 150 条以支持向上翻阅大量历史，不爆内存
+                    // 最多保留最近 150 条
                     while (streamList.children.length > 150) {
                         streamList.removeChild(streamList.firstChild);
                     }
                     
-                    // 只有当用户本来就停留在底部时，才自动滚至最新。
-                    // 使用 setTimeout 延迟到下一帧，保障 DOM 渲染计算后的 scrollHeight 物理高度是最新的
-                    if (isAtBottom) {
-                        setTimeout(() => {
-                            streamList.scrollTop = streamList.scrollHeight;
-                        }, 0);
-                    }
+                    // 打字机动画：用 clip-path 从左到右逐步揭开内容
+                    const temp = document.createElement('span');
+                    temp.innerHTML = lineHtml;
+                    const textLen = (temp.textContent || '').length;
+                    const totalSteps = Math.min(textLen, 50);
+                    let step = 0;
+                    item.style.clipPath = 'inset(0 100% 0 0)';
+                    
+                    const typeTimer = setInterval(() => {
+                        step++;
+                        const pct = Math.min(100, (step / totalSteps) * 100);
+                        item.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+                        
+                        // 每步都滚到底部
+                        streamList.scrollTop = streamList.scrollHeight;
+                        
+                        if (step >= totalSteps) {
+                            clearInterval(typeTimer);
+                            item.style.clipPath = 'none';
+                            item.classList.remove('typing');
+                        }
+                    }, 12);
+                    
+                    // 无条件自动滚到最底部
+                    requestAnimationFrame(() => {
+                        streamList.scrollTop = streamList.scrollHeight;
+                    });
                 }
             }
         });
@@ -8723,25 +8738,8 @@ async function loadAndRenderSystemLogs() {
     try {
         const result = await window.api.readSystemLogs();
         if (result.success) {
-            const rawLines = result.content.split('\n');
-            const processedLines = [];
-            rawLines.forEach(line => {
-                const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s(.*)$/i) || line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s(.*)$/i);
-                if (timeMatch) {
-                    const timePrefix = timeMatch[1];
-                    const content = timeMatch[2];
-                    const formatted = formatLogForUser(content);
-                    if (formatted) {
-                        processedLines.push(`[${timePrefix}] ${formatted}`);
-                    }
-                } else {
-                    const formatted = formatLogForUser(line);
-                    if (formatted) {
-                        processedLines.push(formatted);
-                    }
-                }
-            });
-            systemLogsArea.value = processedLines.join('\n') + (processedLines.length > 0 ? '\n' : '');
+            // 直接展示原始日志内容，不做过滤
+            systemLogsArea.value = result.content;
             // 延迟微调滚动，确保 DOM 已经完全完成渲染后置底
             setTimeout(() => {
                 systemLogsArea.scrollTop = systemLogsArea.scrollHeight;

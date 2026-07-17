@@ -2148,8 +2148,7 @@ function createWindow(existingSplash) {
         }
     } catch (e) {}
 
-    mainWindow.webContents.session.clearCache().catch(() => {});
-    mainWindow.loadFile('index.html', { extraHeaders: 'pragma: no-cache\nCache-Control: no-cache' });
+    mainWindow.loadFile('index.html');
     try {
         const id = (global.nexoraInstance && global.nexoraInstance.id) || 1;
         mainWindow.setTitle(id > 1 ? `Nexora Agent #${id}` : 'Nexora Agent');
