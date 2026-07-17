@@ -2514,8 +2514,8 @@ function setupIpcListeners() {
                         emptyTips.remove();
                     }
                     
-                    // 智能吸附：判定新追加前用户是否已经停留在底部附近（容差45px）
-                    const isAtBottom = streamList.scrollHeight - streamList.scrollTop - streamList.clientHeight < 45;
+                    // 智能吸附：判定新追加前用户是否已经停留在底部附近（容差放宽至80px，支持更好吸附）
+                    const isAtBottom = streamList.scrollHeight - streamList.scrollTop - streamList.clientHeight < 80;
                     
                     const item = document.createElement('div');
                     item.className = 'activity-log-line';
@@ -2527,9 +2527,12 @@ function setupIpcListeners() {
                         streamList.removeChild(streamList.firstChild);
                     }
                     
-                    // 只有当用户本来就停留在底部时，才自动滚至最新，防止打断用户的向上翻阅
+                    // 只有当用户本来就停留在底部时，才自动滚至最新。
+                    // 使用 setTimeout 延迟到下一帧，保障 DOM 渲染计算后的 scrollHeight 物理高度是最新的
                     if (isAtBottom) {
-                        streamList.scrollTop = streamList.scrollHeight;
+                        setTimeout(() => {
+                            streamList.scrollTop = streamList.scrollHeight;
+                        }, 0);
                     }
                 }
             }
