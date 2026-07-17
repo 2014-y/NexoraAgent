@@ -1986,6 +1986,133 @@ async function init() {
     }
 }
 
+// 🔍 小白友好型日志汉化过滤与清洗转化器
+function formatLogForUser(text) {
+    if (!text) return null;
+    // 移除颜色控制字符并修剪两端
+    const cleanLine = text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
+    const lowerLine = cleanLine.toLowerCase();
+
+    // 1. 过滤完全无需展示给小白的日志 (底层噪音调试日志)
+    if (
+        cleanLine.includes('duplicate plugin id') ||
+        cleanLine.includes('AGENTS.md') ||
+        cleanLine.includes('SOUL.md') ||
+        cleanLine.includes('TOOLS.md') ||
+        cleanLine.includes('TokenGuard Cleaned') ||
+        cleanLine.includes('tool policy') ||
+        cleanLine.includes('provider-transport-fetch start') ||
+        cleanLine.includes('log file:') ||
+        cleanLine.includes('allow is empty') ||
+        cleanLine.includes('discovered non-bundled') ||
+        cleanLine.includes('To trust them') ||
+        cleanLine.includes('doctor') ||
+        cleanLine.includes('failed probing') ||
+        cleanLine.includes('announced already') ||
+        cleanLine.includes('|') ||
+        /^[+\s-]+$/.test(cleanLine) ||
+        /^[\u2580-\u259F\s]+$/.test(cleanLine)
+    ) {
+        return null;
+    }
+
+    // 2. 匹配并改造成直观的中文大白话
+    
+    // 大模型配置装载
+    if (cleanLine.includes('agent model:')) {
+        const match = cleanLine.match(/agent model:\s*([^\s]+)/i);
+        const modelName = match ? match[1] : 'Agnes-2.0';
+        return `💡 正在装载大模型智能推理引擎：${modelName}`;
+    }
+
+    // 端口绑定就绪
+    if (cleanLine.includes('HTTP server listening') || cleanLine.includes('[gateway] ready') || cleanLine.includes('gateway] ready')) {
+        return `✅ 本地大模型网关端口绑定成功，本地服务接口已加载就绪！`;
+    }
+
+    // 扩展插件与进程启动
+    if (cleanLine.includes('starting channels and sidecars')) {
+        return `⚙️ 正在初始化连接通道、扩展插件与后台进程驱动...`;
+    }
+
+    // 核心业务件装配就绪
+    if (cleanLine.includes('Runtime initialized') || cleanLine.includes('core server listening') || cleanLine.includes('核心业务件装配完毕')) {
+        return `🚀 Nexora Agent 智能网关核心引擎装配完毕，所有核心服务均已就绪！`;
+    }
+
+    // 收到用户消息并调用大模型
+    if (cleanLine.includes('[provider-transport-fetch] [model-fetch] start') || (cleanLine.includes('model-fetch') && cleanLine.includes('method=POST'))) {
+        return `💬 收到通道聊天消息，正在调用大语言模型进行智能思考与推理...`;
+    }
+
+    // 模型推理响应成功
+    if (cleanLine.includes('[model-fetch] response') && cleanLine.includes('status=200')) {
+        const elapsedMatch = cleanLine.match(/elapsedMs=([0-9]+)/);
+        const elapsed = elapsedMatch ? `${elapsedMatch[1]}毫秒` : '暂无记录';
+        return `✨ 智能回复生成成功！已安全投递至通讯通道 (本次推理耗时: ${elapsed})`;
+    }
+
+    // 模型推理响应失败
+    if (cleanLine.includes('[model-fetch] response') && !cleanLine.includes('status=200')) {
+        return `⚠️ 模型请求失败，请检查您的网络连接或配置。`;
+    }
+
+    // 计费凭证与 Token 消耗
+    if (cleanLine.includes('[TokenGuard] Saved usage') || cleanLine.includes('Saved usage')) {
+        const tokenMatch = cleanLine.match(/usage\s+([^\s]+):\s*([0-9+]+)/i);
+        const modelName = tokenMatch ? tokenMatch[1] : '';
+        const tokenUsage = tokenMatch ? tokenMatch[2] : '';
+        if (tokenUsage) {
+            return `📊 流量记账：大模型 ${modelName} 本次会话消耗了 ${tokenUsage} tokens`;
+        }
+        return `📊 流量计费凭证保存成功！`;
+    }
+
+    // 微信扫码请求
+    if (lowerLine.includes('weixin scan') || lowerLine.includes('wechat scan') || lowerLine.includes('please scan')) {
+        return `📸 检测到微信登录扫码请求，请点击右侧「微信通道」进行扫码授权登录！`;
+    }
+
+    // 微信通道连接就绪
+    if (lowerLine.includes('weixin bound') || lowerLine.includes('wechat bound') || lowerLine.includes('ilink client ready')) {
+        return `🟢 微信消息接收通道已成功连接！正在实时监听群聊与私聊消息...`;
+    }
+
+    // 微信断开重连
+    if (lowerLine.includes('weixin login failed') || lowerLine.includes('weixin disconnected') || lowerLine.includes('weixin connection lost')) {
+        return `🔴 微信通道连接断开，正在尝试后台自动重连中...`;
+    }
+
+    // QQ 机器人通道就绪
+    if (lowerLine.includes('qqbot ready') || lowerLine.includes('qqbot connected') || lowerLine.includes('qq-bot connected')) {
+        return `🟢 QQ 机器人消息通道已成功上线连接！正在实时接收消息中...`;
+    }
+
+    // 飞书/Lark 通道就绪
+    if (lowerLine.includes('feishu ready') || lowerLine.includes('feishu connected') || lowerLine.includes('lark connected')) {
+        return `🟢 飞书/Lark 消息通道已成功上线连接！正在实时接收消息中...`;
+    }
+
+    // 载入最新系统配置
+    if (cleanLine.includes('loading configuration') || cleanLine.includes('loaded config')) {
+        return `⚙️ 正在装载最新的用户个人系统配置参数...`;
+    }
+
+    // 处理接收的消息
+    if (lowerLine.includes('on message') || lowerLine.includes('received message') || lowerLine.includes('handle message')) {
+        return `📩 正在处理并分析接收到的即时聊天消息...`;
+    }
+
+    // 遇到报错（非 Bonjour 的警告）
+    if (lowerLine.includes('error') || lowerLine.includes('exception') || lowerLine.includes('failed')) {
+        if (lowerLine.includes('bonjour') || lowerLine.includes('probe')) return null;
+        return `⚠️ 系统运行警告：${cleanLine}`;
+    }
+
+    // 其余的噪音直接过滤
+    return null;
+}
+
 // 4. IPC 消息监听与分发
 function setupIpcListeners() {
     // 实时日志接收处理函数
@@ -2050,17 +2177,27 @@ function setupIpcListeners() {
             }
         }
 
-        // 将所有原生日志（无视过滤规则）无条件完整地投递进系统的“系统日志”专用面板展示
+        // 将所有原生日志进行过滤并大白话汉化转换展示
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
-            const datePrefix = `[${new Date().toLocaleTimeString()}] `;
-            systemLogsArea.value += datePrefix + text + '\n';
-            // 限制最大行数防止内存泄漏 (限制在 5000 行)
-            const lines = systemLogsArea.value.split('\n');
-            if (lines.length > 5000) {
-                systemLogsArea.value = lines.slice(lines.length - 5000).join('\n');
+            const rawLines = text.split('\n');
+            const processedLines = [];
+            rawLines.forEach(line => {
+                const formatted = formatLogForUser(line);
+                if (formatted) {
+                    const datePrefix = `[${new Date().toLocaleTimeString()}] `;
+                    processedLines.push(datePrefix + formatted);
+                }
+            });
+            if (processedLines.length > 0) {
+                systemLogsArea.value += processedLines.join('\n') + '\n';
+                // 限制最大行数防止内存泄漏 (限制在 5000 行)
+                const lines = systemLogsArea.value.split('\n');
+                if (lines.length > 5000) {
+                    systemLogsArea.value = lines.slice(lines.length - 5000).join('\n');
+                }
+                systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
             }
-            systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
         }
 
         // 🌟 拦截Nexora Agent后台模型的常规预热探针错误日志（不影响正常对话，防止打扰用户）
@@ -8460,7 +8597,25 @@ async function loadAndRenderSystemLogs() {
     try {
         const result = await window.api.readSystemLogs();
         if (result.success) {
-            systemLogsArea.value = result.content;
+            const rawLines = result.content.split('\n');
+            const processedLines = [];
+            rawLines.forEach(line => {
+                const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s(.*)$/i) || line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s(.*)$/i);
+                if (timeMatch) {
+                    const timePrefix = timeMatch[1];
+                    const content = timeMatch[2];
+                    const formatted = formatLogForUser(content);
+                    if (formatted) {
+                        processedLines.push(`[${timePrefix}] ${formatted}`);
+                    }
+                } else {
+                    const formatted = formatLogForUser(line);
+                    if (formatted) {
+                        processedLines.push(formatted);
+                    }
+                }
+            });
+            systemLogsArea.value = processedLines.join('\n') + (processedLines.length > 0 ? '\n' : '');
             // 延迟微调滚动，确保 DOM 已经完全完成渲染后置底
             setTimeout(() => {
                 systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
