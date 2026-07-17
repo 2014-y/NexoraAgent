@@ -9028,6 +9028,15 @@ function renderAccelerationChannel(data) {
     if (systemProxyToggle) systemProxyToggle.checked = !!data.systemProxy;
     if (tunToggle) tunToggle.checked = !!data.virtualNic;
 
+    const desc = document.getElementById('acc-enabled-desc');
+    if (desc) {
+        if (enabled && data && data.mixedPort) {
+            desc.textContent = `开启后网关与客户端请求走本地加速代理 (当前端口: ${data.mixedPort})`;
+        } else {
+            desc.textContent = '开启后网关与客户端请求走本地加速代理';
+        }
+    }
+
     const pill = document.getElementById('acc-status-pill');
     if (pill) {
         pill.textContent = enabled ? '已启用' : '未启用';
