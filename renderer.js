@@ -1849,11 +1849,12 @@ async function init() {
             if (activeModel) activeModel.textContent = t('console.dash.not_configured') || '未启动';
             
             ['weixin', 'qqbot', 'feishu'].forEach(ch => {
-                const badge = document.getElementById(`tile-badge-${ch}`);
-                if (badge) {
-                    badge.className = 'tile-badge offline';
-                    badge.textContent = t('console.dash.disconnected') || '未连接';
-                    if (ch === 'qqbot') badge.textContent = t('console.dash.not_configured') || '未配置';
+                const tile = document.getElementById(`tile-${ch}`);
+                if (tile) {
+                    tile.className = 'channel-status-tile offline';
+                    if (ch === 'weixin') tile.title = '微信消息通道: 未连接';
+                    if (ch === 'qqbot') tile.title = 'QQ机器人通道: 未配置';
+                    if (ch === 'feishu') tile.title = '飞书/Lark通道: 未连接';
                 }
             });
         });
@@ -2462,34 +2463,34 @@ function setupIpcListeners() {
             
             // 微信通道
             if (lineHtml.includes('微信消息接收通道已成功连接')) {
-                const badge = document.getElementById('tile-badge-weixin');
-                if (badge) {
-                    badge.className = 'tile-badge online';
-                    badge.textContent = t('console.dash.connected') || '已连接';
+                const tile = document.getElementById('tile-weixin');
+                if (tile) {
+                    tile.className = 'channel-status-tile online';
+                    tile.title = '微信消息通道: 已连接';
                 }
             } else if (lineHtml.includes('微信通道连接断开')) {
-                const badge = document.getElementById('tile-badge-weixin');
-                if (badge) {
-                    badge.className = 'tile-badge offline';
-                    badge.textContent = t('console.dash.disconnected') || '未连接';
+                const tile = document.getElementById('tile-weixin');
+                if (tile) {
+                    tile.className = 'channel-status-tile offline';
+                    tile.title = '微信消息通道: 未连接';
                 }
             }
             
             // QQ通道
             if (lineHtml.includes('QQ 机器人消息通道已成功上线')) {
-                const badge = document.getElementById('tile-badge-qqbot');
-                if (badge) {
-                    badge.className = 'tile-badge online';
-                    badge.textContent = t('console.dash.connected') || '已连接';
+                const tile = document.getElementById('tile-qqbot');
+                if (tile) {
+                    tile.className = 'channel-status-tile online';
+                    tile.title = 'QQ机器人通道: 已连接';
                 }
             }
             
             // 飞书通道
             if (lineHtml.includes('飞书/Lark 消息通道已成功上线')) {
-                const badge = document.getElementById('tile-badge-feishu');
-                if (badge) {
-                    badge.className = 'tile-badge online';
-                    badge.textContent = t('console.dash.connected') || '已连接';
+                const tile = document.getElementById('tile-feishu');
+                if (tile) {
+                    tile.className = 'channel-status-tile online';
+                    tile.title = '飞书/Lark通道: 已连接';
                 }
             }
 

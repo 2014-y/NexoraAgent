@@ -389,15 +389,6 @@
                         <span class="dash-card-value" id="dash-active-model" data-i18n="console.dash.not_configured">未启动</span>
                       </div>
                     </div>
-                    
-                    <!-- 运行环境卡片 -->
-                    <div class="dash-card env-card">
-                      <div class="dash-card-icon">💻</div>
-                      <div class="dash-card-info">
-                        <span class="dash-card-label" data-i18n="console.dash.env_label">沙箱 Node 环境</span>
-                        <span class="dash-card-value" id="dash-node-version">v24.15.0</span>
-                      </div>
-                    </div>
                   </div>
 
                   <!-- 中半部分：通道连接面板（微信、QQ、飞书的卡片磁贴） -->
@@ -405,30 +396,21 @@
                     <h3 class="dash-section-title">🔌 通道接口状态监测</h3>
                     <div class="dash-channels-grid">
                       <!-- 微信 -->
-                      <div class="channel-status-tile" id="tile-weixin">
-                        <div class="tile-header">
-                          <span class="tile-icon">💬</span>
-                          <span class="tile-name">微信消息通道</span>
-                        </div>
-                        <span class="tile-badge offline" id="tile-badge-weixin" data-i18n="console.dash.disconnected">未连接</span>
+                      <div class="channel-status-tile offline" id="tile-weixin" title="微信消息通道: 未连接">
+                        <span class="tile-icon">💬</span>
+                        <span class="tile-name">微信</span>
                       </div>
                       
                       <!-- QQ -->
-                      <div class="channel-status-tile" id="tile-qqbot">
-                        <div class="tile-header">
-                          <span class="tile-icon">🤖</span>
-                          <span class="tile-name">QQ机器人通道</span>
-                        </div>
-                        <span class="tile-badge offline" id="tile-badge-qqbot" data-i18n="console.dash.not_configured">未配置</span>
+                      <div class="channel-status-tile offline" id="tile-qqbot" title="QQ机器人通道: 未配置">
+                        <span class="tile-icon">🤖</span>
+                        <span class="tile-name">QQ机器人</span>
                       </div>
                       
                       <!-- 飞书 -->
-                      <div class="channel-status-tile" id="tile-feishu">
-                        <div class="tile-header">
-                          <span class="tile-icon">🕊️</span>
-                          <span class="tile-name">飞书/Lark通道</span>
-                        </div>
-                        <span class="tile-badge offline" id="tile-badge-feishu" data-i18n="console.dash.disconnected">未连接</span>
+                      <div class="channel-status-tile offline" id="tile-feishu" title="飞书/Lark通道: 未连接">
+                        <span class="tile-icon">🕊️</span>
+                        <span class="tile-name">飞书</span>
                       </div>
                     </div>
                   </div>
