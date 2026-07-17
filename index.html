@@ -7,10 +7,16 @@
   <link rel="stylesheet" href="index.css">
 </head>
 <body class="theme-dark"> <!-- 默认暗黑流光主题 -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('user-theme') || 'theme-dark';
+      document.body.className = savedTheme;
+    })();
+  </script>
   <!-- 全局初始化加载遮罩层 -->
-  <div id="app-loading-screen" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #07080c; z-index: 99999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; transition: opacity 0.4s ease, visibility 0.4s;">
+  <div id="app-loading-screen" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-base) !important; z-index: 99999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; transition: opacity 0.4s ease, visibility 0.4s;">
     <div style="width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.03); border-top-color: var(--accent-color, #6366f1); border-radius: 50%; animation: spin 0.8s infinite linear;"></div>
-    <div id="app-loading-text" style="font-size: 13px; color: rgba(255,255,255,0.55); font-family: system-ui, -apple-system, sans-serif; letter-spacing: 1px;">正在加载 Nexora Agent 配置文件与引擎...</div>
+    <div id="app-loading-text" style="font-size: 13px; color: var(--text-secondary); font-family: system-ui, -apple-system, sans-serif; letter-spacing: 1px;">正在加载 Nexora Agent 配置文件与引擎...</div>
     <script>
       (function() {
         const lang = localStorage.getItem('setting_language') || 'zh-CN';
@@ -785,7 +791,7 @@
                 <option value="today" data-i18n="stats.time.today" selected>📅 当天</option>
                 <option value="7days" data-i18n="stats.time.7days">最近7天</option>
               </select>
-              <button class="btn-primary" id="btn-stats-query" data-i18n="stats.btn.query" style="height: 30px; font-size: 12px; margin-top: 0; width: 92px; justify-content: center; flex-shrink: 0; white-space: nowrap; border-radius: 6px; background: linear-gradient(135deg, #8c52ff 0%, #00d2ff 100%); border: none; color: white; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(140,82,255,0.2); transition: opacity 0.2s ease;">
+              <button class="btn-primary" id="btn-stats-query" data-i18n="stats.btn.query" style="height: 30px; font-size: 12px; margin-top: 0; width: 92px; justify-content: center; flex-shrink: 0; white-space: nowrap; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: opacity 0.2s ease;">
                 🔍 查询
               </button>
             </div>
@@ -871,7 +877,7 @@
             <div class="stats-tabs-section" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 14px; padding: 16px; margin-bottom: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
                 <div class="stats-sub-tabs" style="display: flex; gap: 6px;">
-                  <button type="button" class="btn-cancel active" id="btn-stats-tab-logs" style="margin-top: 0; padding: 5px 14px; font-size: 11px; background: var(--accent-color); color: white; border-color: transparent;" data-i18n="stats.tab.logs">📋 请求日志</button>
+                  <button type="button" class="btn-cancel active" id="btn-stats-tab-logs" style="margin-top: 0; padding: 5px 14px; font-size: 11px; background: var(--accent-color); color: var(--accent-text); border-color: transparent;" data-i18n="stats.tab.logs">📋 请求日志</button>
                   <button type="button" class="btn-cancel" id="btn-stats-tab-providers" style="margin-top: 0; padding: 5px 14px; font-size: 11px;" data-i18n="stats.tab.providers">🔌 Provider 统计</button>
                   <button type="button" class="btn-cancel" id="btn-stats-tab-models" style="margin-top: 0; padding: 5px 14px; font-size: 11px;" data-i18n="stats.tab.models">🤖 模型统计</button>
                 </div>
@@ -901,13 +907,24 @@
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
               <div>
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.theme.title">🎨 界面视觉主题</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.theme.desc">自由切换客户端的整体主色调风格（暗黑流光、极光霓虹或白昼明亮）。</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.theme.desc">自由切换客户端的整体主色调风格。</div>
               </div>
               <div class="theme-dots" style="display: flex; gap: 8px;">
                 <div class="theme-dot black" id="theme-btn-black" title="曜石纯黑" data-i18n-title="settings.theme.black"></div>
                 <div class="theme-dot dark" id="theme-btn-dark" title="暗黑流光" data-i18n-title="settings.theme.dark"></div>
                 <div class="theme-dot aurora" id="theme-btn-aurora" title="极光霓虹" data-i18n-title="settings.theme.aurora"></div>
                 <div class="theme-dot light" id="theme-btn-light" title="白昼明亮" data-i18n-title="settings.theme.light"></div>
+                <div class="theme-dot blue" id="theme-btn-blue" title="深邃科技蓝" data-i18n-title="settings.theme.blue"></div>
+                <div class="theme-dot orange" id="theme-btn-orange" title="璀璨珊瑚橙" data-i18n-title="settings.theme.orange"></div>
+                <div class="theme-dot teal" id="theme-btn-teal" title="Matrix青墨绿" data-i18n-title="settings.theme.teal"></div>
+                <div class="theme-dot amber" id="theme-btn-amber" title="璀璨复古金" data-i18n-title="settings.theme.amber"></div>
+                <div class="theme-dot pink" id="theme-btn-pink" title="赛博迷幻粉" data-i18n-title="settings.theme.pink"></div>
+                <div class="theme-dot glacier" id="theme-btn-glacier" title="北极冰川蓝" data-i18n-title="settings.theme.glacier"></div>
+                <div class="theme-dot magma" id="theme-btn-magma" title="火山熔岩红" data-i18n-title="settings.theme.magma"></div>
+                <div class="theme-dot abyss" id="theme-btn-abyss" title="幽冥深渊紫" data-i18n-title="settings.theme.abyss"></div>
+                <div class="theme-dot sage" id="theme-btn-sage" title="雅致鼠尾草绿" data-i18n-title="settings.theme.sage"></div>
+                <div class="theme-dot mint" id="theme-btn-mint" title="液氮荧光青" data-i18n-title="settings.theme.mint"></div>
+                <div class="theme-dot forest" id="theme-btn-forest" title="英伦极夜绿" data-i18n-title="settings.theme.forest"></div>
               </div>
             </div>
 
@@ -1032,15 +1049,15 @@
           <!-- 软件版本与检测更新 -->
           <div class="form-group-section" style="width: 100%; margin-bottom: 24px;">
             <h3 data-i18n="settings.about.title">ℹ️ 关于</h3>
-            <div style="padding: 20px; background: linear-gradient(135deg, rgba(147, 51, 234, 0.08) 0%, rgba(79, 70, 229, 0.08) 100%); border: 1px solid rgba(147, 51, 234, 0.15); border-radius: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="padding: 20px; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08) 0%, rgba(var(--accent-rgb), 0.03) 100%); border: 1px solid rgba(var(--accent-rgb), 0.15); border-radius: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <div style="font-size: 18px; font-weight: bold; color: white; display: flex; align-items: center; gap: 8px;">
+                <div style="font-size: 18px; font-weight: bold; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
                   Nexora Agent
-                  <span id="app-version-badge" style="font-size: 11px; padding: 2px 6px; background: var(--accent-color); border-radius: 4px; color: white; font-weight: normal; margin-left: 5px;">v1.0.9</span>
+                  <span id="app-version-badge" style="font-size: 11px; padding: 2px 6px; background: var(--accent-color); border-radius: 4px; color: var(--accent-text); font-weight: normal; margin-left: 5px;">v1.0.9</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;" data-i18n="settings.about.app_desc">本地智能大模型网关与微信通道管理桌面控制中心。</div>
               </div>
-              <button type="button" class="btn-primary" id="btn-check-update" style="width: auto; padding: 6px 16px; font-size: 12px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; border-radius: 6px; color: white; font-weight: 600; cursor: pointer;" data-i18n="nav.update">🔍 检查更新</button>
+              <button type="button" class="btn-primary" id="btn-check-update" style="width: auto; padding: 6px 16px; font-size: 12px; margin-top: 0; border-radius: 6px; cursor: pointer;" data-i18n="nav.update">🔍 检查更新</button>
             </div>
 
             <!-- 详细系统信息 -->

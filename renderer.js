@@ -5588,7 +5588,18 @@ function setupThemeSwitching() {
     const pickerDark = document.getElementById('theme-btn-dark');
     const pickerAurora = document.getElementById('theme-btn-aurora');
     const pickerLight = document.getElementById('theme-btn-light');
-    const dots = [pickerBlack, pickerDark, pickerAurora, pickerLight];
+    const pickerBlue = document.getElementById('theme-btn-blue');
+    const pickerOrange = document.getElementById('theme-btn-orange');
+    const pickerTeal = document.getElementById('theme-btn-teal');
+    const pickerAmber = document.getElementById('theme-btn-amber');
+    const pickerPink = document.getElementById('theme-btn-pink');
+    const pickerGlacier = document.getElementById('theme-btn-glacier');
+    const pickerMagma = document.getElementById('theme-btn-magma');
+    const pickerAbyss = document.getElementById('theme-btn-abyss');
+    const pickerSage = document.getElementById('theme-btn-sage');
+    const pickerMint = document.getElementById('theme-btn-mint');
+    const pickerForest = document.getElementById('theme-btn-forest');
+    const dots = [pickerBlack, pickerDark, pickerAurora, pickerLight, pickerBlue, pickerOrange, pickerTeal, pickerAmber, pickerPink, pickerGlacier, pickerMagma, pickerAbyss, pickerSage, pickerMint, pickerForest];
 
     const updateActiveDot = (activeTheme) => {
         dots.forEach(dot => {
@@ -5598,6 +5609,17 @@ function setupThemeSwitching() {
         if (activeTheme === 'theme-dark' && pickerDark) pickerDark.classList.add('active');
         if (activeTheme === 'theme-aurora' && pickerAurora) pickerAurora.classList.add('active');
         if (activeTheme === 'theme-light' && pickerLight) pickerLight.classList.add('active');
+        if (activeTheme === 'theme-blue' && pickerBlue) pickerBlue.classList.add('active');
+        if (activeTheme === 'theme-orange' && pickerOrange) pickerOrange.classList.add('active');
+        if (activeTheme === 'theme-teal' && pickerTeal) pickerTeal.classList.add('active');
+        if (activeTheme === 'theme-amber' && pickerAmber) pickerAmber.classList.add('active');
+        if (activeTheme === 'theme-pink' && pickerPink) pickerPink.classList.add('active');
+        if (activeTheme === 'theme-glacier' && pickerGlacier) pickerGlacier.classList.add('active');
+        if (activeTheme === 'theme-magma' && pickerMagma) pickerMagma.classList.add('active');
+        if (activeTheme === 'theme-abyss' && pickerAbyss) pickerAbyss.classList.add('active');
+        if (activeTheme === 'theme-sage' && pickerSage) pickerSage.classList.add('active');
+        if (activeTheme === 'theme-mint' && pickerMint) pickerMint.classList.add('active');
+        if (activeTheme === 'theme-forest' && pickerForest) pickerForest.classList.add('active');
         if (typeof drawSidebarChart === 'function') drawSidebarChart();
     };
 
@@ -5630,6 +5652,94 @@ function setupThemeSwitching() {
             document.body.className = 'theme-light';
             localStorage.setItem('user-theme', 'theme-light');
             updateActiveDot('theme-light');
+        });
+    }
+
+    if (pickerBlue) {
+        pickerBlue.addEventListener('click', () => {
+            document.body.className = 'theme-blue';
+            localStorage.setItem('user-theme', 'theme-blue');
+            updateActiveDot('theme-blue');
+        });
+    }
+
+    if (pickerOrange) {
+        pickerOrange.addEventListener('click', () => {
+            document.body.className = 'theme-orange';
+            localStorage.setItem('user-theme', 'theme-orange');
+            updateActiveDot('theme-orange');
+        });
+    }
+
+    if (pickerTeal) {
+        pickerTeal.addEventListener('click', () => {
+            document.body.className = 'theme-teal';
+            localStorage.setItem('user-theme', 'theme-teal');
+            updateActiveDot('theme-teal');
+        });
+    }
+
+    if (pickerAmber) {
+        pickerAmber.addEventListener('click', () => {
+            document.body.className = 'theme-amber';
+            localStorage.setItem('user-theme', 'theme-amber');
+            updateActiveDot('theme-amber');
+        });
+    }
+
+    if (pickerPink) {
+        pickerPink.addEventListener('click', () => {
+            document.body.className = 'theme-pink';
+            localStorage.setItem('user-theme', 'theme-pink');
+            updateActiveDot('theme-pink');
+        });
+    }
+
+    if (pickerGlacier) {
+        pickerGlacier.addEventListener('click', () => {
+            document.body.className = 'theme-glacier';
+            localStorage.setItem('user-theme', 'theme-glacier');
+            updateActiveDot('theme-glacier');
+        });
+    }
+
+    if (pickerMagma) {
+        pickerMagma.addEventListener('click', () => {
+            document.body.className = 'theme-magma';
+            localStorage.setItem('user-theme', 'theme-magma');
+            updateActiveDot('theme-magma');
+        });
+    }
+
+    if (pickerAbyss) {
+        pickerAbyss.addEventListener('click', () => {
+            document.body.className = 'theme-abyss';
+            localStorage.setItem('user-theme', 'theme-abyss');
+            updateActiveDot('theme-abyss');
+        });
+    }
+
+    if (pickerSage) {
+        pickerSage.addEventListener('click', () => {
+            document.body.className = 'theme-sage';
+            localStorage.setItem('user-theme', 'theme-sage');
+            updateActiveDot('theme-sage');
+        });
+    }
+
+    if (pickerMint) {
+        pickerMint.addEventListener('click', () => {
+            document.body.className = 'theme-mint';
+            localStorage.setItem('user-theme', 'theme-mint');
+            updateActiveDot('theme-mint');
+        });
+    }
+
+    if (pickerForest) {
+        pickerForest.addEventListener('click', () => {
+            document.body.className = 'theme-forest';
+            localStorage.setItem('user-theme', 'theme-forest');
+            updateActiveDot('theme-forest');
         });
     }
 
@@ -5876,7 +5986,7 @@ async function renderUsageCharts() {
             activeBtn.classList.add('active');
             activeBtn.style.background = 'var(--accent-color)';
             activeBtn.style.borderColor = 'transparent';
-            activeBtn.style.color = 'white';
+            activeBtn.style.color = 'var(--accent-text)';
         }
     };
 
