@@ -2369,37 +2369,44 @@ function setupIpcListeners() {
         // 忽略非关键的计费拉取失败日志 (国内网络下通常会失败)
         if (text.includes('[model-pricing]') && text.includes('fetch failed')) return;
 
-        // 进行常见启动消息的汉化和修饰
-        let cleanedText = text;
-        
-        // 格式化日期显示为：年月日 时分秒
-        cleanedText = cleanedText.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?\s*/gm, '$1 $2 ');
+        // 进行日志分割、过滤与播报员着色处理
+        const rawLines = text.split('\n');
+        const processedLines = [];
+        rawLines.forEach(line => {
+            if (!line.trim()) return;
+            const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s(.*)$/i) || 
+                              line.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?\s*(.*)$/i) ||
+                              line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s(.*)$/i);
+            
+            let timePrefix = '';
+            let content = line;
+            if (timeMatch) {
+                if (timeMatch.length === 4) {
+                    timePrefix = `${timeMatch[1]} ${timeMatch[2]}`;
+                    content = timeMatch[3];
+                } else {
+                    timePrefix = timeMatch[1];
+                    content = timeMatch[2];
+                }
+            }
 
-        if (text.includes('loading configuration')) {
-            cleanedText = cleanedText.replace(/loading configuration[.….]*/, '正在读取与解析Nexora Agent本地配置文件...');
-        } else if (text.includes('resolving authentication')) {
-            cleanedText = cleanedText.replace(/resolving authentication[.….]*/, '正在与云端服务器进行开发者授权密钥安全核验...');
-        } else if (text.includes('force: no listeners on port')) {
-            cleanedText = cleanedText.replace(/force: no listeners on port (\d+)/, '检测到通信端口 $1 空闲，准备占用侦听...');
-        } else if (text.includes('starting...')) {
-            cleanedText = cleanedText.replace('starting...', '正在拉起Nexora Agent核心引擎，初始化网络钩子...');
-        } else if (text.includes('started (interval:')) {
-            cleanedText = cleanedText.replace(/started \(interval: [^)]+\)/, '健康状态监控已上线 ✅');
-        } else if (text.includes('provider auth state pre-warmed')) {
-            cleanedText = cleanedText.replace(/provider auth state pre-warmed in (\d+)ms/, '内置模型云端鉴权通道安全预热就绪 (耗时 $1ms) ✅');
-        } else if (text.includes('agent runtime plugins pre-warmed')) {
-            cleanedText = cleanedText.replace(/agent runtime plugins pre-warmed in (\d+)ms/, 'Nexora Agent运行时全部核心业务插件装载完毕 (耗时 $1ms) 🚀');
-        } else if (/http server listening/i.test(text)) {
-            cleanedText = cleanedText.replace(/http server listening[^\n]*/i, 'HTTP 本地服务已监听，面板可打开 ✅');
-        } else if (text.includes('HTTP server listening on')) {
-            cleanedText = cleanedText.replace(/HTTP server listening on http:\/\/([^\s]+)/, 'HTTP 本地总线服务在 http://$1 上开启成功！');
-        } else if (text.includes('Webhook server listening on')) {
-            cleanedText = cleanedText.replace(/Webhook server listening on http:\/\/([^\s]+)/, '微信/语音 Webhook 本地服务在 http://$1 上监听就绪！');
-        } else if (text.includes('heartbeat] started')) {
-            cleanedText = cleanedText.replace('[heartbeat] started', '在线心跳监控守护已开启，Nexora Agent连接保持正常 💓');
-        } else if (text.includes('ready') && text.includes('[gateway]')) {
-            cleanedText = cleanedText.replace('ready', 'Nexora Agent全部引擎启动就绪，正在静候业务请求传入...');
-        }
+            const formatted = formatLogForUser(content);
+            if (formatted) {
+                const displayTime = timePrefix ? `[${timePrefix}] ` : `[${new Date().toLocaleTimeString()}] `;
+                const coloredText = formatted
+                    .replace(/\[系统核心\]/g, '<span style="color: #64b5f6;">[系统核心]</span>')
+                    .replace(/\[系统警报\]/g, '<span style="color: #ff5252; font-weight: bold;">[系统警报]</span>')
+                    .replace(/\[插件模块\]/g, '<span style="color: #ba68c8;">[插件模块]</span>')
+                    .replace(/\[微信插件\]/g, '<span style="color: #4db6ac;">[微信插件]</span>')
+                    .replace(/\[QQ机器人\]/g, '<span style="color: #9575cd;">[QQ机器人]</span>')
+                    .replace(/\[飞书插件\]/g, '<span style="color: #e57373;">[飞书插件]</span>')
+                    .replace(/\[大模型服务\]/g, '<span style="color: #a1887f;">[大模型服务]</span>')
+                    .replace(/\[健康监测\]/g, '<span style="color: #ffd54f;">[健康监测]</span>')
+                    .replace(/\[对话账单\]/g, '<span style="color: #81c784;">[对话账单]</span>');
+
+                processedLines.push(displayTime + coloredText);
+            }
+        });
 
         // --- 开始：前端终端下载进度注入 ---
         if (text.includes('Failed to install missing configured plugin') && !window.pluginDownloadTimer) {
@@ -2409,7 +2416,6 @@ function setupIpcListeners() {
                 const msgTemplate = t('console.log.downloading_plugins');
                 const msg = msgTemplate.replace('{0}', window.pluginDownloadSeconds);
                 
-                // 模拟插入日志
                 const timerSpan = document.createElement('span');
                 timerSpan.textContent = msg;
                 timerSpan.style.color = '#ff9800';
@@ -2434,39 +2440,28 @@ function setupIpcListeners() {
         }
         // --- 结束：前端终端下载进度注入 ---
 
-        // 不在「Nexora Agent状态」页时：别往可视控制台刷 DOM（这是菜单切换卡顿的主因之一）
-        if (currentTab !== 'console-view' && currentTab !== null) {
-            if (!window.__deferredConsoleLogs) window.__deferredConsoleLogs = [];
-            window.__deferredConsoleLogs.push(cleanedText);
-            if (window.__deferredConsoleLogs.length > 200) {
-                window.__deferredConsoleLogs = window.__deferredConsoleLogs.slice(-120);
+        if (processedLines.length === 0) return;
+
+        processedLines.forEach(lineHtml => {
+            if (currentTab !== 'console-view' && currentTab !== null) {
+                if (!window.__deferredConsoleLogs) window.__deferredConsoleLogs = [];
+                window.__deferredConsoleLogs.push(lineHtml);
+                if (window.__deferredConsoleLogs.length > 200) {
+                    window.__deferredConsoleLogs = window.__deferredConsoleLogs.slice(-120);
+                }
+            } else {
+                const span = document.createElement('span');
+                span.innerHTML = lineHtml + '<br/>';
+                logTerminal.appendChild(span);
             }
-            return;
-        }
+        });
 
-        // 追加日志并做中文翻译及着色
-        const span = document.createElement('span');
-        let coloredText = cleanedText
-            .replace(/\[gateway\]/g, '<span style="color: #64b5f6;">[Nexora Agent核心]</span>')
-            .replace(/\[System\]/g, '<span style="color: #f06292;">[系统监控]</span>')
-            .replace(/\[plugins\]/g, '<span style="color: #ba68c8;">[插件模块]</span>')
-            .replace(/\[hooks\]/g, '<span style="color: #4db6ac;">[钩子机制]</span>')
-            .replace(/\[voice-call\]/g, '<span style="color: #e57373;">[语音通话]</span>')
-            .replace(/\[health-monitor\]/g, '<span style="color: #a1887f;">[健康监视]</span>')
-            .replace(/\[heartbeat\]/g, '<span style="color: #9575cd;">[心跳保持]</span>')
-            .replace(/\b(?:ERROR|Error)\b/g, '<span style="color: #ff5252; font-weight: bold;">[错误报错]</span>')
-            .replace(/\b(?:WARNING|Warning)\b/g, '<span style="color: #ffd54f;">[警告提醒]</span>');
-
-        span.innerHTML = coloredText;
-        logTerminal.appendChild(span);
-
-        // 控制台字数过多自动裁剪防崩溃
-        if (logTerminal.innerText.length > 25000) {
+        if (logTerminal && logTerminal.innerText.length > 25000) {
             logTerminal.innerHTML = logTerminal.innerHTML.substring(5000);
         }
-
-        // 自动滚到底部
-        logTerminal.scrollTop = logTerminal.scrollHeight;
+        if (logTerminal) {
+            logTerminal.scrollTop = logTerminal.scrollHeight;
+        }
     };
 
     // 挂载至全局 window，专供 CDP 自动化脚本进行 100% 仿真日志注入质量自检
