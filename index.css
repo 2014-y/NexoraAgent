@@ -3499,7 +3499,14 @@ input:focus, select:focus, textarea:focus {
 
 .sidebar.collapsed .status-light-btn-container {
   background: transparent !important;
-  border: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  width: 36px !important;
+  height: 36px !important;
+}
+
+.sidebar.collapsed .status-light-btn-container svg {
+  width: 18px !important;
+  height: 18px !important;
 }
 
 .sidebar.collapsed .status-text-zone,
