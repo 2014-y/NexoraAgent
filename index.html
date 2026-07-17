@@ -364,11 +364,82 @@
                   </div>
                 </div>
 
-                <div class="log-terminal" id="log-terminal-output" style="display: none;">
-                  <div class="log-line-entry" data-i18n="console.log.init">&gt;&gt;&gt; AI-Assistant Local Daemon Initialized.</div>
-                  <div class="log-line-entry" data-i18n="console.log.stopped">&gt;&gt;&gt; [系统状态] 核心进程检测完成，当前处于【已停止】闲置状态。</div>
-                  <div class="log-line-entry" data-i18n="console.log.guide">&gt;&gt;&gt; [操作指引] 请点击左上角“启动 Nexora Agent”按钮，拉起本地 AI 服务总线...</div>
-                  <div class="terminal-cursor-line" id="terminal-active-cursor"><span class="terminal-cursor">▋</span></div>
+                <!-- 强制隐藏的真实底层文本终端，保障所有底层 ipc 写入与日志下载逻辑 100% 兼容无故障 -->
+                <div class="log-terminal" id="log-terminal-output" style="display: none !important;"></div>
+
+                <!-- 表面上展现的白净整洁的高科技卡片式运行监控大盘 -->
+                <div class="console-dashboard-view" id="console-dashboard-monitor" style="display: none;">
+                  <!-- 上半部分：系统运行状态与动态指标 -->
+                  <div class="dashboard-metrics-row">
+                    <!-- 状态指示大卡片 -->
+                    <div class="dash-card status-card">
+                      <div class="dash-card-icon">⚙️</div>
+                      <div class="dash-card-info">
+                        <span class="dash-card-label" data-i18n="console.dash.status_label">Nexora 服务状态</span>
+                        <span class="dash-card-value" id="dash-service-status" data-i18n="console.dash.stopped">已停止</span>
+                      </div>
+                      <span class="status-indicator-dot stopped" id="dash-status-dot"></span>
+                    </div>
+                    
+                    <!-- 活动大模型卡片 -->
+                    <div class="dash-card model-card">
+                      <div class="dash-card-icon">🧠</div>
+                      <div class="dash-card-info">
+                        <span class="dash-card-label" data-i18n="console.dash.model_label">活跃推理引擎</span>
+                        <span class="dash-card-value" id="dash-active-model" data-i18n="console.dash.not_configured">未启动</span>
+                      </div>
+                    </div>
+                    
+                    <!-- 运行环境卡片 -->
+                    <div class="dash-card env-card">
+                      <div class="dash-card-icon">💻</div>
+                      <div class="dash-card-info">
+                        <span class="dash-card-label" data-i18n="console.dash.env_label">沙箱 Node 环境</span>
+                        <span class="dash-card-value" id="dash-node-version">v24.15.0</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 中半部分：通道连接面板（微信、QQ、飞书的卡片磁贴） -->
+                  <div class="dashboard-channels-section">
+                    <h3 class="dash-section-title">🔌 通道接口状态监测</h3>
+                    <div class="dash-channels-grid">
+                      <!-- 微信 -->
+                      <div class="channel-status-tile" id="tile-weixin">
+                        <div class="tile-header">
+                          <span class="tile-icon">💬</span>
+                          <span class="tile-name">微信消息通道</span>
+                        </div>
+                        <span class="tile-badge offline" id="tile-badge-weixin" data-i18n="console.dash.disconnected">未连接</span>
+                      </div>
+                      
+                      <!-- QQ -->
+                      <div class="channel-status-tile" id="tile-qqbot">
+                        <div class="tile-header">
+                          <span class="tile-icon">🤖</span>
+                          <span class="tile-name">QQ机器人通道</span>
+                        </div>
+                        <span class="tile-badge offline" id="tile-badge-qqbot" data-i18n="console.dash.not_configured">未配置</span>
+                      </div>
+                      
+                      <!-- 飞书 -->
+                      <div class="channel-status-tile" id="tile-feishu">
+                        <div class="tile-header">
+                          <span class="tile-icon">🕊️</span>
+                          <span class="tile-name">飞书/Lark通道</span>
+                        </div>
+                        <span class="tile-badge offline" id="tile-badge-feishu" data-i18n="console.dash.disconnected">未连接</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 下半部分：精简版最近动态日志流水（无黑框，大白话，仅展示最近 5 条） -->
+                  <div class="dashboard-activity-section">
+                    <h3 class="dash-section-title">⏱️ 实时系统活动监测流</h3>
+                    <div class="dash-activity-stream" id="dash-activity-stream-list">
+                      <div class="activity-item-empty" data-i18n="console.dash.empty_tips">暂无系统活动，启动服务后将在此显示最新状态...</div>
+                    </div>
+                  </div>
                 </div>
                <div class="terminal-progress-container" id="terminal-progress-bar-container" style="display: none;">
                  <div class="terminal-progress-track">

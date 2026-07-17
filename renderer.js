@@ -1841,15 +1841,21 @@ async function init() {
     if (btnClearLogs) {
         btnClearLogs.addEventListener('click', () => {
             if (gatewayStatus !== 'stopped') return;
-            const terminalOutput = document.getElementById('log-terminal-output');
-            if (terminalOutput) {
-                terminalOutput.innerHTML = `
-                    <div class="log-line-entry" data-i18n="console.log.init">${t('console.log.init')}</div>
-                    <div class="log-line-entry" data-i18n="console.log.stopped">${t('console.log.stopped')}</div>
-                    <div class="log-line-entry" data-i18n="console.log.guide">${t('console.log.guide')}</div>
-                    <div class="terminal-cursor-line" id="terminal-active-cursor"><span class="terminal-cursor">▋</span></div>
-                `;
+            const streamList = document.getElementById('dash-activity-stream-list');
+            if (streamList) {
+                streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
             }
+            const activeModel = document.getElementById('dash-active-model');
+            if (activeModel) activeModel.textContent = t('console.dash.not_configured') || '未启动';
+            
+            ['weixin', 'qqbot', 'feishu'].forEach(ch => {
+                const badge = document.getElementById(`tile-badge-${ch}`);
+                if (badge) {
+                    badge.className = 'tile-badge offline';
+                    badge.textContent = t('console.dash.disconnected') || '未连接';
+                    if (ch === 'qqbot') badge.textContent = t('console.dash.not_configured') || '未配置';
+                }
+            });
         });
     }
 
@@ -2399,17 +2405,17 @@ function setupIpcListeners() {
             if (formatted) {
                 const displayTime = timePrefix ? `[${timePrefix}] ` : `[${new Date().toLocaleTimeString()}] `;
                 const coloredText = formatted
-                    .replace(/\[⚙️ 系统核心\]/g, '<span style="background: rgba(100, 181, 246, 0.12); color: #64b5f6; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">⚙️ 系统核心</span>')
-                    .replace(/\[⚠️ 系统警报\]/g, '<span style="background: rgba(255, 82, 82, 0.12); color: #ff5252; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">⚠️ 系统警报</span>')
-                    .replace(/\[🧩 插件模块\]/g, '<span style="background: rgba(186, 104, 200, 0.12); color: #ba68c8; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">🧩 插件模块</span>')
-                    .replace(/\[💬 微信插件\]/g, '<span style="background: rgba(77, 182, 172, 0.12); color: #4db6ac; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">💬 微信插件</span>')
-                    .replace(/\[🤖 QQ机器人\]/g, '<span style="background: rgba(149, 117, 205, 0.12); color: #9575cd; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">🤖 QQ机器人</span>')
-                    .replace(/\[🕊️ 飞书插件\]/g, '<span style="background: rgba(229, 115, 115, 0.12); color: #e57373; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">🕊️ 飞书插件</span>')
-                    .replace(/\[🧠 大模型服务\]/g, '<span style="background: rgba(161, 136, 127, 0.12); color: #a1887f; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">🧠 大模型服务</span>')
-                    .replace(/\[💓 健康监测\]/g, '<span style="background: rgba(255, 213, 79, 0.12); color: #ffd54f; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">💓 健康监测</span>')
-                    .replace(/\[📊 对话账单\]/g, '<span style="background: rgba(129, 199, 132, 0.12); color: #81c784; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 6px; display: inline-block; user-select: none;">📊 对话账单</span>');
+                    .replace(/\[⚙️ 系统核心\]/g, '<span style="color: #64b5f6; font-weight: bold; margin-right: 4px;">⚙️ [系统核心]</span>')
+                    .replace(/\[⚠️ 系统警报\]/g, '<span style="color: #ff5252; font-weight: bold; margin-right: 4px;">⚠️ [系统警报]</span>')
+                    .replace(/\[🧩 插件模块\]/g, '<span style="color: #ba68c8; font-weight: bold; margin-right: 4px;">🧩 [插件模块]</span>')
+                    .replace(/\[💬 微信插件\]/g, '<span style="color: #4db6ac; font-weight: bold; margin-right: 4px;">💬 [微信插件]</span>')
+                    .replace(/\[🤖 QQ机器人\]/g, '<span style="color: #9575cd; font-weight: bold; margin-right: 4px;">🤖 [QQ机器人]</span>')
+                    .replace(/\[🕊️ 飞书插件\]/g, '<span style="color: #e57373; font-weight: bold; margin-right: 4px;">🕊️ [飞书插件]</span>')
+                    .replace(/\[🧠 大模型服务\]/g, '<span style="color: #a1887f; font-weight: bold; margin-right: 4px;">🧠 [大模型服务]</span>')
+                    .replace(/\[💓 健康监测\]/g, '<span style="color: #ffd54f; font-weight: bold; margin-right: 4px;">💓 [健康监测]</span>')
+                    .replace(/\[📊 对话账单\]/g, '<span style="color: #81c784; font-weight: bold; margin-right: 4px;">📊 [对话账单]</span>');
 
-                const styledTime = `<span style="color: #6a6f8a; font-size: 11.5px; font-family: var(--font-mono); margin-right: 6px;">${displayTime}</span>`;
+                const styledTime = `<span style="color: #6a6f8a; font-family: var(--font-mono); opacity: 0.55; margin-right: 8px;">${displayTime}</span>`;
                 processedLines.push(styledTime + coloredText);
             }
         });
@@ -2446,9 +2452,53 @@ function setupIpcListeners() {
         }
         // --- 结束：前端终端下载进度注入 ---
 
-        if (processedLines.length === 0) return;
-
         processedLines.forEach(lineHtml => {
+            // 实时状态提取并更新至看板卡片
+            if (lineHtml.includes('成功接入大模型推理引擎：')) {
+                const modelVal = lineHtml.substring(lineHtml.indexOf('成功接入大模型推理引擎：') + 12);
+                const activeModelEl = document.getElementById('dash-active-model');
+                if (activeModelEl) activeModelEl.textContent = modelVal.replace(/<\/?[^>]+(>|$)/g, "").trim(); // 去除 HTML tag
+            }
+            
+            // 微信通道
+            if (lineHtml.includes('微信消息接收通道已成功连接')) {
+                const badge = document.getElementById('tile-badge-weixin');
+                if (badge) {
+                    badge.className = 'tile-badge online';
+                    badge.textContent = t('console.dash.connected') || '已连接';
+                }
+            } else if (lineHtml.includes('微信通道连接断开')) {
+                const badge = document.getElementById('tile-badge-weixin');
+                if (badge) {
+                    badge.className = 'tile-badge offline';
+                    badge.textContent = t('console.dash.disconnected') || '未连接';
+                }
+            }
+            
+            // QQ通道
+            if (lineHtml.includes('QQ 机器人消息通道已成功上线')) {
+                const badge = document.getElementById('tile-badge-qqbot');
+                if (badge) {
+                    badge.className = 'tile-badge online';
+                    badge.textContent = t('console.dash.connected') || '已连接';
+                }
+            }
+            
+            // 飞书通道
+            if (lineHtml.includes('飞书/Lark 消息通道已成功上线')) {
+                const badge = document.getElementById('tile-badge-feishu');
+                if (badge) {
+                    badge.className = 'tile-badge online';
+                    badge.textContent = t('console.dash.connected') || '已连接';
+                }
+            }
+
+            // 写入隐藏的原大终端
+            const span = document.createElement('span');
+            span.innerHTML = lineHtml + '<br/>';
+            if (logTerminal) logTerminal.appendChild(span);
+
+            // 写入新 Dashboard 活动监控流
             if (currentTab !== 'console-view' && currentTab !== null) {
                 if (!window.__deferredConsoleLogs) window.__deferredConsoleLogs = [];
                 window.__deferredConsoleLogs.push(lineHtml);
@@ -2456,14 +2506,24 @@ function setupIpcListeners() {
                     window.__deferredConsoleLogs = window.__deferredConsoleLogs.slice(-120);
                 }
             } else {
-                const cursorLine = document.getElementById('terminal-active-cursor');
-                const span = document.createElement('span');
-                span.className = 'log-line-entry';
-                span.innerHTML = lineHtml;
-                if (cursorLine) {
-                    logTerminal.insertBefore(span, cursorLine);
-                } else {
-                    logTerminal.appendChild(span);
+                const streamList = document.getElementById('dash-activity-stream-list');
+                if (streamList) {
+                    const emptyTips = streamList.querySelector('.activity-item-empty');
+                    if (emptyTips) {
+                        emptyTips.remove();
+                    }
+                    
+                    const item = document.createElement('div');
+                    item.className = 'activity-log-line';
+                    item.innerHTML = lineHtml;
+                    streamList.appendChild(item);
+                    
+                    // 最多保留最近 5 条
+                    while (streamList.children.length > 5) {
+                        streamList.removeChild(streamList.firstChild);
+                    }
+                    
+                    streamList.scrollTop = streamList.scrollHeight;
                 }
             }
         });
@@ -5243,9 +5303,12 @@ function applyViewMode(mode) {
     const logTerminalOutput = document.getElementById('log-terminal-output');
     const terminalLeft = document.getElementById('tour-log-terminal');
 
+    const dashboardMonitor = document.getElementById('console-dashboard-monitor');
+
     if (mode === 'log') {
         if (stepProgressContainer) stepProgressContainer.style.display = 'none';
-        if (logTerminalOutput) logTerminalOutput.style.display = 'block';
+        if (logTerminalOutput) logTerminalOutput.style.display = 'none !important';
+        if (dashboardMonitor) dashboardMonitor.style.display = 'flex';
         if (terminalLeft) terminalLeft.classList.remove('step-view-active');
         if (btnToggleViewMode) {
             btnToggleViewMode.setAttribute('data-i18n', 'console.btn.toggle_step_view');
@@ -5254,7 +5317,8 @@ function applyViewMode(mode) {
     } else {
         // 'step'
         if (stepProgressContainer) stepProgressContainer.style.display = 'flex';
-        if (logTerminalOutput) logTerminalOutput.style.display = 'none';
+        if (logTerminalOutput) logTerminalOutput.style.display = 'none !important';
+        if (dashboardMonitor) dashboardMonitor.style.display = 'none';
         if (terminalLeft) terminalLeft.classList.add('step-view-active');
         if (btnToggleViewMode) {
             btnToggleViewMode.setAttribute('data-i18n', 'console.btn.toggle_log_view');
@@ -5423,6 +5487,22 @@ function updateGatewayStatusUI(status) {
             btnClearLogs.removeAttribute('disabled');
         } else {
             btnClearLogs.setAttribute('disabled', 'true');
+        }
+    }
+
+    // 同步更新仪表盘（Dashboard）服务状态与呼吸灯
+    const dashServiceStatus = document.getElementById('dash-service-status');
+    const dashStatusDot = document.getElementById('dash-status-dot');
+    if (dashServiceStatus && dashStatusDot) {
+        if (status === 'running') {
+            dashServiceStatus.textContent = t('console.dash.running') || '运行中';
+            dashStatusDot.className = 'status-indicator-dot running';
+        } else if (status === 'starting') {
+            dashServiceStatus.textContent = t('console.dash.starting') || '正在启动...';
+            dashStatusDot.className = 'status-indicator-dot running';
+        } else {
+            dashServiceStatus.textContent = t('console.dash.stopped') || '已停止';
+            dashStatusDot.className = 'status-indicator-dot stopped';
         }
     }
 
