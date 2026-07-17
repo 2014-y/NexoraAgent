@@ -1995,7 +1995,6 @@ function formatLogForUser(text) {
 
     // 1. 过滤完全无需展示给小白的日志 (底层噪音调试日志)
     if (
-        cleanLine.includes('duplicate plugin id') ||
         cleanLine.includes('AGENTS.md') ||
         cleanLine.includes('SOUL.md') ||
         cleanLine.includes('TOOLS.md') ||
@@ -2009,6 +2008,9 @@ function formatLogForUser(text) {
         cleanLine.includes('doctor') ||
         cleanLine.includes('failed probing') ||
         cleanLine.includes('announced already') ||
+        cleanLine.includes('auto-enabled plugins') ||
+        cleanLine.includes('ollama/gemma4') ||
+        cleanLine.includes('starting HTTP server') ||
         cleanLine.includes('|') ||
         /^[+\s-]+$/.test(cleanLine) ||
         /^[\u2580-\u259F\s]+$/.test(cleanLine)
@@ -2016,45 +2018,61 @@ function formatLogForUser(text) {
         return null;
     }
 
-    // 2. 匹配并改造成直观的中文大白话
+    // 2. 特殊提取：[插件模块] duplicate plugin id resolved... (重写为成功装载)
+    if (cleanLine.includes('duplicate plugin id') && cleanLine.includes('plugin=')) {
+        const pluginMatch = cleanLine.match(/plugin=([a-zA-Z0-9_-]+)/i);
+        if (pluginMatch) {
+            const pluginName = pluginMatch[1].trim();
+            const displayPluginName = pluginName.charAt(0).toUpperCase() + pluginName.slice(1);
+            return `[插件模块] 成功装载 ${displayPluginName} 消息通道插件`;
+        }
+        return null;
+    }
+
+    // 过滤无用的 duplicate plugin 警告
+    if (cleanLine.includes('duplicate plugin id')) {
+        return null;
+    }
+
+    // 3. 匹配并改造成直观的中文大白话
     
     // 大模型配置装载
     if (cleanLine.includes('agent model:')) {
         const match = cleanLine.match(/agent model:\s*([^\s]+)/i);
         const modelName = match ? match[1] : 'Agnes-2.0';
-        return `💡 正在装载大模型智能推理引擎：${modelName}`;
+        return `[系统核心] 成功接入大模型推理引擎：${modelName}`;
     }
 
     // 端口绑定就绪
-    if (cleanLine.includes('HTTP server listening') || cleanLine.includes('[gateway] ready') || cleanLine.includes('gateway] ready')) {
-        return `✅ 本地大模型网关端口绑定成功，本地服务接口已加载就绪！`;
+    if (cleanLine.includes('HTTP server listening') || cleanLine.includes('HTTP 本地服务已监听') || cleanLine.includes('[gateway] ready') || cleanLine.includes('gateway] ready')) {
+        return `[系统核心] 网关本地服务接口就绪，正在监听内部端口`;
     }
 
-    // 扩展插件与进程启动
-    if (cleanLine.includes('starting channels and sidecars')) {
-        return `⚙️ 正在初始化连接通道、扩展插件与后台进程驱动...`;
+    // 正在拉起核心引擎
+    if (cleanLine.includes('正在拉起Nexora Agent核心') || cleanLine.includes('starting channels and sidecars')) {
+        return `[系统核心] 正在初始化连接通道与插件进程驱动...`;
     }
 
     // 核心业务件装配就绪
-    if (cleanLine.includes('Runtime initialized') || cleanLine.includes('core server listening') || cleanLine.includes('核心业务件装配完毕')) {
-        return `🚀 Nexora Agent 智能网关核心引擎装配完毕，所有核心服务均已就绪！`;
+    if (cleanLine.includes('Runtime initialized') || cleanLine.includes('core server listening') || cleanLine.includes('核心业务件装配完毕') || cleanLine.includes('全部引擎启动就绪')) {
+        return `[系统核心] 所有核心业务组件装配完毕，核心服务已就绪！`;
     }
 
     // 收到用户消息并调用大模型
     if (cleanLine.includes('[provider-transport-fetch] [model-fetch] start') || (cleanLine.includes('model-fetch') && cleanLine.includes('method=POST'))) {
-        return `💬 收到通道聊天消息，正在调用大语言模型进行智能思考与推理...`;
+        return `[大模型服务] 收到通道聊天消息，正在调用大语言模型进行推理思考...`;
     }
 
     // 模型推理响应成功
     if (cleanLine.includes('[model-fetch] response') && cleanLine.includes('status=200')) {
         const elapsedMatch = cleanLine.match(/elapsedMs=([0-9]+)/);
-        const elapsed = elapsedMatch ? `${elapsedMatch[1]}毫秒` : '暂无记录';
-        return `✨ 智能回复生成成功！已安全投递至通讯通道 (本次推理耗时: ${elapsed})`;
+        const elapsed = elapsedMatch ? `${elapsedMatch[1]}ms` : '';
+        return `[大模型服务] 智能回复生成成功！已安全投递至通讯通道 ${elapsed ? `(耗时: ${elapsed})` : ''}`;
     }
 
     // 模型推理响应失败
     if (cleanLine.includes('[model-fetch] response') && !cleanLine.includes('status=200')) {
-        return `⚠️ 模型请求失败，请检查您的网络连接或配置。`;
+        return `[大模型服务] ⚠️ 智能回复生成失败，请检查您的网络连接或配置。`;
     }
 
     // 计费凭证与 Token 消耗
@@ -2063,50 +2081,55 @@ function formatLogForUser(text) {
         const modelName = tokenMatch ? tokenMatch[1] : '';
         const tokenUsage = tokenMatch ? tokenMatch[2] : '';
         if (tokenUsage) {
-            return `📊 流量记账：大模型 ${modelName} 本次会话消耗了 ${tokenUsage} tokens`;
+            return `[对话账单] 计费流量记账成功：大模型 ${modelName} 本次会话消耗了 ${tokenUsage} tokens`;
         }
-        return `📊 流量计费凭证保存成功！`;
+        return `[对话账单] 流量计费凭证已安全保存`;
     }
 
     // 微信扫码请求
     if (lowerLine.includes('weixin scan') || lowerLine.includes('wechat scan') || lowerLine.includes('please scan')) {
-        return `📸 检测到微信登录扫码请求，请点击右侧「微信通道」进行扫码授权登录！`;
+        return `[微信插件] 📸 检测到微信登录扫码请求，请点击右侧「微信通道」进行扫码授权登录！`;
     }
 
     // 微信通道连接就绪
     if (lowerLine.includes('weixin bound') || lowerLine.includes('wechat bound') || lowerLine.includes('ilink client ready')) {
-        return `🟢 微信消息接收通道已成功连接！正在实时监听群聊与私聊消息...`;
+        return `[微信插件] 🟢 微信消息接收通道已成功连接！正在实时监听群聊与私聊消息...`;
     }
 
     // 微信断开重连
     if (lowerLine.includes('weixin login failed') || lowerLine.includes('weixin disconnected') || lowerLine.includes('weixin connection lost')) {
-        return `🔴 微信通道连接断开，正在尝试后台自动重连中...`;
+        return `[微信插件] 🔴 微信通道连接断开，正在后台尝试自动重连中...`;
     }
 
     // QQ 机器人通道就绪
     if (lowerLine.includes('qqbot ready') || lowerLine.includes('qqbot connected') || lowerLine.includes('qq-bot connected')) {
-        return `🟢 QQ 机器人消息通道已成功上线连接！正在实时接收消息中...`;
+        return `[QQ机器人] 🟢 QQ 机器人消息通道已成功上线连接！正在实时接收消息中...`;
     }
 
     // 飞书/Lark 通道就绪
     if (lowerLine.includes('feishu ready') || lowerLine.includes('feishu connected') || lowerLine.includes('lark connected')) {
-        return `🟢 飞书/Lark 消息通道已成功上线连接！正在实时接收消息中...`;
+        return `[飞书插件] 🟢 飞书/Lark 消息通道已成功上线连接！正在实时接收消息中...`;
+    }
+
+    // 健康监测
+    if (cleanLine.includes('健康状态已上线') || cleanLine.includes('health-check')) {
+        return `[健康监测] 心跳与健康守护状态已上线`;
     }
 
     // 载入最新系统配置
     if (cleanLine.includes('loading configuration') || cleanLine.includes('loaded config')) {
-        return `⚙️ 正在装载最新的用户个人系统配置参数...`;
+        return `[系统核心] 正在装载最新的用户个人系统配置参数...`;
     }
 
     // 处理接收的消息
     if (lowerLine.includes('on message') || lowerLine.includes('received message') || lowerLine.includes('handle message')) {
-        return `📩 正在处理并分析接收到的即时聊天消息...`;
+        return `[系统核心] 📩 正在处理并分析接收到的即时聊天消息...`;
     }
 
     // 遇到报错（非 Bonjour 的警告）
     if (lowerLine.includes('error') || lowerLine.includes('exception') || lowerLine.includes('failed')) {
         if (lowerLine.includes('bonjour') || lowerLine.includes('probe')) return null;
-        return `⚠️ 系统运行警告：${cleanLine}`;
+        return `[系统警报] ⚠️ 系统运行警告：${cleanLine}`;
     }
 
     // 其余的噪音直接过滤
