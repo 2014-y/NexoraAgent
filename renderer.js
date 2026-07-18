@@ -9860,11 +9860,12 @@ async function applyAccelerationAutoSelect(options = {}) {
     }
     // 迟滞：差距太小不切换，减少来回跳导致的短暂卡顿
     const current = pool.find((n) => n && n.name === accelerationState.selectedProxy);
-    if (current && typeof current.latency === 'number' && current.latency > 0
+    const hysteresis = getAccelerationAutoSelectThresholdMs();
+    if (hysteresis > 0 && current && typeof current.latency === 'number' && current.latency > 0
         && typeof best.latency === 'number' && best.latency > 0
-        && (current.latency - best.latency) < 40) {
+        && (current.latency - best.latency) < hysteresis) {
         if (notifyKeep) {
-            showToast(`自动测速完成 · 保持当前节点（差距 < 40ms）`);
+            showToast(`自动测速完成 · 保持当前节点（差距 < ${hysteresis}ms）`);
         }
         return null;
     }
@@ -10647,6 +10648,28 @@ function getAccelerationAutoSelectIntervalSec() {
 
 const ACC_AUTO_SELECT_INTERVAL_OPTIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 120, 300, 600];
 
+const ACC_AUTO_SELECT_THRESHOLD_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+
+function getAccelerationAutoSelectThresholdMs() {
+    const raw = localStorage.getItem('acc_auto_select_threshold');
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) return 5;
+    return n;
+}
+
+function syncAccelerationAutoSelectThresholdSelect(ms) {
+    const el = document.getElementById('acc-auto-select-threshold');
+    if (!el) return;
+    const value = String(ms != null ? ms : getAccelerationAutoSelectThresholdMs());
+    const html = ACC_AUTO_SELECT_THRESHOLD_OPTIONS.map((v) => {
+        const str = String(v);
+        const label = v === 0 ? '迟滞: 关闭' : `迟滞: ${v}ms`;
+        return '<option value="' + str + '"' + (str === value ? ' selected' : '') + '>' + label + '</option>';
+    }).join('');
+    el.innerHTML = html;
+    el.value = value;
+}
+
 /** 以 localStorage 为准重建 option，避免隐藏时改 value 后闭口文字不刷新 */
 function syncAccelerationAutoSelectIntervalSelect(sec) {
     const intervalInput = document.getElementById('acc-auto-select-interval');
@@ -11161,6 +11184,21 @@ function initAccelerationChannel() {
         // 展开前先按缓存校正，避免闭口文字和真实值不一致
         autoSelectInterval.addEventListener('mousedown', () => {
             syncAccelerationAutoSelectIntervalSelect();
+        });
+    }
+
+    const autoSelectThreshold = document.getElementById('acc-auto-select-threshold');
+    if (autoSelectThreshold) {
+        syncAccelerationAutoSelectThresholdSelect();
+        autoSelectThreshold.addEventListener('change', (e) => {
+            let val = parseInt(e.target.value, 10);
+            if (isNaN(val) || val < 0) val = 5;
+            localStorage.setItem('acc_auto_select_threshold', String(val));
+            syncAccelerationAutoSelectThresholdSelect(val);
+            showToast(val === 0 ? '迟滞已关闭，始终切换到最低延迟节点' : `迟滞阈值已改为 ${val}ms`);
+        });
+        autoSelectThreshold.addEventListener('mousedown', () => {
+            syncAccelerationAutoSelectThresholdSelect();
         });
     }
 

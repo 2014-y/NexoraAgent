@@ -1191,6 +1191,10 @@ body.maximized .app-container {
   border-radius: 8px;
 }
 
+.acc-proxy-interval #acc-auto-select-threshold {
+  width: 110px;
+}
+
 @media (max-width: 900px) {
   .acc-proxy-hero {
     grid-template-columns: 1fr;

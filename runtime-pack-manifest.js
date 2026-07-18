@@ -3,7 +3,7 @@
  * 网关运行时打包 / 解压共用清单（单一真相源）。
  * pack-gateway-runtime.js 与 gateway-runtime.js 必须引用同一份。
  */
-const RUNTIME_PACK_ID = 'pack-8cbca6f64275';
+const RUNTIME_PACK_ID = 'pack-86a59d65602d';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
 const REQUIRED_RUNTIME_MARKERS = [

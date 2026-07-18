@@ -1526,6 +1526,19 @@
                       <option value="300">300秒/次</option>
                       <option value="600">600秒/次</option>
                     </select>
+                    <select id="acc-auto-select-threshold" class="acc-select" autocomplete="off" aria-label="切换迟滞阈值" title="延迟差距小于该值时不切换节点，设为 0 表示始终切换到最低延迟">
+                      <option value="0">迟滞: 关闭</option>
+                      <option value="5" selected>迟滞: 5ms</option>
+                      <option value="10">迟滞: 10ms</option>
+                      <option value="15">迟滞: 15ms</option>
+                      <option value="20">迟滞: 20ms</option>
+                      <option value="25">迟滞: 25ms</option>
+                      <option value="30">迟滞: 30ms</option>
+                      <option value="35">迟滞: 35ms</option>
+                      <option value="40">迟滞: 40ms</option>
+                      <option value="45">迟滞: 45ms</option>
+                      <option value="50">迟滞: 50ms</option>
+                    </select>
                     <span id="acc-auto-select-status" class="acc-auto-select-status" data-i18n="acc.proxy.status_waiting">等待中</span>
                   </div>
                   <span id="acc-delay-progress" class="acc-delay-progress" hidden aria-live="polite"></span>
