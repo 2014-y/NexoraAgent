@@ -22,3 +22,9 @@ __pycache__/
 /scratch/
 .tmp-voice-test/
 .runtime-version
+
+# Voice models
+builtin-asr/
+voice-packs/
+*.tar.bz2
+*.zip

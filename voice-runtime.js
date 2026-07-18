@@ -168,7 +168,12 @@ class VoiceRuntime extends EventEmitter {
     }
 
     _findAsrModelFiles() {
-        const dir = this.asrModelDir;
+        let files = this._findAsrModelFilesInDir(this.asrModelDir);
+        if (files) return files;
+        return this._findAsrModelFilesInDir(path.join(__dirname, 'builtin-asr'));
+    }
+
+    _findAsrModelFilesInDir(dir) {
         if (!fs.existsSync(dir)) return null;
         let modelFile = null;
         let tokensFile = null;

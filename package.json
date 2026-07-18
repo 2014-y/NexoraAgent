@@ -155,6 +155,7 @@
       "!node_modules/**/LICENSE*",
       "!node_modules/**/LICENCE*",
       "plugins/**/*",
+      "builtin-asr/**/*",
       "!extensions/**/*",
       "!.node-sandbox/**/*"
     ]
