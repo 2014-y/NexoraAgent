@@ -49,6 +49,8 @@
     "node-pty": "^1.1.0",
     "open-computer-use": "0.1.54",
     "openclaw": "2026.7.1",
+    "sherpa-onnx-node": "^1.13.4",
+    "sherpa-onnx-win-x64": "^1.13.4",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0"
   },
@@ -69,7 +71,11 @@
       "**/node_modules/node-pty/**",
       "**/node_modules/@openclaw/**",
       "**/node_modules/@tencent-weixin/**",
-      "**/*.node"
+      "**/node_modules/sherpa-onnx-node/**",
+      "**/node_modules/sherpa-onnx-win-x64/**",
+      "**/tts-worker.js",
+      "**/*.node",
+      "**/*.dll"
     ],
     "icon": "config/icon.ico",
     "directories": {
@@ -118,6 +124,8 @@
       "plugin-catalog.js",
       "gateway-boot-harden.js",
       "role-config.js",
+      "voice-runtime.js",
+      "tts-worker.js",
       "runtime-pack-manifest.js",
       "patch_gateway.js",
       "capture-desktop.ps1",
@@ -146,7 +154,7 @@
       "!node_modules/**/*.{md,markdown,map,ts,tsx}",
       "!node_modules/**/LICENSE*",
       "!node_modules/**/LICENCE*",
-      "!plugins/**/*",
+      "plugins/**/*",
       "!extensions/**/*",
       "!.node-sandbox/**/*"
     ]

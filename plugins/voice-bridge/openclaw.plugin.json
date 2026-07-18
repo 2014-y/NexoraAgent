@@ -1,0 +1,24 @@
+{
+  "id": "voice-bridge",
+  "name": "Voice Bridge",
+  "description": "将渠道 AI 文字回复转发到 Nexora Agent 本机离线朗读（不改变渠道文字回传）",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否启用渠道回复本机朗读桥接"
+      },
+      "httpPort": {
+        "type": "number",
+        "default": 18791,
+        "description": "Nexora voice-runtime 本机端口"
+      }
+    }
+  }
+}

@@ -1844,6 +1844,8 @@ function sanitizeCustomRole(raw, opts = {}) {
     return { ok: false, error: '不能覆盖内置角色 ID' };
   }
 
+  const voicePackId = sanitizeText(raw && (raw.voicePackId || (raw.voice && raw.voice.packId)), 80);
+
   return {
     ok: true,
     role: {
@@ -1853,7 +1855,8 @@ function sanitizeCustomRole(raw, opts = {}) {
       summary: summary || name,
       tags,
       prompt,
-      builtin: false
+      builtin: false,
+      ...(voicePackId ? { voicePackId, voice: { packId: voicePackId } } : {})
     }
   };
 }

@@ -140,6 +140,12 @@
       "remote-policy": {
         "enabled": true
       },
+      "voice-bridge": {
+        "enabled": true,
+        "config": {
+          "httpPort": 18791
+        }
+      },
       "memory-core": {
         "enabled": false
       },
@@ -285,6 +291,7 @@
       "context-router",
       "health-check",
       "remote-policy",
+      "voice-bridge",
       "role-manager",
       "ollama",
       "duckduckgo",

@@ -2504,7 +2504,12 @@ function setupIpcListeners() {
             if (lineHtml.includes('成功接入大模型推理引擎：')) {
                 const modelVal = lineHtml.substring(lineHtml.indexOf('成功接入大模型推理引擎：') + 12);
                 const activeModelEl = document.getElementById('dash-active-model');
-                if (activeModelEl) activeModelEl.textContent = modelVal.replace(/<\/?[^>]+(>|$)/g, "").trim(); // 去除 HTML tag
+                if (activeModelEl) {
+                    let clean = modelVal.replace(/<\/?[^>]+(>|$)/g, "").trim();
+                    clean = clean.split('[')[0].trim();
+                    const parts = clean.split('/');
+                    activeModelEl.textContent = parts[parts.length - 1].trim();
+                }
             }
             
             // 微信通道
@@ -2651,6 +2656,7 @@ function setupIpcListeners() {
                 sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已停止运行。');
             }
             __openclawPanelLastUrl = '';
+            if (typeof refreshAccelerationChannel === 'function') refreshAccelerationChannel().catch(() => {});
         } 
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
@@ -2669,6 +2675,7 @@ function setupIpcListeners() {
                     __openclawPanelLastUrl = '';
                 }
             }
+            if (typeof refreshAccelerationChannel === 'function') refreshAccelerationChannel().catch(() => {});
         }
         else {
             gatewayStatus = status;
@@ -5531,16 +5538,19 @@ function updateStepperUI(progressVal) {
     }
 }
 
+function getActiveModelNameFromConfig() {
+    if (!configData || !configData.agents || !configData.agents.defaults || !configData.agents.defaults.model) {
+        return null;
+    }
+    const model = configData.agents.defaults.model.primary;
+    if (!model) return null;
+    const parts = model.split('/');
+    return parts[parts.length - 1].trim();
+}
+
 // 6. UI 状态刷新
 function updateGatewayStatusUI(status) {
-    const pulseVisualizer = document.getElementById('pulse-visualizer');
-    if (pulseVisualizer) {
-        if (status === 'running' || status === 'starting' || status === 'upgrading') {
-            pulseVisualizer.classList.add('active');
-        } else {
-            pulseVisualizer.classList.remove('active');
-        }
-    }
+
 
     if (status !== 'running') {
         gatewayFullyReady = false;
@@ -5582,6 +5592,12 @@ function updateGatewayStatusUI(status) {
         if (status === 'running') {
             dashServiceStatus.textContent = getCleanText('console.dash.running', '运行中');
             dashStatusDot.className = 'status-indicator-dot running';
+            
+            const activeModelEl = document.getElementById('dash-active-model');
+            if (activeModelEl) {
+                const modelName = getActiveModelNameFromConfig() || '已启动';
+                activeModelEl.textContent = modelName;
+            }
         } else if (status === 'starting') {
             dashServiceStatus.textContent = getCleanText('console.dash.starting', '正在启动...');
             dashStatusDot.className = 'status-indicator-dot running';
@@ -5909,6 +5925,14 @@ function setupTabSwitching() {
                     Promise.resolve().then(() => {
                         if (typeof loadRoleConfigState === 'function') {
                             return loadRoleConfigState({ preferActive: true });
+                        }
+                    }).catch((err) => console.error(err));
+                }
+
+                if (currentTab === 'voice-view') {
+                    Promise.resolve().then(() => {
+                        if (typeof refreshVoicePanel === 'function') {
+                            return refreshVoicePanel();
                         }
                     }).catch((err) => console.error(err));
                 }
@@ -7910,6 +7934,11 @@ async function handleSendMessage() {
             // 计入会话用量
             const usage = result.usage || { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 };
             addSessionLog('dialog-test', modelId, usage.prompt_tokens, usage.completion_tokens, 0, 1200);
+
+            // 本地离线语音：桌面聊天回复朗读
+            if (typeof maybeSpeakDesktopReply === 'function') {
+                maybeSpeakDesktopReply(reply);
+            }
         } else {
             const errText = await response.text();
             aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 接口响应错误 (HTTP ${response.status}): ${errText || '未知错误'}</span>`;
@@ -9558,7 +9587,7 @@ async function runAccelerationIpDetect(options = {}) {
         return null;
     }
 
-    const viaProxy = !!(accelerationState && accelerationState.enabled);
+    const viaProxy = !!(accelerationState && accelerationState.running);
     accelerationIpDetectInFlight = true;
     accelerationIpDetectStartedAt = Date.now();
     paint(t('检测中...', 'Detecting...', '檢測中...'), '', viaProxy ? t('正在检测代理出口 IP', 'Detecting proxy exit IP', '正在檢測代理出口 IP') : t('正在检测本机公网出口', 'Detecting local exit IP', '正在檢測本機公網出口'));
@@ -10103,24 +10132,25 @@ async function refreshAccelerationChannel() {
 
 function renderAccelerationChannel(data) {
     const enabled = !!(data && data.enabled);
+    const running = !!(data && data.running);
     const settingToggle = document.getElementById('setting-acceleration-toggle');
     const pageToggle = document.getElementById('acc-page-enabled-toggle');
     const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
     const systemProxyToggle = document.getElementById('acc-system-proxy-toggle');
     const tunToggle = document.getElementById('acc-tun-toggle');
     if (settingToggle) settingToggle.checked = enabled;
-    if (pageToggle) pageToggle.checked = enabled;
-    if (controlsToggle) controlsToggle.checked = enabled;
-    if (systemProxyToggle) systemProxyToggle.checked = !!data.systemProxy;
-    if (tunToggle) tunToggle.checked = !!data.virtualNic;
+    if (pageToggle) pageToggle.checked = running;
+    if (controlsToggle) controlsToggle.checked = running;
+    if (systemProxyToggle) systemProxyToggle.checked = running && !!data.systemProxy;
+    if (tunToggle) tunToggle.checked = running && !!data.virtualNic;
 
     // 仪表盘开关同步
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
     const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
     const dashTunToggle = document.getElementById('acc-dash-tun-toggle');
-    if (dashEnabledToggle) dashEnabledToggle.checked = enabled;
-    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = !!data.systemProxy;
-    if (dashTunToggle) dashTunToggle.checked = !!data.virtualNic;
+    if (dashEnabledToggle) dashEnabledToggle.checked = running;
+    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = running && !!data.systemProxy;
+    if (dashTunToggle) dashTunToggle.checked = running && !!data.virtualNic;
 
     // 仪表盘出站模式同步
     const mode = data.mode || 'rule';
@@ -10156,10 +10186,10 @@ function renderAccelerationChannel(data) {
     const dashRunStatus = document.getElementById('acc-dash-run-status');
     if (dashRunStatus) {
         if (dashRunStatus.parentElement) {
-            dashRunStatus.parentElement.classList.toggle('enabled', enabled);
+            dashRunStatus.parentElement.classList.toggle('enabled', running);
         }
-        const statusKey = !enabled
-            ? 'acc.status.disabled'
+        const statusKey = !running
+            ? (enabled ? 'acc.status.stopped' : 'acc.status.disabled')
             : data.virtualNic && data.systemProxy
                 ? 'acc.status.tun_proxy'
                 : data.virtualNic
@@ -10173,7 +10203,7 @@ function renderAccelerationChannel(data) {
 
     const desc = document.getElementById('acc-enabled-desc');
     if (desc) {
-        if (enabled && data && data.mixedPort) {
+        if (running && data && data.mixedPort) {
             desc.textContent = `开启后网关与客户端请求走本地加速代理 (当前端口: ${data.mixedPort})`;
         } else {
             desc.textContent = '开启后网关与客户端请求走本地加速代理';
@@ -10182,10 +10212,15 @@ function renderAccelerationChannel(data) {
 
     const pill = document.getElementById('acc-status-pill');
     if (pill) {
-        const pillKey = enabled ? 'acc.status.enabled' : 'acc.status.disabled';
+        let pillKey = 'acc.status.disabled';
+        if (running) {
+            pillKey = 'acc.status.enabled';
+        } else if (enabled) {
+            pillKey = 'acc.status.stopped';
+        }
         pill.setAttribute('data-i18n', pillKey);
         pill.textContent = t(pillKey);
-        pill.classList.toggle('enabled', enabled);
+        pill.classList.toggle('enabled', running);
     }
     const mixed = document.getElementById('acc-mixed-port');
     const dashMixed = document.getElementById('acc-dash-mixed-port');
@@ -10526,6 +10561,7 @@ function renderAccelerationChannel(data) {
     }
 
     updateAccelerationBusyUi();
+    setupAutoSelectTimer();
 }
 
 window.toggleGroupExpand = function(groupName) {
@@ -10684,7 +10720,8 @@ async function refreshAccelerationNodesAndLatency(options = {}) {
 }
 
 async function setAccelerationEnabledFromUi(enabled) {
-    if (accelerationBusy || !window.api || !window.api.setAccelerationEnabled) return;
+    if (!window.api || !window.api.setAccelerationEnabled) return;
+    if (enabled && accelerationBusy) return;
     try {
         setAccelerationBusy(true, enabled ? '启动中...' : '关闭中...');
         const res = await window.api.setAccelerationEnabled(!!enabled, accelerationState && accelerationState.activeProfileId);
@@ -10883,7 +10920,9 @@ function setupAutoSelectTimer(options = {}) {
     }
     stopAccelerationAutoSelectCountdown();
 
-    const enabled = localStorage.getItem('acc_auto_select_enabled') === 'true';
+    const clashEnabled = !!(accelerationState && accelerationState.enabled);
+    const clashRunning = !!(accelerationState && accelerationState.running);
+    const enabled = localStorage.getItem('acc_auto_select_enabled') === 'true' && clashEnabled && clashRunning;
     const intervalSec = getAccelerationAutoSelectIntervalSec();
     // 仅在从未写过时落盘，避免启动时用默认值覆盖用户缓存
     if (localStorage.getItem('acc_auto_select_interval') == null) {
@@ -10975,7 +11014,20 @@ function initAccelerationChannel() {
     const pageToggle = document.getElementById('acc-page-enabled-toggle');
     const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
     const syncEnable = (e) => setAccelerationEnabledFromUi(e.target.checked);
-    if (settingToggle) settingToggle.addEventListener('change', syncEnable);
+    if (settingToggle) {
+        settingToggle.addEventListener('change', async (e) => {
+            const checked = e.target.checked;
+            if (checked) {
+                // 这个设置开 就把这几个开关全部打开
+                try {
+                    await window.api.setAccelerationOptions({ systemProxy: true, virtualNic: true });
+                } catch (err) {
+                    console.warn('[Acceleration] failed to pre-enable options:', err.message);
+                }
+            }
+            await setAccelerationEnabledFromUi(checked);
+        });
+    }
     if (pageToggle) pageToggle.addEventListener('change', syncEnable);
     if (controlsToggle) controlsToggle.addEventListener('change', syncEnable);
 
@@ -11900,9 +11952,9 @@ function drawDashboardTrafficRing(uploadTotal, downloadTotal) {
     ctx.stroke();
 }
 
-// 优先抓取 Clash 真实内存占用，若未启用或抓取失败则回退至波动模拟，绝对零挂起
 function getClashMemoryMock() {
-    if (!accelerationState || !accelerationState.enabled) {
+    const running = !!(accelerationState && accelerationState.running);
+    if (!running) {
         return t('0.0 MB (未启动)', '0.0 MB (Inactive)', '0.0 MB (未啟動)');
     }
     if (accelerationState.clashMemory && accelerationState.clashMemory !== '0.0 MB' && accelerationState.clashMemory !== 'INACTIVE') {
@@ -12507,5 +12559,592 @@ function initRolesUI() {
             await applyRoleAction({ action: 'delete', roleId: role.id }, 'roles.toast.deleted', '角色已删除');
         });
     }
+}
+
+// ─── 语音管理：设置 / 下载 / 朗读 / 唤醒 / 语音对话 ───
+let __voiceState = null;
+let __voiceUiBound = false;
+let __voiceRec = null;
+let __voiceRecMode = 'off'; // off | wake | chat
+let __voiceChatBuffer = '';
+let __voiceChatSilenceTimer = null;
+let __voiceApplyingUi = false;
+
+function voiceT(key, fallback) {
+    try {
+        if (typeof t === 'function') {
+            const v = t(key);
+            if (v && v !== key) return v;
+        }
+    } catch (err) {}
+    return fallback || key;
+}
+
+function escapeVoiceHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function normalizeWakeText(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/[，。！？、,.!?]/g, '');
+}
+
+function voiceStatusLabel(status, enabled) {
+    const isEnabled = enabled !== undefined
+        ? !!enabled
+        : !!(__voiceState && __voiceState.settings && __voiceState.settings.enabled);
+    const map = {
+        idle: isEnabled
+            ? voiceT('voice.status.ready', '空闲（就绪）')
+            : voiceT('voice.status.idle', '未启用'),
+        listening_wake: voiceT('voice.status.listening_wake', '倾听唤醒词中'),
+        listening: voiceT('voice.status.listening', '正在听你说话'),
+        speaking: voiceT('voice.status.speaking', '正在朗读'),
+        downloading: voiceT('voice.status.downloading', '正在下载语音包')
+    };
+    return map[status] || map.idle;
+}
+
+async function maybeSpeakDesktopReply(text, roleId) {
+    try {
+        if (!window.api || !window.api.voice) return;
+        const st = __voiceState || (await window.api.voice.getState()).data;
+        if (!st || !st.settings) return;
+        const s = st.settings;
+        if (!s.enabled || s.muted) return;
+        if (!(s.desktopSpeak || s.voiceChat)) return;
+        const clean = String(text || '').trim();
+        if (!clean || clean.startsWith('⚠️') || clean.startsWith('❌')) return;
+        await window.api.voice.speak({
+            text: clean,
+            source: 'desktop',
+            roleId: roleId || ((__roleConfigState && __roleConfigState.activeRoleId) || undefined)
+        });
+    } catch (e) {
+        console.warn('[Voice] desktop speak skipped:', e);
+    }
+}
+
+function updateVoiceStatusUi(state) {
+    if (!state) return;
+    const statusDot = document.getElementById('voice-status-dot');
+    const statusText = document.getElementById('voice-status-text');
+    if (statusDot) statusDot.setAttribute('data-status', state.status || 'idle');
+    if (statusText) statusText.textContent = voiceStatusLabel(state.status || 'idle', state.settings && state.settings.enabled);
+    const note = document.getElementById('voice-engine-note');
+    if (note && state.engineNote) note.textContent = state.engineNote;
+
+    const pulseVisualizer = document.getElementById('pulse-visualizer');
+    const pulseModule = document.getElementById('ai-pulse-module');
+    if (pulseVisualizer && pulseModule) {
+        if (state.speaking || state.status === 'speaking' || state.status === 'listening') {
+            pulseVisualizer.classList.add('active');
+            pulseModule.style.opacity = '0.8';
+        } else {
+            pulseVisualizer.classList.remove('active');
+            pulseModule.style.opacity = '0';
+        }
+    }
+}
+
+function applyVoiceStateToUi(state) {
+    if (!state) return;
+    __voiceState = state;
+    __voiceApplyingUi = true;
+    try {
+        const s = state.settings || {};
+        const setChecked = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!val;
+        };
+        setChecked('voice-toggle-enabled', s.enabled);
+        setChecked('voice-toggle-channel', s.channelReplySpeak);
+        setChecked('voice-toggle-wake', s.wakeListen);
+        setChecked('voice-toggle-chat', s.voiceChat);
+        setChecked('voice-toggle-desktop', s.desktopSpeak !== false);
+        setChecked('voice-toggle-mute', s.muted);
+
+        const vol = document.getElementById('voice-volume-slider');
+        const volVal = document.getElementById('voice-volume-value');
+        const pct = Math.round((Number(s.volume) || 0.8) * 100);
+        if (vol && document.activeElement !== vol) vol.value = String(pct);
+        if (volVal) volVal.textContent = pct + '%';
+
+        const wakeInput = document.getElementById('voice-wake-word');
+        if (wakeInput && document.activeElement !== wakeInput) wakeInput.value = s.wakeWord || '你好 Nexora';
+
+        const rateSelect = document.getElementById('voice-rate');
+        if (rateSelect) rateSelect.value = String(s.rate || 0);
+
+        updateVoiceStatusUi(state);
+
+        fillVoicePackSelects(state);
+        renderVoicePackGrids(state);
+    } finally {
+        __voiceApplyingUi = false;
+    }
+
+    syncVoiceListeningFromSettings(state.settings || {});
+}
+
+function getVoicePackById(packId) {
+    const catalog = (__voiceState && __voiceState.catalog) || [];
+    return catalog.find((p) => p.id === packId) || null;
+}
+
+/** 试听句按音色语言匹配：英文包用英文，中文包用中文，避免神经引擎读不了导致回退到系统女声 */
+function voicePreviewPhrase(pack) {
+    if (pack && pack.lang === 'en') {
+        return 'Hello, I am Nexora Agent local voice assistant.';
+    }
+    return voiceT('voice.test.phrase', '你好，我是 Nexora Agent 本地语音助手。');
+}
+
+async function previewVoicePack(packId) {
+    if (!window.api || !window.api.voice) return;
+    const pack = getVoicePackById(packId);
+    if (!pack) return;
+    if (!pack.installed) {
+        showToast(voiceT('voice.toast.not_downloaded', '该男声音色还未下载，请先下载语音包'));
+        return;
+    }
+    await window.api.voice.speak({
+        text: voicePreviewPhrase(pack),
+        source: 'preview',
+        packId: pack.id
+    });
+}
+
+function warnIfPackNotInstalled(packId) {
+    const pack = getVoicePackById(packId);
+    if (pack && !pack.installed) {
+        showToast(voiceT('voice.toast.not_downloaded', '该男声音色还未下载，请先下载语音包'));
+    }
+}
+
+function fillVoicePackSelects(state) {
+    const catalog = (state && state.catalog) || [];
+    const activeId = (state.settings && state.settings.activePackId) || '';
+    const sel = document.getElementById('voice-active-pack');
+    if (!sel) return;
+    // 下拉展开时不要重建 options，否则会闪烁且无法点选
+    if (document.activeElement === sel) {
+        if (activeId) sel.value = activeId;
+        return;
+    }
+    const signature = catalog.map((p) => `${p.id}:${p.installed ? 1 : 0}`).join('|');
+    if (sel.dataset.voiceSig === signature) {
+        const next = activeId || (catalog[0] && catalog[0].id) || '';
+        if (sel.value !== next) sel.value = next;
+        return;
+    }
+    sel.innerHTML = catalog.map((p) => {
+        const mark = p.installed ? '✓ ' : '';
+        return `<option value="${escapeVoiceHtml(p.id)}">${mark}${escapeVoiceHtml(p.name)}</option>`;
+    }).join('');
+    sel.dataset.voiceSig = signature;
+    sel.value = activeId || (catalog[0] && catalog[0].id) || '';
+}
+
+function renderVoicePackGrids(state) {
+    const grid = document.getElementById('voice-pack-grid');
+    if (!grid) return;
+    const catalog = (state && state.catalog) || (__voiceState && __voiceState.catalog) || [];
+    const signature = catalog.map((p) => `${p.id}:${p.installed ? 1 : 0}:${p.active ? 1 : 0}`).join('|');
+    if (grid.dataset.voiceSig === signature) return;
+
+    grid.innerHTML = catalog.map((pack) => {
+        const badge = voiceT(pack.badgeKey, pack.group === 'jarvis' ? '贾维斯风' : '中文');
+        const status = pack.installed ? '' : pack.size;
+        const previewBtn = pack.installed
+            ? `<button type="button" class="btn-secondary btn-voice-preview" data-voice-id="${escapeVoiceHtml(pack.id)}">${escapeVoiceHtml(voiceT('voice.btn.preview', '试听'))}</button>`
+            : '';
+        const action = pack.installed
+            ? (pack.active
+                ? `<button type="button" class="btn-secondary" disabled>${escapeVoiceHtml(voiceT('voice.badge.active', '使用中'))}</button>`
+                : `<button type="button" class="btn-primary btn-voice-use" data-voice-id="${escapeVoiceHtml(pack.id)}">${escapeVoiceHtml(voiceT('voice.btn.use', '设为当前'))}</button>`)
+            : `<button type="button" class="btn-primary btn-voice-download" data-voice-id="${escapeVoiceHtml(pack.id)}">${escapeVoiceHtml(voiceT('voice.btn.download', '下载语音包'))}</button>`;
+        return `
+        <div class="plugin-card-item" data-voice-id="${escapeVoiceHtml(pack.id)}">
+          <div class="plugin-card-top">
+            <div class="plugin-card-title-row">
+              <h4>${escapeVoiceHtml(pack.name)}</h4>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span class="voice-badge">${escapeVoiceHtml(badge)}</span>
+                ${pack.license === '自定义' ? `<button type="button" class="btn-voice-delete" data-voice-id="${escapeVoiceHtml(pack.id)}" title="删除" style="background: transparent; border: none; cursor: pointer; opacity: 0.6; padding: 0 4px; font-size: 12px;">❌</button>` : ''}
+              </div>
+            </div>
+            <p>${escapeVoiceHtml(pack.summary)}</p>
+          </div>
+          <div class="plugin-card-bot voice-card-actions">
+            <span class="plugin-card-hint">${escapeVoiceHtml(status)}</span>
+            <div style="display: flex; gap: 8px;">
+              ${previewBtn}
+              ${action}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    grid.dataset.voiceSig = signature;
+
+    grid.querySelectorAll('.btn-voice-preview').forEach((btn) => {
+        btn.onclick = () => previewVoicePack(btn.getAttribute('data-voice-id'));
+    });
+    grid.querySelectorAll('.btn-voice-delete').forEach((btn) => {
+        btn.onclick = async (e) => {
+            e.stopPropagation();
+            if (!confirm('确定要删除这个自定义语音包吗？')) return;
+            const id = btn.getAttribute('data-voice-id');
+            const res = await window.api.voice.deleteCustomPack(id);
+            if (!res || !res.success) {
+                console.error('Failed to delete pack:', res);
+            }
+        };
+    });
+    grid.querySelectorAll('.btn-voice-use').forEach((btn) => {
+        btn.onclick = async () => {
+            const id = btn.getAttribute('data-voice-id');
+            const res = await window.api.voice.setSettings({ activePackId: id });
+            if (res && res.data) applyVoiceStateToUi(res.data);
+            warnIfPackNotInstalled(id);
+        };
+    });
+    grid.querySelectorAll('.btn-voice-download').forEach((btn) => {
+        btn.onclick = async () => {
+            const id = btn.getAttribute('data-voice-id');
+            btn.disabled = true;
+            try {
+                const res = await window.api.voice.downloadPack(id);
+                if (res && res.success) {
+                    showToast(voiceT('voice.toast.download_ok', '语音包已下载'));
+                    const st = await window.api.voice.getState();
+                    if (st && st.data) applyVoiceStateToUi(st.data);
+                } else {
+                    showToast(voiceT('voice.toast.download_fail', '下载失败：{error}').replace('{error}', (res && res.error) || 'unknown'));
+                }
+            } finally {
+                btn.disabled = false;
+            }
+        };
+    });
+}
+
+async function patchVoiceSettings(patch) {
+    if (!window.api || !window.api.voice) return;
+    const res = await window.api.voice.setSettings(patch);
+    if (res && res.data) applyVoiceStateToUi(res.data);
+}
+
+function stopVoiceRecognition() {
+    __voiceRecMode = 'off';
+    __voiceChatBuffer = '';
+    if (__voiceChatSilenceTimer) {
+        clearTimeout(__voiceChatSilenceTimer);
+        __voiceChatSilenceTimer = null;
+    }
+    if (__voiceRec) {
+        try { __voiceRec.onresult = null; } catch (e) {}
+        try { __voiceRec.onerror = null; } catch (e) {}
+        try { __voiceRec.onend = null; } catch (e) {}
+        try { __voiceRec.stop(); } catch (e) {}
+        __voiceRec = null;
+    }
+}
+
+function createSpeechRecognition() {
+    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Ctor) return null;
+    const rec = new Ctor();
+    rec.lang = (localStorage.getItem('setting_language') || 'zh-CN').startsWith('en') ? 'en-US' : 'zh-CN';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    return rec;
+}
+
+function startVoiceRecognition(mode) {
+    stopVoiceRecognition();
+    const rec = createSpeechRecognition();
+    if (!rec) {
+        showToast(voiceT('voice.toast.mic_denied', '无法访问麦克风，请在系统设置中允许'));
+        return;
+    }
+    __voiceRec = rec;
+    __voiceRecMode = mode;
+    __voiceChatBuffer = '';
+
+    rec.onresult = (event) => {
+        let interim = '';
+        let finalText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const piece = event.results[i][0].transcript || '';
+            if (event.results[i].isFinal) finalText += piece;
+            else interim += piece;
+        }
+        const heard = (finalText || interim || '').trim();
+        if (!heard) return;
+
+        if (__voiceRecMode === 'wake') {
+            const settings = (__voiceState && __voiceState.settings) || {};
+            const wake = normalizeWakeText(settings.wakeWord || '你好 Nexora');
+            const got = normalizeWakeText(heard);
+            if (wake && got.includes(wake)) {
+                if (settings.voiceChat) enterVoiceChatListening();
+                else {
+                    showToast(voiceT('voice.status.listening_wake', '倾听唤醒词中') + ': OK');
+                }
+            }
+            return;
+        }
+
+        if (__voiceRecMode === 'chat') {
+            if (finalText) {
+                __voiceChatBuffer = (__voiceChatBuffer + ' ' + finalText).trim();
+            }
+            if (__voiceChatSilenceTimer) clearTimeout(__voiceChatSilenceTimer);
+            __voiceChatSilenceTimer = setTimeout(() => {
+                const utter = (__voiceChatBuffer || heard).trim();
+                __voiceChatBuffer = '';
+                if (utter) submitVoiceChatUtterance(utter);
+            }, 1400);
+        }
+    };
+
+    rec.onerror = (ev) => {
+        if (ev && (ev.error === 'not-allowed' || ev.error === 'service-not-allowed')) {
+            showToast(voiceT('voice.toast.mic_denied', '无法访问麦克风，请在系统设置中允许'));
+            stopVoiceRecognition();
+            if (window.api && window.api.voice) window.api.voice.setListenStatus('idle');
+        }
+    };
+
+    rec.onend = () => {
+        // 持续倾听：若仍应监听则自动重启
+        if (__voiceRecMode === 'off') return;
+        const s = (__voiceState && __voiceState.settings) || {};
+        if (!s.enabled) return;
+        if (__voiceRecMode === 'wake' && s.wakeListen) {
+            try { rec.start(); } catch (e) {}
+        } else if (__voiceRecMode === 'chat' && s.voiceChat) {
+            try { rec.start(); } catch (e) {}
+        }
+    };
+
+    try {
+        rec.start();
+        if (window.api && window.api.voice) {
+            window.api.voice.setListenStatus(mode === 'wake' ? 'listening_wake' : 'listening');
+        }
+    } catch (e) {
+        showToast(voiceT('voice.toast.mic_denied', '无法访问麦克风，请在系统设置中允许'));
+        stopVoiceRecognition();
+    }
+}
+
+function enterVoiceChatListening() {
+    const s = (__voiceState && __voiceState.settings) || {};
+    if (!s.enabled || !s.voiceChat) return;
+    startVoiceRecognition('chat');
+    showToast(voiceT('voice.status.listening', '正在听你说话'));
+}
+
+async function submitVoiceChatUtterance(text) {
+    const clean = String(text || '').trim();
+    if (!clean) return;
+
+    // 回到唤醒待机，避免把 AI 播报再识别进去
+    const s = (__voiceState && __voiceState.settings) || {};
+    if (s.wakeListen) startVoiceRecognition('wake');
+    else stopVoiceRecognition();
+
+    try {
+        const input = document.getElementById('chat-text-input');
+        if (input) input.value = clean;
+        // 切到会话页并发送
+        const chatNav = document.querySelector('.nav-item[data-tab="chat-view"]');
+        if (chatNav) chatNav.click();
+        if (typeof handleSendMessage === 'function') {
+            await handleSendMessage();
+        }
+    } catch (e) {
+        console.warn('[VoiceChat] submit failed:', e);
+    }
+}
+
+let __voiceDesiredListenMode = null;
+
+function syncVoiceListeningFromSettings(settings) {
+    const s = settings || {};
+    // 计算目标监听模式；只有模式真正变化时才动麦克风/发状态，避免状态事件循环刷新 UI
+    let desired = 'off';
+    if (s.enabled) {
+        if (s.wakeListen) desired = 'wake';
+        else if (s.voiceChat) desired = 'chat';
+    }
+    // chat 由唤醒进入的临时态不被 wake 目标覆盖
+    if (desired === 'wake' && __voiceRecMode === 'chat') return;
+    if (desired === __voiceDesiredListenMode && desired === (__voiceRecMode === 'off' ? 'off' : __voiceRecMode)) return;
+    __voiceDesiredListenMode = desired;
+
+    if (desired === 'off') {
+        if (__voiceRecMode !== 'off') stopVoiceRecognition();
+        if (window.api && window.api.voice) window.api.voice.setListenStatus('idle');
+        return;
+    }
+    if (__voiceRecMode !== desired) startVoiceRecognition(desired);
+}
+
+function bindVoiceControlsOnce() {
+    if (__voiceUiBound) return;
+    __voiceUiBound = true;
+
+    const bindToggle = (id, key) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            if (__voiceApplyingUi) return;
+            const patch = {};
+            patch[key] = !!el.checked;
+            if (key !== 'enabled' && key !== 'muted') {
+                // 打开分项时若总开关关着，提示
+                if (el.checked && __voiceState && __voiceState.settings && !__voiceState.settings.enabled && key !== 'enabled') {
+                    showToast(voiceT('voice.toast.need_enable', '请先打开语音总开关'));
+                }
+            }
+            patchVoiceSettings(patch);
+        });
+    };
+    bindToggle('voice-toggle-enabled', 'enabled');
+    bindToggle('voice-toggle-channel', 'channelReplySpeak');
+    bindToggle('voice-toggle-wake', 'wakeListen');
+    bindToggle('voice-toggle-chat', 'voiceChat');
+    bindToggle('voice-toggle-desktop', 'desktopSpeak');
+    bindToggle('voice-toggle-mute', 'muted');
+
+    const vol = document.getElementById('voice-volume-slider');
+    if (vol) {
+        let timer = null;
+        vol.addEventListener('input', () => {
+            const pct = parseInt(vol.value, 10) || 0;
+            const label = document.getElementById('voice-volume-value');
+            if (label) label.textContent = pct + '%';
+            if (__voiceApplyingUi) return;
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => patchVoiceSettings({ volume: pct / 100 }), 120);
+        });
+    }
+
+    const wakeInput = document.getElementById('voice-wake-word');
+    if (wakeInput) {
+        wakeInput.addEventListener('change', () => {
+            if (__voiceApplyingUi) return;
+            patchVoiceSettings({ wakeWord: wakeInput.value.trim() || '你好 Nexora' });
+        });
+    }
+
+    const rateSelect = document.getElementById('voice-rate');
+    if (rateSelect) {
+        rateSelect.addEventListener('change', () => {
+            if (__voiceApplyingUi) return;
+            patchVoiceSettings({ rate: parseInt(rateSelect.value, 10) || 0 });
+        });
+    }
+
+    const activePack = document.getElementById('voice-active-pack');
+    if (activePack) {
+        activePack.addEventListener('change', () => {
+            if (__voiceApplyingUi) return;
+            const id = activePack.value;
+            warnIfPackNotInstalled(id);
+            patchVoiceSettings({ activePackId: id });
+        });
+    }
+
+    const btnStop = document.getElementById('btn-voice-stop');
+    if (btnStop) btnStop.addEventListener('click', () => window.api.voice && window.api.voice.stop());
+
+    const btnTest = document.getElementById('btn-voice-test');
+    if (btnTest) {
+        btnTest.addEventListener('click', async () => {
+            const id = (__voiceState && __voiceState.settings && __voiceState.settings.activePackId) || '';
+            await previewVoicePack(id);
+        });
+    }
+
+    const btnImport = document.getElementById('btn-voice-import');
+    if (btnImport) {
+        btnImport.addEventListener('click', async () => {
+            if (!window.api.voice || !window.api.voice.importCustomPack) return;
+            const btnOriginalText = btnImport.textContent;
+            btnImport.textContent = voiceT('voice.btn.importing', '导入中...');
+            btnImport.disabled = true;
+            try {
+                const res = await window.api.voice.importCustomPack();
+                if (!res.success && !res.canceled) {
+                    showToast('error', `导入失败：${res.error}`);
+                }
+            } catch (e) {
+                showToast('error', `导入出错：${e.message}`);
+            } finally {
+                btnImport.textContent = btnOriginalText;
+                btnImport.disabled = false;
+            }
+        });
+    }
+
+    if (window.api && window.api.voice) {
+        // 状态事件只刷新状态灯/文字，绝不重建卡片区（否则悬停闪烁、滚动丢失、下拉被覆盖）
+        window.api.voice.onStatus((data) => {
+            if (data) __voiceState = data;
+            updateVoiceStatusUi(data);
+        });
+        window.api.voice.onSettingsUpdated((data) => applyVoiceStateToUi(data));
+        window.api.voice.onDownloadProgress((p) => {
+            const statusText = document.getElementById('voice-status-text');
+            const statusDot = document.getElementById('voice-status-dot');
+            if (statusDot) statusDot.setAttribute('data-status', 'downloading');
+            if (statusText && p) statusText.textContent = `${voiceStatusLabel('downloading')} ${p.percent || 0}%`;
+        });
+        window.api.voice.onSpeakError((err) => {
+            if (!err) return;
+            if (err.hint === 'male_pack_required') {
+                showToast(voiceT('voice.toast.sapi_fallback', '男声音色未下载，已阻止系统女声朗读。请下载对应语音包。'));
+            } else if (err.hint === 'neural_failed_no_sapi_fallback') {
+                showToast(voiceT('voice.toast.neural_fail', '神经音色朗读失败：{error}').replace('{error}', err.error || 'unknown'));
+            }
+        });
+    }
+}
+
+async function initVoiceModule() {
+    bindVoiceControlsOnce();
+    if (!window.api || !window.api.voice) return;
+    try {
+        const res = await window.api.voice.getState();
+        if (res && res.data) applyVoiceStateToUi(res.data);
+    } catch (e) {
+        console.warn('[Voice] init failed:', e);
+    }
+}
+
+async function refreshVoicePanel() {
+    bindVoiceControlsOnce();
+    if (!window.api || !window.api.voice) return;
+    const res = await window.api.voice.getState();
+    if (res && res.data) applyVoiceStateToUi(res.data);
+    else renderVoicePackGrids(__voiceState);
+}
+
+// 启动后初始化语音（默认关闭，不占麦）
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(initVoiceModule, 800));
+} else {
+    setTimeout(initVoiceModule, 800);
 }
 

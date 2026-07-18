@@ -42,7 +42,7 @@
       </div>
 
       <!-- 神经脉搏指示器 (窗口顶部绝对居中) -->
-      <div id="ai-pulse-module" style="display: flex; align-items: center; opacity: 0.8; transition: opacity 0.5s; height: 24px; position: absolute; left: 0; right: 0; top: 12px; margin: 0 auto; width: max-content; z-index: 5; -webkit-app-region: drag;">
+      <div id="ai-pulse-module" style="display: flex; align-items: center; opacity: 0; transition: opacity 0.5s; height: 24px; position: absolute; left: 0; right: 0; top: 12px; margin: 0 auto; width: max-content; z-index: 5; -webkit-app-region: drag;">
         <div class="pulse-visualizer" id="pulse-visualizer">
           <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
         </div>
@@ -136,6 +136,15 @@
             <div class="nav-item" data-tab="plugins-view" id="tour-nav-plugins">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
               <span data-i18n="nav.plugins">内置插件</span>
+            </div>
+            <div class="nav-item" data-tab="voice-view" id="btn-nav-voice">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <span data-i18n="nav.voice">语音管理</span>
             </div>
             <div class="nav-item" data-tab="terminal-view" id="btn-nav-terminal">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -843,6 +852,100 @@
           </div>
         </section>
 
+        <!-- Tab: 语音管理 -->
+        <section class="tab-pane" id="voice-view">
+          <div class="view-header">
+            <h2 data-i18n="voice.title">语音管理</h2>
+            <p data-i18n="voice.desc">本地离线语音：渠道 AI 回复朗读、唤醒倾听、语音对话；全部可开关，默认关闭以节省性能</p>
+          </div>
+
+          <div class="voice-control-panel">
+            <div class="voice-status-row">
+              <span class="voice-status-dot" id="voice-status-dot" data-status="idle"></span>
+              <span id="voice-status-text" data-i18n="voice.status.idle">未启用</span>
+              <span class="voice-engine-note" id="voice-engine-note"></span>
+            </div>
+
+            <div class="voice-toggles-grid">
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.enabled">总开关</span>
+                <label class="switch-slider-btn" for="voice-toggle-enabled">
+                  <input type="checkbox" id="voice-toggle-enabled" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.channel">渠道回复朗读</span>
+                <label class="switch-slider-btn" for="voice-toggle-channel">
+                  <input type="checkbox" id="voice-toggle-channel" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.wake">唤醒倾听</span>
+                <label class="switch-slider-btn" for="voice-toggle-wake">
+                  <input type="checkbox" id="voice-toggle-wake" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.chat">语音对话</span>
+                <label class="switch-slider-btn" for="voice-toggle-chat">
+                  <input type="checkbox" id="voice-toggle-chat" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.desktop">桌面聊天朗读</span>
+                <label class="switch-slider-btn" for="voice-toggle-desktop">
+                  <input type="checkbox" id="voice-toggle-desktop" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+              <div class="voice-toggle-item">
+                <span data-i18n="voice.toggle.mute">静音</span>
+                <label class="switch-slider-btn" for="voice-toggle-mute">
+                  <input type="checkbox" id="voice-toggle-mute" />
+                  <span class="slider-knob"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="voice-volume-row">
+              <label for="voice-volume-slider" data-i18n="voice.field.volume">音量</label>
+              <input type="range" id="voice-volume-slider" min="0" max="100" value="80" />
+              <span id="voice-volume-value">80%</span>
+              <button type="button" class="btn-secondary" id="btn-voice-stop" data-i18n="voice.btn.stop">停止朗读</button>
+              <button type="button" class="btn-secondary" id="btn-voice-test" data-i18n="voice.btn.test">试听</button>
+            </div>
+
+            <div class="voice-wake-row">
+              <label for="voice-wake-word" data-i18n="voice.field.wake_word">唤醒词</label>
+              <input type="text" id="voice-wake-word" maxlength="40" placeholder="你好 Nexora" />
+              <label for="voice-active-pack" data-i18n="voice.field.active_pack">当前音色</label>
+              <select id="voice-active-pack"></select>
+              <label for="voice-rate" data-i18n="voice.field.rate" style="margin-left: 15px;">语速</label>
+              <select id="voice-rate">
+                <option value="-6">极慢</option>
+                <option value="-3">较慢</option>
+                <option value="0">正常</option>
+                <option value="3">较快</option>
+                <option value="6">极快</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="voice-notice" data-i18n="voice.notice">
+            说明：开源仓库没有官方 Jarvis 版权音色。最接近的是英式男声（如 Piper Alan）。未下载 Piper 模型时，使用 Windows 本地语音引擎离线朗读。关闭总开关即释放麦克风与播放队列。
+          </div>
+
+          <div class="voice-section-header">
+            <div class="voice-section-label" data-i18n="voice.section.packs">语音包（全局共用一个音色）</div>
+            <button type="button" class="btn-secondary" id="btn-voice-import" data-i18n="voice.btn.import">导入自定义语音包</button>
+          </div>
+          <div class="plugins-masonry" id="voice-pack-grid"></div>
+        </section>
+
         <!-- Tab: 模型角色 -->
         <section class="tab-pane" id="roles-view">
           <div class="view-header-row" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
@@ -1104,7 +1207,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.autostart.title">🖥️ 开机自动启动</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.autostart.desc">开启后，AI助手客户端将在您的电脑开机时自动随系统启动并运行。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-autostart-toggle">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-autostart-toggle">
                 <span class="slider-knob"></span>
               </label>
@@ -1116,7 +1219,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.autogateway.title">⚡ 自动启用 Nexora Agent</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.autogateway.desc">软件启动时，自动开启 OpenClaw 本地智能网关 service，无需每次手动点击。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-auto-gateway">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-auto-gateway">
                 <span class="slider-knob"></span>
               </label>
@@ -1128,7 +1231,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.notify.title">🔔 系统通知提醒</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.notify.desc">在网关状态变更、微信掉线自动重连成功时触发系统桌面横幅通知。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-notify-toggle">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-notify-toggle">
                 <span class="slider-knob"></span>
               </label>
@@ -1140,7 +1243,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.builtin.title">🤖 内置模型启用</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.builtin.desc">开启后，检验连通性与模型对话将默认走内置的 Agnes 官方高速通道服务；关闭后走您的自定义配置。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-built-in-models-toggle">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-built-in-models-toggle">
                 <span class="slider-knob"></span>
               </label>
@@ -1152,7 +1255,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.auto_update.title">🔄 自动检查更新</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.auto_update.desc">开启后，每次进入客户端都会自动在后台检查新版本。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-auto-update-toggle">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-auto-update-toggle" checked>
                 <span class="slider-knob"></span>
               </label>
@@ -1179,7 +1282,7 @@
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.acc.title">⚡ 通道加速</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.acc.desc">优化网关在海外模型网络下的连通性能，大幅度缩短启动插件与请求模型的握手延迟。</div>
               </div>
-              <label class="switch-slider-btn" for="setting-acceleration-toggle">
+              <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-acceleration-toggle">
                 <span class="slider-knob"></span>
               </label>
@@ -1307,7 +1410,7 @@
               <span id="acc-status-pill" class="acc-status-pill" data-i18n="acc.status.disabled">未启用</span>
               <div class="acc-mini-enable" title="启用加速通道" data-i18n-title="acc.enable.title">
                 <span data-i18n="acc.enable">启用</span>
-                <label class="switch-slider-btn" for="acc-page-enabled-toggle">
+                <label class="switch-slider-btn">
                   <input type="checkbox" id="acc-page-enabled-toggle">
                   <span class="slider-knob"></span>
                 </label>
@@ -1412,16 +1515,7 @@
                   </div>
 
                   <div class="acc-dash-side-section acc-dash-side-toggles">
-                    <div class="acc-dash-toggle-row">
-                      <div class="toggle-info">
-                        <div class="toggle-name" data-i18n="acc.toggle.enabled">启用加速通道</div>
-                        <div class="toggle-desc" data-i18n="acc.toggle.enabled_desc">开启内置代理内核以启用加速</div>
-                      </div>
-                      <label class="switch-slider-btn">
-                        <input type="checkbox" id="acc-dash-enabled-toggle">
-                        <span class="slider-knob"></span>
-                      </label>
-                    </div>
+
                     <div class="acc-dash-toggle-row">
                       <div class="toggle-info">
                         <div class="toggle-name" data-i18n="acc.toggle.system_proxy">系统代理</div>
@@ -1679,22 +1773,13 @@
                 <div class="acc-card acc-controls-card">
                   <div class="acc-card-title" data-i18n="acc.control.title">通道控制</div>
                   <div class="acc-controls-card-body">
-                    <div class="acc-control-row">
-                      <div style="flex: 1; min-width: 0; padding-right: 12px;">
-                        <div data-i18n="acc.control.enabled">启用加速通道</div>
-                        <div id="acc-enabled-desc" class="acc-muted" data-i18n="acc.control.enabled_desc">开启后网关与客户端请求走本地加速代理</div>
-                      </div>
-                      <label class="switch-slider-btn" for="acc-controls-enabled-toggle" style="margin-top: 2px; flex-shrink: 0;">
-                        <input type="checkbox" id="acc-controls-enabled-toggle">
-                        <span class="slider-knob"></span>
-                      </label>
-                    </div>
+
                     <div class="acc-control-row">
                       <div style="flex: 1; min-width: 0; padding-right: 12px;">
                         <div data-i18n="acc.control.system_proxy">系统代理</div>
                         <div class="acc-muted" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.control.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
                       </div>
-                      <label class="switch-slider-btn" for="acc-system-proxy-toggle" style="margin-top: 2px; flex-shrink: 0;">
+                      <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
                         <input type="checkbox" id="acc-system-proxy-toggle">
                         <span class="slider-knob"></span>
                       </label>
@@ -1704,7 +1789,7 @@
                         <div data-i18n="acc.control.tun">虚拟网卡 TUN</div>
                         <div class="acc-muted" title="需管理员权限，并安装 wintun.dll" data-i18n="acc.control.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
                       </div>
-                      <label class="switch-slider-btn" for="acc-tun-toggle" style="margin-top: 2px; flex-shrink: 0;">
+                      <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
                         <input type="checkbox" id="acc-tun-toggle">
                         <span class="slider-knob"></span>
                       </label>

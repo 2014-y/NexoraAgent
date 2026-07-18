@@ -1510,7 +1510,7 @@ async function stopCore() {
         try {
             // 只杀本实例内核，绝不能 taskkill /IM mihomo.exe（会误杀多开的其它实例）
             if (process.platform === 'win32' && pid) {
-                try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' }); } catch (e) {}
+                try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore', timeout: 2000 }); } catch (e) {}
             } else {
                 try { proc.kill('SIGKILL'); } catch (e) {}
             }
@@ -1675,10 +1675,20 @@ function powershell(script) {
         });
         let out = '';
         let err = '';
+        const timer = setTimeout(() => {
+            try { child.kill(); } catch (e) {}
+            resolve({ out, err: 'timeout' });
+        }, 5000);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('close', () => resolve({ out, err }));
-        child.on('error', (e) => resolve({ out, err: e.message }));
+        child.on('close', () => {
+            clearTimeout(timer);
+            resolve({ out, err });
+        });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            resolve({ out, err: e.message });
+        });
     });
 }
 

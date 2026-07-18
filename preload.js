@@ -109,5 +109,38 @@ contextBridge.exposeInMainWorld('api', {
     writeBuiltinTerminal: (data) => ipcRenderer.send('builtin-terminal-write', data),
     onBuiltinTerminalData: (callback) => {
         ipcRenderer.on('builtin-terminal-data', (event, data) => callback(data));
+    },
+
+    // 本地离线语音
+    voice: {
+        getState: () => ipcRenderer.invoke('voice-get-state'),
+        setSettings: (patch) => ipcRenderer.invoke('voice-set-settings', patch),
+        speak: (payload) => ipcRenderer.invoke('voice-speak', payload),
+        stop: () => ipcRenderer.invoke('voice-stop'),
+        downloadPack: (packId) => ipcRenderer.invoke('voice-download-pack', packId),
+        importCustomPack: () => ipcRenderer.invoke('voice-import-custom'),
+        deleteCustomPack: (packId) => ipcRenderer.invoke('voice-delete-custom', packId),
+        bindRole: (payload) => ipcRenderer.invoke('voice-bind-role', payload),
+        setListenStatus: (status) => ipcRenderer.invoke('voice-set-listen-status', status),
+        onStatus: (callback) => {
+            const listener = (event, data) => callback(data);
+            ipcRenderer.on('voice-status', listener);
+            return () => ipcRenderer.removeListener('voice-status', listener);
+        },
+        onSettingsUpdated: (callback) => {
+            const listener = (event, data) => callback(data);
+            ipcRenderer.on('voice-settings-updated', listener);
+            return () => ipcRenderer.removeListener('voice-settings-updated', listener);
+        },
+        onDownloadProgress: (callback) => {
+            const listener = (event, data) => callback(data);
+            ipcRenderer.on('voice-download-progress', listener);
+            return () => ipcRenderer.removeListener('voice-download-progress', listener);
+        },
+        onSpeakError: (callback) => {
+            const listener = (event, data) => callback(data);
+            ipcRenderer.on('voice-speak-error', listener);
+            return () => ipcRenderer.removeListener('voice-speak-error', listener);
+        }
     }
 });

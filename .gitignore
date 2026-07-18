@@ -20,4 +20,5 @@ __pycache__/
 
 # Scratch and runtime version files
 /scratch/
+.tmp-voice-test/
 .runtime-version

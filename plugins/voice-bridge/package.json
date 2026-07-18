@@ -1,0 +1,13 @@
+{
+  "name": "@openclaw-plugin/voice-bridge",
+  "version": "1.0.0",
+  "description": "Bridge OpenClaw AI replies to Nexora local offline TTS",
+  "main": "index.js",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "license": "MIT"
+}

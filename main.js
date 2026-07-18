@@ -48,6 +48,7 @@ const {
 } = require('./gateway-runtime');
 const acceleration = require('./acceleration');
 const roleConfig = require('./role-config');
+const { voiceRuntime } = require('./voice-runtime');
 
 let hardenGatewayBootAgainstPluginNpm = () => ({ notes: ['harden-unavailable'], configChanged: false });
 let softenOpenClawStartupMigrationGuard = () => ({ ok: false, reason: 'harden-unavailable' });
@@ -853,7 +854,8 @@ const BUNDLED_CUSTOM_PLUGINS = [
     'compaction-memory-guard',
     'context-router',
     'health-check',
-    'remote-policy'
+    'remote-policy',
+    'voice-bridge'
 ];
 
 // 随安装包一起交付的 npm 渠道插件。
@@ -1362,6 +1364,46 @@ function copyPluginDir(srcDir, destDir, pluginId, appVersion) {
     ensurePluginManifestJson(destDir, pluginId);
 }
 
+/** 强制同步某个内置插件目录到 ~/.openclaw/extensions，不受 .bundle-version 限制。 */
+function syncBundledPluginFiles(pluginId) {
+    try {
+        if (!pluginId) return;
+        const destDir = path.join(CONFIG_DIR, 'extensions', pluginId);
+        fs.mkdirSync(destDir, { recursive: true });
+        const pluginSrcCandidates = [
+            path.join(__dirname, 'plugins', pluginId),
+            resolveAppFsPath('plugins', pluginId)
+        ];
+        let pluginSrc = null;
+        for (const candidate of pluginSrcCandidates) {
+            if (candidate && fs.existsSync(path.join(candidate, 'index.js'))) {
+                pluginSrc = candidate;
+                break;
+            }
+        }
+        if (!pluginSrc) return;
+        for (const name of fs.readdirSync(pluginSrc)) {
+            if (name === 'node_modules' || name === '.bundle-version') continue;
+            const from = path.join(pluginSrc, name);
+            const to = path.join(destDir, name);
+            try {
+                const st = fs.statSync(from);
+                if (st.isDirectory()) {
+                    fs.cpSync(from, to, { recursive: true, force: true });
+                } else {
+                    fs.copyFileSync(from, to);
+                }
+            } catch (e) {
+                console.warn(`[PluginSeed] Failed syncing ${pluginId}/${name}:`, e.message);
+            }
+        }
+        ensurePluginPackageJson(destDir, pluginId);
+        ensurePluginManifestJson(destDir, pluginId);
+    } catch (e) {
+        console.warn(`[PluginSeed] syncBundledPluginFiles(${pluginId}) failed:`, e.message);
+    }
+}
+
 /** 强制同步 role-manager 插件与共享 role-config，不受 .bundle-version 限制。 */
 function syncRoleManagerSharedModules() {
     try {
@@ -1780,6 +1822,8 @@ function seedBundledPlugins() {
 
         // 角色管理插件依赖根目录 role-config.js：无论 bundle stamp 是否变化都强制同步
         syncRoleManagerSharedModules();
+        // voice-bridge 钩子实现变更必须立即覆盖用户目录，避免旧 onAfterResponse 卡死朗读
+        syncBundledPluginFiles('voice-bridge');
     } catch (e) {
         console.error('[PluginSeed] seedBundledPlugins failed:', e.message);
     }
@@ -2239,6 +2283,22 @@ function createWindow(existingSplash) {
         }
     } catch (e) {}
 
+    // 语音：允许麦克风（唤醒/语音对话）；默认不开启采集，仅授权
+    try {
+        session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+            if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+                return callback(true);
+            }
+            callback(false);
+        });
+        session.defaultSession.setPermissionCheckHandler((wc, permission) => {
+            if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+                return true;
+            }
+            return false;
+        });
+    } catch (e) {}
+
     mainWindow.loadFile('index.html');
     try {
         const id = (global.nexoraInstance && global.nexoraInstance.id) || 1;
@@ -2462,6 +2522,19 @@ async function stopGatewayProcess() {
         } else {
             gatewayProcess.kill('SIGTERM');
         }
+        // Linkage: Stop Clash (if enabled in settings) when Agent stops
+        try {
+            const st = acceleration.getStatus();
+            if (st.enabled) {
+                console.log('[Linkage] Stopping Nexora Clash core on Agent stop...');
+                await acceleration.stopCore();
+                await acceleration.applySystemProxy(false);
+                await applyElectronSessionProxy(false);
+            }
+        } catch (e) {
+            console.warn('[Linkage] Clash stop linkage error:', e.message);
+        }
+
         gatewayProcess = null;
         stopGatewayHttpReadyWatch();
         gatewayHttpReadyNotified = false;
@@ -2714,6 +2787,20 @@ async function startGatewayProcess() {
                 forkOptions.env[pathKey] = `${sandboxDir}${path.delimiter}${originalPath}`;
             }
 
+            // Linkage: Start Clash (if enabled in settings) before starting Agent process
+            try {
+                const st = acceleration.getStatus();
+                if (st.enabled && st.activeProfileId) {
+                    console.log('[Linkage] Starting Nexora Clash before gateway fork...');
+                    await acceleration.setEnabled(true, st.activeProfileId);
+                    await applyElectronSessionProxy(true);
+                    // Re-apply proxy env variables to childEnv since Clash is now fully running
+                    try { acceleration.applyProxyToEnvObject(childEnv); } catch (e) {}
+                }
+            } catch (e) {
+                console.warn('[Linkage] Clash startup linkage error before gateway fork:', e.message);
+            }
+
             console.log(`[TokenGuard] Fork gateway home=${lockedAuth.homePath} state=${lockedAuth.stateDir} token_len=${String(lockedAuth.token).length}`);
 
             // 启动子进程运行Nexora Agent
@@ -2752,6 +2839,11 @@ async function startGatewayProcess() {
                         'utf8'
                     );
                 } catch(e) {}
+
+                // 渠道回复朗读兜底：不依赖 voice-bridge 插件是否成功挂上钩子
+                try {
+                    voiceRuntime.maybeSpeakChannelReplyFromGatewayLog(text);
+                } catch (e) {}
 
                 if (mainWindow) {
                     mainWindow.webContents.send('gateway-log', text);
@@ -3166,6 +3258,33 @@ function ensureOpenClawConfigInitialized() {
                 }
             } catch (e) {}
         }
+
+        // 内置自定义插件必须进入 load.paths，否则网关不会加载（语音桥接/角色管理会静默失效）
+        try {
+            if (!config.plugins.load) config.plugins.load = {};
+            if (!Array.isArray(config.plugins.load.paths)) config.plugins.load.paths = [];
+            const mustLoad = [...BUNDLED_CUSTOM_PLUGINS, 'role-manager'];
+            for (const name of mustLoad) {
+                const pluginDir = path.join(CONFIG_DIR, 'extensions', name);
+                if (!fs.existsSync(path.join(pluginDir, 'index.js'))) continue;
+                const abs = path.resolve(pluginDir);
+                const has = config.plugins.load.paths.some(
+                    (p) => typeof p === 'string' && path.resolve(p) === abs
+                );
+                if (!has) {
+                    config.plugins.load.paths.push(abs);
+                    needsSave = true;
+                }
+                if (!config.plugins.entries[name]) {
+                    config.plugins.entries[name] = { enabled: true };
+                    needsSave = true;
+                }
+                if (config.plugins.entries[name].enabled === true && !config.plugins.allow.includes(name)) {
+                    config.plugins.allow.push(name);
+                    needsSave = true;
+                }
+            }
+        } catch (e) {}
         
         // 多用户/云电脑：读配置时也清洗野指针，避免长期保留别人机器的绝对路径
         try {
@@ -3504,6 +3623,98 @@ ipcMain.handle('role-config-read', async () => {
     }
 });
 
+// ─── 本地离线语音 ───
+ipcMain.handle('voice-get-state', async () => {
+    try {
+        return { success: true, data: voiceRuntime.getPublicState() };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-set-settings', async (event, patch) => {
+    try {
+        const data = voiceRuntime.setSettings(patch || {});
+        return { success: true, data };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-speak', async (event, payload) => {
+    try {
+        const p = payload && typeof payload === 'object' ? payload : { text: String(payload || '') };
+        return voiceRuntime.speak(p.text, {
+            source: p.source || 'manual',
+            roleId: p.roleId,
+            packId: p.packId,
+            maxLen: p.maxLen
+        });
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-stop', async () => {
+    try {
+        return voiceRuntime.stop({ clearQueue: true });
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-download-pack', async (event, packId) => {
+    try {
+        return await voiceRuntime.downloadPack(packId);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+ipcMain.handle('voice-import-custom', async (event) => {
+    try {
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            title: '导入自定义语音包',
+            properties: ['openFile'],
+            filters: [
+                { name: 'Sherpa-ONNX Voice Pack', extensions: ['tar.bz2', 'zip'] },
+                { name: 'All Files', extensions: ['*'] }
+            ]
+        });
+        if (canceled || filePaths.length === 0) return { success: false, canceled: true };
+        
+        return await voiceRuntime.importCustomPack(filePaths[0]);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-delete-custom', async (event, packId) => {
+    try {
+        return await voiceRuntime.deleteCustomPack(packId);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-bind-role', async (event, payload) => {
+    try {
+        const roleId = payload && payload.roleId;
+        const packId = payload && payload.packId;
+        return { success: true, data: voiceRuntime.bindRoleVoice(roleId, packId) };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-set-listen-status', async (event, status) => {
+    try {
+        voiceRuntime.setListenStatus(status);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('role-config-save', async (event, payload) => {
     try {
         const action = payload && payload.action;
@@ -3531,6 +3742,21 @@ ipcMain.handle('role-config-save', async (event, payload) => {
         } else {
             return { success: false, error: '未知操作' };
         }
+
+        // 角色自带 voicePackId 时同步到语音绑定表
+        try {
+            if (action === 'upsert' && result && result.role) {
+                const packId = result.role.voicePackId || (result.role.voice && result.role.voice.packId);
+                if (packId) voiceRuntime.bindRoleVoice(result.role.id, packId);
+            }
+            if ((action === 'activate' || action === 'reset-active') && result && result.role) {
+                const packId = result.role.voicePackId || (result.role.voice && result.role.voice.packId);
+                if (packId) {
+                    voiceRuntime.bindRoleVoice(result.role.id, packId);
+                    voiceRuntime.setSettings({ activePackId: packId });
+                }
+            }
+        } catch (e) {}
 
         __roleConfigWatchIgnoreUntil = Date.now() + 800;
         const sync = syncActiveRoleToSoulMd(cfg);
@@ -5915,6 +6141,17 @@ app.whenReady().then(async () => {
         console.warn('[Acceleration] init failed:', e.message);
     }
 
+    // 语音运行时：默认关闭，仅初始化配置目录；开启渠道朗读时才监听本机 HTTP
+    try {
+        // CONFIG_DIR 可能稍后才最终确定，这里先用当前值；home 矫正后再 re-init
+        voiceRuntime.init({
+            configDir: CONFIG_DIR,
+            getMainWindow: () => mainWindow
+        });
+    } catch (e) {
+        console.warn('[VoiceRuntime] init failed:', e.message);
+    }
+
     // 家目录矫正：优先真实用户目录；不可写时改走 AppData\NexoraAgent，禁止落到裸 Temp
     // 多开第 2+ 实例：强制使用本实例 userData 下的隔离 home，避免与主实例抢 .openclaw / 18789
     try {
@@ -6059,6 +6296,16 @@ app.whenReady().then(async () => {
     }
 
     // 先出窗口再种插件，避免首启同步拷贝把 UI 卡死
+    // CONFIG_DIR 最终确定后再挂载语音运行时（设置文件落在用户 OpenClaw 目录）
+    try {
+        voiceRuntime.init({
+            configDir: CONFIG_DIR,
+            getMainWindow: () => mainWindow
+        });
+    } catch (e) {
+        console.warn('[VoiceRuntime] re-init failed:', e.message);
+    }
+
     createWindow(bootSplash);
     createTray();
     setImmediate(() => {
@@ -6082,6 +6329,9 @@ app.on('window-all-closed', () => {
 // 应用退出时必须清理本实例内核；系统代理仅在本实例开启过时才关闭（避免多开误关主实例代理）
 app.on('will-quit', async (e) => {
     e.preventDefault();
+    try {
+        voiceRuntime.dispose();
+    } catch (err) {}
     try {
         const st = acceleration.getStatus();
         await acceleration.stopCore();
