@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     volume: 0.8,
     rate: 0,
     wakeWord: '你好 Nexora',
-    activePackId: 'piper-zh-chaowen',
+    activePackId: 'fanchen-wnj-zh-en',
     roleVoiceMap: {},
     httpPort: 18791,
     customPacks: []
