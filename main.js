@@ -852,7 +852,7 @@ const BUNDLED_CUSTOM_PLUGINS = [
 const BUNDLED_NPM_CHANNEL_PLUGINS = [
     { id: 'openclaw-weixin', viaLoadPaths: true, candidates: [path.join('node_modules', '@tencent-weixin', 'openclaw-weixin')] },
     { id: 'qqbot', viaLoadPaths: true, packageName: '@openclaw/qqbot', candidates: [path.join('node_modules', '@openclaw', 'qqbot')] },
-    { id: 'feishu', viaLoadPaths: true, packageName: '@openclaw/feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
+    { id: 'feishu', viaLoadPaths: false, packageName: '@openclaw/feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
     // voice-call 绝不能进 load.paths（trusted store）
     { id: 'voice-call', viaLoadPaths: false, packageName: '@openclaw/voice-call', candidates: [path.join('node_modules', '@openclaw', 'voice-call')] },
     { id: 'slack', viaLoadPaths: true, packageName: '@openclaw/slack', candidates: [path.join('node_modules', '@openclaw', 'slack')] },
