@@ -47,6 +47,7 @@ const {
     ensureGatewayRuntime
 } = require('./gateway-runtime');
 const acceleration = require('./acceleration');
+const roleConfig = require('./role-config');
 
 let hardenGatewayBootAgainstPluginNpm = () => ({ notes: ['harden-unavailable'], configChanged: false });
 let softenOpenClawStartupMigrationGuard = () => ({ ok: false, reason: 'harden-unavailable' });
@@ -1361,6 +1362,83 @@ function copyPluginDir(srcDir, destDir, pluginId, appVersion) {
     ensurePluginManifestJson(destDir, pluginId);
 }
 
+/** 强制同步 role-manager 插件与共享 role-config，不受 .bundle-version 限制。 */
+function syncRoleManagerSharedModules() {
+    try {
+        const destDir = path.join(CONFIG_DIR, 'extensions', 'role-manager');
+        fs.mkdirSync(destDir, { recursive: true });
+
+        const pluginSrcCandidates = [
+            path.join(__dirname, 'plugins', 'role-manager'),
+            resolveAppFsPath('plugins', 'role-manager')
+        ];
+        let pluginSrc = null;
+        for (const candidate of pluginSrcCandidates) {
+            if (candidate && fs.existsSync(path.join(candidate, 'index.js'))) {
+                pluginSrc = candidate;
+                break;
+            }
+        }
+        if (pluginSrc) {
+            for (const name of fs.readdirSync(pluginSrc)) {
+                if (name === 'node_modules' || name === '.bundle-version') continue;
+                const from = path.join(pluginSrc, name);
+                const to = path.join(destDir, name);
+                try {
+                    const st = fs.statSync(from);
+                    if (st.isDirectory()) {
+                        fs.cpSync(from, to, { recursive: true, force: true });
+                    } else {
+                        const srcBuf = fs.readFileSync(from);
+                        let same = false;
+                        if (fs.existsSync(to)) {
+                            try { same = Buffer.compare(srcBuf, fs.readFileSync(to)) === 0; } catch (e) {}
+                        }
+                        if (!same) fs.writeFileSync(to, srcBuf);
+                    }
+                } catch (e) {
+                    console.warn(`[PluginSeed] Failed syncing role-manager/${name}:`, e.message);
+                }
+            }
+        }
+
+        const sharedFiles = ['role-config.js'];
+        for (const name of sharedFiles) {
+            const srcCandidates = [
+                path.join(__dirname, name),
+                resolveAppFsPath(name)
+            ];
+            let src = null;
+            for (const candidate of srcCandidates) {
+                if (candidate && fs.existsSync(candidate)) {
+                    src = candidate;
+                    break;
+                }
+            }
+            if (!src) continue;
+            const dest = path.join(destDir, name);
+            try {
+                const srcBuf = fs.readFileSync(src);
+                let same = false;
+                if (fs.existsSync(dest)) {
+                    try { same = Buffer.compare(srcBuf, fs.readFileSync(dest)) === 0; } catch (e) {}
+                }
+                if (!same) {
+                    fs.writeFileSync(dest, srcBuf);
+                    console.log(`[PluginSeed] Synced ${name} -> role-manager`);
+                }
+            } catch (e) {
+                console.warn(`[PluginSeed] Failed syncing ${name} to role-manager:`, e.message);
+            }
+        }
+        ensurePluginPackageJson(destDir, 'role-manager');
+        ensurePluginManifestJson(destDir, 'role-manager');
+        console.log('[PluginSeed] role-manager synced');
+    } catch (e) {
+        console.warn('[PluginSeed] syncRoleManagerSharedModules failed:', e.message);
+    }
+}
+
 const DEFAULT_MEMORY_MD_TEMPLATE = `# MEMORY.md
 
 ## 核心身份
@@ -1699,6 +1777,9 @@ function seedBundledPlugins() {
                 } catch (e) {}
             }
         }
+
+        // 角色管理插件依赖根目录 role-config.js：无论 bundle stamp 是否变化都强制同步
+        syncRoleManagerSharedModules();
     } catch (e) {
         console.error('[PluginSeed] seedBundledPlugins failed:', e.message);
     }
@@ -2503,6 +2584,7 @@ async function startGatewayProcess() {
                 }
                 seedDefaultMemoryFile(path.join(ws, 'MEMORY.md'));
                 ensureCompactWorkspaceAgentsMd(ws);
+                try { syncActiveRoleToSoulMd(); } catch (e2) {}
             } catch (e) {}
 
             // 部署补丁到可写目录（Doctor 迁移 / harden 依赖最新脚本）
@@ -3275,6 +3357,126 @@ function ensureOpenClawConfigInitialized() {
     }
 }
 
+function resolveWorkspaceSoulPath() {
+    return path.join(CONFIG_DIR, 'workspace', 'SOUL.md');
+}
+
+function syncActiveRoleToSoulMd(configOverride) {
+    try {
+        const cfg = configOverride || roleConfig.readRoleConfig(CONFIG_DIR);
+        const active = roleConfig.getActiveRole(cfg);
+        const wsDir = path.join(CONFIG_DIR, 'workspace');
+        fs.mkdirSync(wsDir, { recursive: true });
+        const soulPath = resolveWorkspaceSoulPath();
+        let existing = '';
+        if (fs.existsSync(soulPath)) {
+            existing = fs.readFileSync(soulPath, 'utf8').replace(/^\uFEFF/, '');
+        } else {
+            // 优先用模板，保证首次写入不丢默认 SOUL 结构
+            const tplCandidates = [
+                path.join(__dirname, 'config', 'openclaw-templates', 'SOUL.md'),
+                resolveAppFsPath('config', 'openclaw-templates', 'SOUL.md')
+            ];
+            for (const tpl of tplCandidates) {
+                try {
+                    if (fs.existsSync(tpl)) {
+                        existing = fs.readFileSync(tpl, 'utf8').replace(/^\uFEFF/, '');
+                        break;
+                    }
+                } catch (e) {}
+            }
+        }
+        const next = roleConfig.applyManagedSoulBlock(existing, active);
+        if (next !== existing) {
+            fs.writeFileSync(soulPath, next, 'utf8');
+        }
+        return { success: true, roleId: active && active.id, soulPath };
+    } catch (e) {
+        console.warn('[RoleConfig] syncActiveRoleToSoulMd failed:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
+function buildRoleClientPayload() {
+    const cfg = roleConfig.readRoleConfig(CONFIG_DIR);
+    return roleConfig.toClientPayload(cfg);
+}
+
+function broadcastRoleConfigUpdated(payload) {
+    try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('role-config-updated', payload);
+        }
+        BrowserWindow.getAllWindows().forEach((win) => {
+            try {
+                if (!win || win.isDestroyed()) return;
+                if (mainWindow && win.id === mainWindow.id) return;
+                win.webContents.send('role-config-updated', payload);
+            } catch (e) {}
+        });
+    } catch (e) {}
+}
+
+let __roleConfigWatcher = null;
+let __roleConfigWatchTimer = null;
+let __roleConfigWatchIgnoreUntil = 0;
+let __roleConfigLastSig = '';
+
+function getRoleConfigSignature() {
+    try {
+        const filePath = roleConfig.resolveRolesPath(CONFIG_DIR);
+        if (!fs.existsSync(filePath)) return '';
+        const st = fs.statSync(filePath);
+        return `${st.mtimeMs}:${st.size}`;
+    } catch (e) {
+        return '';
+    }
+}
+
+function watchRoleConfigFile() {
+    try {
+        if (__roleConfigWatcher) {
+            try { __roleConfigWatcher.close(); } catch (e) {}
+            __roleConfigWatcher = null;
+        }
+        fs.mkdirSync(CONFIG_DIR, { recursive: true });
+        const rolesPath = roleConfig.resolveRolesPath(CONFIG_DIR);
+        __roleConfigLastSig = getRoleConfigSignature();
+        // 监听目录更稳：Windows 上对尚不存在的单文件 watch 容易失效
+        __roleConfigWatcher = fs.watch(CONFIG_DIR, { persistent: false }, (eventType, filename) => {
+            try {
+                const name = filename ? String(filename) : '';
+                if (name && name !== roleConfig.ROLES_FILE_NAME && !name.endsWith(roleConfig.ROLES_FILE_NAME)) {
+                    return;
+                }
+                if (Date.now() < __roleConfigWatchIgnoreUntil) return;
+                if (__roleConfigWatchTimer) clearTimeout(__roleConfigWatchTimer);
+                __roleConfigWatchTimer = setTimeout(() => {
+                    __roleConfigWatchTimer = null;
+                    try {
+                        const sig = getRoleConfigSignature();
+                        if (sig && sig === __roleConfigLastSig) return;
+                        __roleConfigLastSig = sig;
+                        const cfg = roleConfig.readRoleConfig(CONFIG_DIR);
+                        const sync = syncActiveRoleToSoulMd(cfg);
+                        const data = roleConfig.toClientPayload(cfg);
+                        broadcastRoleConfigUpdated({
+                            data,
+                            action: 'external',
+                            soulSynced: !!(sync && sync.success)
+                        });
+                        console.log('[RoleConfig] External roles file change synced');
+                    } catch (e) {
+                        console.warn('[RoleConfig] watch sync failed:', e.message);
+                    }
+                }, 280);
+            } catch (e) {}
+        });
+    } catch (e) {
+        console.warn('[RoleConfig] watchRoleConfigFile failed:', e.message);
+    }
+}
+
 // 配置文件的读写 IPC
 ipcMain.handle('config-read', async () => {
     try {
@@ -3288,6 +3490,65 @@ ipcMain.handle('config-read', async () => {
     } catch (e) {
         console.error('Failed to read config:', e);
         return null;
+    }
+});
+
+ipcMain.handle('role-config-read', async () => {
+    try {
+        // 确保工作区角色块与当前启用角色一致
+        syncActiveRoleToSoulMd();
+        return { success: true, data: buildRoleClientPayload() };
+    } catch (e) {
+        console.error('[RoleConfig] read failed:', e);
+        return { success: false, error: e.message, data: roleConfig.toClientPayload(roleConfig.createDefaultConfig()) };
+    }
+});
+
+ipcMain.handle('role-config-save', async (event, payload) => {
+    try {
+        const action = payload && payload.action;
+        let cfg = roleConfig.readRoleConfig(CONFIG_DIR);
+        let result;
+
+        if (action === 'upsert') {
+            result = roleConfig.upsertCustomRole(cfg, payload.role || {});
+            if (!result.ok) return { success: false, error: result.error };
+            cfg = roleConfig.writeRoleConfig(CONFIG_DIR, result.config);
+        } else if (action === 'delete') {
+            result = roleConfig.deleteCustomRole(cfg, payload.roleId);
+            if (!result.ok) return { success: false, error: result.error };
+            cfg = roleConfig.writeRoleConfig(CONFIG_DIR, result.config);
+        } else if (action === 'activate') {
+            result = roleConfig.setActiveRole(cfg, payload.roleId);
+            if (!result.ok) return { success: false, error: result.error };
+            cfg = roleConfig.writeRoleConfig(CONFIG_DIR, result.config);
+        } else if (action === 'reset-active') {
+            result = roleConfig.setActiveRole(cfg, roleConfig.DEFAULT_ACTIVE_ROLE_ID);
+            if (!result.ok) return { success: false, error: result.error };
+            cfg = roleConfig.writeRoleConfig(CONFIG_DIR, result.config);
+        } else if (action === 'replace') {
+            cfg = roleConfig.writeRoleConfig(CONFIG_DIR, payload.config || {});
+        } else {
+            return { success: false, error: '未知操作' };
+        }
+
+        __roleConfigWatchIgnoreUntil = Date.now() + 800;
+        const sync = syncActiveRoleToSoulMd(cfg);
+        const data = roleConfig.toClientPayload(cfg);
+        __roleConfigLastSig = getRoleConfigSignature();
+        broadcastRoleConfigUpdated({
+            data,
+            action: action || 'replace',
+            soulSynced: !!(sync && sync.success)
+        });
+        return {
+            success: true,
+            data,
+            soulSynced: !!(sync && sync.success)
+        };
+    } catch (e) {
+        console.error('[RoleConfig] save failed:', e);
+        return { success: false, error: e.message };
     }
 });
 
@@ -5802,6 +6063,7 @@ app.whenReady().then(async () => {
     createTray();
     setImmediate(() => {
         try { seedBundledPlugins(); } catch (e) {}
+        try { watchRoleConfigFile(); } catch (e) {}
     });
 
     app.on('activate', () => {

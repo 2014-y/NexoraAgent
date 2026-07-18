@@ -134,6 +134,9 @@
       "health-check": {
         "enabled": true
       },
+      "role-manager": {
+        "enabled": true
+      },
       "remote-policy": {
         "enabled": true
       },
@@ -282,6 +285,7 @@
       "context-router",
       "health-check",
       "remote-policy",
+      "role-manager",
       "ollama",
       "duckduckgo",
       "webhooks",

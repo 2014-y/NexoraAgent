@@ -17,6 +17,13 @@ contextBridge.exposeInMainWorld('api', {
     // 配置读写
     readConfig: () => ipcRenderer.invoke('config-read'),
     saveConfig: (newConfig) => ipcRenderer.invoke('config-save', newConfig),
+    readRoleConfig: () => ipcRenderer.invoke('role-config-read'),
+    saveRoleConfig: (payload) => ipcRenderer.invoke('role-config-save', payload),
+    onRoleConfigUpdated: (callback) => {
+        const listener = (event, data) => callback(data);
+        ipcRenderer.on('role-config-updated', listener);
+        return () => ipcRenderer.removeListener('role-config-updated', listener);
+    },
     clearWeChatSession: () => ipcRenderer.invoke('wechat-clear'),
     checkWeChatStatus: () => ipcRenderer.invoke('wechat-check-status'),
     triggerWeChatLogin: () => ipcRenderer.invoke('wechat-login'),

@@ -32,6 +32,7 @@ const ZERO_CONFIG_PLUGINS = [
   'auto-summary',
   'memory-rotate',
   'compaction-memory-guard',
+  'role-manager',
   'openclaw-weixin'
 ];
 
@@ -42,6 +43,7 @@ const ZERO_CONFIG_DEFAULT_ON = [
   'auto-summary',
   'memory-rotate',
   'compaction-memory-guard',
+  'role-manager',
   'openclaw-weixin',
   LONG_TERM_MEMORY_UI_ID
 ];
@@ -219,6 +221,14 @@ function ensureUiPluginCatalog(config, opts = {}) {
   // 长期记忆开箱：强制启用真实插件栈 + UI 伞形卡
   const ltm = ensureLongTermMemoryStack(config);
   if (ltm.changed) changes.push(...ltm.changes);
+
+  // 角色管理：全渠道查询/切换基础能力，始终默认开启（不进插件菜单）
+  if (ensureEntry(config, 'role-manager', true)) changes.push('role-manager: entry created');
+  if (config.plugins.entries['role-manager'] && config.plugins.entries['role-manager'].enabled !== true) {
+    config.plugins.entries['role-manager'].enabled = true;
+    changes.push('role-manager: enabled -> true (role commands oobe)');
+  }
+  if (ensureAllow(config, 'role-manager')) changes.push('role-manager: +allow');
 
   // llm-task 作为摘要能力补充始终允许（即使 UI 主卡是 long-term-memory）
   if (ensureAllow(config, 'llm-task')) changes.push('llm-task: +allow');

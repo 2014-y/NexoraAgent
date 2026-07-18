@@ -1,0 +1,19 @@
+{
+  "id": "role-manager",
+  "name": "Role Manager",
+  "description": "List, search, and switch global AI roles from WeChat, QQ, Feishu and other channels",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否启用全渠道角色查询与切换"
+      }
+    }
+  }
+}

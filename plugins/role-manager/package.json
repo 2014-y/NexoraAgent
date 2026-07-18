@@ -1,0 +1,20 @@
+{
+  "name": "@openclaw-plugin/role-manager",
+  "version": "1.0.0",
+  "description": "List, search, and switch global AI roles from any OpenClaw channel",
+  "main": "index.js",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.4.24"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
+}

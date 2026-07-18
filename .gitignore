@@ -17,3 +17,7 @@ __pycache__/
 
 /dist/
 /build-resources/
+
+# Scratch and runtime version files
+/scratch/
+.runtime-version

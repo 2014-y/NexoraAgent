@@ -1261,6 +1261,14 @@ async function init() {
     // 读取并渲染配置
     await loadAndRenderConfig();
 
+    // 预加载全局角色配置（模型会话口吻 + 角色页）
+    try {
+        if (typeof initRolesUI === 'function') initRolesUI();
+        if (typeof loadRoleConfigState === 'function') await loadRoleConfigState({ silent: true });
+    } catch (e) {
+        console.warn('[Roles] preload failed:', e);
+    }
+
     // 加载开机自启配置
     const autostartToggleElement = document.getElementById('setting-autostart-toggle');
     if (autostartToggleElement) {
@@ -1376,13 +1384,6 @@ async function init() {
             try { updateConsoleChannelStatusUI(); } catch (e) {}
             try { updateWeChatStatusUI(); } catch (e) {}
             try { if (typeof window.syncChatQuickPanelToggleText === 'function') window.syncChatQuickPanelToggleText(); } catch (e) {}
-            const btnToggleTerminal = document.getElementById('btn-toggle-terminal');
-            const terminalContainer = document.getElementById('xterm-container');
-            if (btnToggleTerminal && terminalContainer) {
-                const key = terminalContainer.style.display === 'none' ? 'terminal.expand' : 'terminal.collapse';
-                btnToggleTerminal.setAttribute('data-i18n', key);
-                btnToggleTerminal.textContent = t(key);
-            }
             if (typeof accelerationState !== 'undefined' && accelerationState) {
                 renderAccelerationChannel(accelerationState);
             }
@@ -2187,6 +2188,22 @@ function formatLogForUser(text) {
 
 // 4. IPC 消息监听与分发
 function setupIpcListeners() {
+    // 角色配置变更：对话切换 / 角色页启用后立即全界面同步
+    if (window.api && typeof window.api.onRoleConfigUpdated === 'function') {
+        window.api.onRoleConfigUpdated((payload) => {
+            try {
+                if (!payload || !payload.data) return;
+                applyRoleConfigState(payload.data, {
+                    preferActive: true,
+                    selectRoleId: payload.data.activeRoleId || null,
+                    clearEditing: true
+                });
+            } catch (e) {
+                console.warn('[Roles] live sync failed:', e);
+            }
+        });
+    }
+
     // 实时日志接收处理函数
     const handleReceivedLog = (text) => {
         // Dynamic topology node activation based on logs
@@ -5822,7 +5839,7 @@ function setupTabSwitching() {
             }
 
             // 离开终端：停光标闪烁，降低后台 GPU 占用
-            if (prevTab === 'settings-view' && builtinTerminal) {
+            if (prevTab === 'terminal-view' && builtinTerminal) {
                 try { builtinTerminal.blur(); } catch (err) {}
                 try { builtinTerminal.options.cursorBlink = false; } catch (err) {}
             }
@@ -5880,7 +5897,7 @@ function setupTabSwitching() {
                     } catch (err) {}
                 }
 
-                if (currentTab === 'settings-view' && typeof initBuiltinTerminal === 'function') {
+                if (currentTab === 'terminal-view' && typeof initBuiltinTerminal === 'function') {
                     initBuiltinTerminal();
                 }
 
@@ -5888,12 +5905,31 @@ function setupTabSwitching() {
                     Promise.resolve().then(() => renderPluginsGrid()).catch((err) => console.error(err));
                 }
 
+                if (currentTab === 'roles-view') {
+                    Promise.resolve().then(() => {
+                        if (typeof loadRoleConfigState === 'function') {
+                            return loadRoleConfigState({ preferActive: true });
+                        }
+                    }).catch((err) => console.error(err));
+                }
+
+                if (currentTab === 'chat-view') {
+                    Promise.resolve().then(() => {
+                        if (typeof loadRoleConfigState === 'function') {
+                            return loadRoleConfigState({ silent: true, preferActive: false, clearEditing: false });
+                        }
+                    }).catch((err) => console.error(err));
+                }
+
                 if (currentTab === 'openclaw-panel-view') {
                     Promise.resolve().then(() => loadOpenclawControlUi(false)).catch((err) => console.error(err));
                 }
 
-                if (currentTab === 'settings-view') {
+                if (currentTab === 'syslogs-view') {
                     try { loadAndRenderSystemLogs(); } catch (err) { console.error(err); }
+                }
+
+                if (currentTab === 'settings-view') {
                     const settingLangSel = document.getElementById('setting-language-select');
                     if (settingLangSel) {
                         const initLang = localStorage.getItem('setting_language') || 'zh-CN';
@@ -7264,6 +7300,19 @@ function applyLanguage(lang) {
     
     _restoreAllSelects();
     requestAnimationFrame(() => _restoreAllSelects());
+
+    // 模型角色：动态列表/按钮文案跟随系统语言
+    try {
+        if (typeof renderRolesList === 'function' && __roleConfigState) {
+            renderRolesList();
+            if (typeof fillRoleEditor === 'function' && !__editingNewRole) {
+                fillRoleEditor(findRoleInState(__selectedRoleId));
+            }
+            if (typeof updateChatActiveRoleBadge === 'function') {
+                updateChatActiveRoleBadge();
+            }
+        }
+    } catch (e) {}
 }
 
 // 发送系统桌面横幅通知
@@ -7672,6 +7721,12 @@ async function handleSendMessage() {
 
     appendChatMessage('user', text, file);
 
+    // 对话内角色指令不请求模型，由客户端直接执行并立即反馈。
+    if (!file && typeof handleChatRoleCommand === 'function') {
+        const roleCommandHandled = await handleChatRoleCommand(text);
+        if (roleCommandHandled) return;
+    }
+
     const modelSelect = document.getElementById('chat-model-select');
     if (!modelSelect || modelSelect.selectedIndex === -1) {
         appendChatMessage('ai', '⚠️ 请先在右上角选择对话所用的大模型！如果下拉框为空，请先在【模型配置】中配置厂家模型。');
@@ -7770,9 +7825,19 @@ async function handleSendMessage() {
      - **MCP 插件加载报错**：部分复杂的 MCP 插件需要外部的 \`python\` 或 \`uv\` 运行时支持。如果日志提示无法运行相关指令，请在系统内安装对应的运行环境，并在配置文件中核对执行路径。
      - **请求/转发报错（如 401/403/429 等）**：若与本地 AI 对话时，日志区提示 \`[patch-gateway] 请求大模型失败\`，代表本地网关网络是通的，但你配置的第三方大模型 API Key 无效、到期、欠费或超频限流，请前往【模型配置】中重新校对您的 API 密钥与代理端点。`;
 
+        // 附加全局角色口吻（每次发送前强制读取最新启用角色，避免页面间状态不同步）
+        let roleAddon = '';
+        try {
+            if (typeof loadRoleConfigState === 'function') {
+                await loadRoleConfigState({ silent: true, preferActive: false, clearEditing: false });
+            }
+            if (typeof getActiveRoleChatAddon === 'function') {
+                roleAddon = getActiveRoleChatAddon() || '';
+            }
+        } catch (e) {}
         messages.push({
             role: 'system',
-            content: systemPrompt
+            content: systemPrompt + roleAddon
         });
         if (file) {
             messages.push({
@@ -11480,7 +11545,7 @@ function scheduleBuiltinTerminalFit(forceResizePty) {
     requestAnimationFrame(() => {
         terminalFitScheduled = false;
         const container = document.getElementById('xterm-container');
-        if (currentTab !== 'settings-view' || !builtinTerminalFitAddon || !builtinTerminal || !container || container.style.display === 'none') return;
+        if (currentTab !== 'terminal-view' || !builtinTerminalFitAddon || !builtinTerminal || !container) return;
         const prevCols = builtinTerminal.cols;
         const prevRows = builtinTerminal.rows;
         try { builtinTerminalFitAddon.fit(); } catch (e) {}
@@ -11494,62 +11559,35 @@ function scheduleBuiltinTerminalFit(forceResizePty) {
 }
 
 function initBuiltinTerminal() {
-    const pane = document.getElementById('settings-view');
-    if (pane) pane.classList.add('terminal-keeplive');
-
     const container = document.getElementById('xterm-container');
-    const btnToggle = document.getElementById('btn-toggle-terminal');
-    
-    if (btnToggle && container && !btnToggle.dataset.hasListener) {
-        btnToggle.dataset.hasListener = 'true';
-        btnToggle.addEventListener('click', () => {
-            const isHidden = container.style.display === 'none';
-            if (isHidden) {
-                container.style.display = 'block';
-                btnToggle.setAttribute('data-i18n', 'terminal.collapse');
-                btnToggle.textContent = t('terminal.collapse');
-                terminalNeedsFit = true;
-                scheduleBuiltinTerminalFit(true);
-                setTimeout(() => {
-                    try { builtinTerminal.focus(); } catch (e) {}
-                }, 50);
-            } else {
-                container.style.display = 'none';
-                btnToggle.setAttribute('data-i18n', 'terminal.expand');
-                btnToggle.textContent = t('terminal.expand');
-                try { builtinTerminal.blur(); } catch (e) {}
-            }
-        });
-    }
+    if (!container) return;
 
     if (isTerminalInitialized && builtinTerminal) {
-        // 再次切入：不 fit、不强刷，只恢复光标并延后聚焦
+        // 再次切入：恢复光标并延后聚焦
         try { builtinTerminal.options.cursorBlink = true; } catch (e) {}
+        terminalNeedsFit = true;
         setTimeout(() => {
-            if (currentTab === 'settings-view' && builtinTerminal && container && container.style.display !== 'none') {
+            if (currentTab === 'terminal-view' && builtinTerminal) {
                 try { builtinTerminal.focus(); } catch (e) {}
-                if (terminalNeedsFit) scheduleBuiltinTerminalFit(false);
+                scheduleBuiltinTerminalFit(true);
             }
         }, 0);
         return;
     }
 
     if (isTerminalInitializing) return;
-    
-    if (!container) return;
+
     if (!window.Terminal) {
         container.innerHTML = `<div style="color:#f44336;padding:16px;font-family:Consolas,monospace;font-size:13px;">${escapeHtml(t('xterm 组件未加载（打包后资源缺失）。请重新安装完整包。', 'xterm component failed to load (packaged resource missing). Please reinstall the full package.', 'xterm 元件未載入（打包後資源缺失）。請重新安裝完整包。'))}</div>`;
         return;
     }
-    
+
     isTerminalInitializing = true;
     setTimeout(() => {
         if (builtinTerminal) {
             isTerminalInitializing = false;
             isTerminalInitialized = true;
-            if (container.style.display !== 'none') {
-                scheduleBuiltinTerminalFit(true);
-            }
+            scheduleBuiltinTerminalFit(true);
             return;
         }
         try {
@@ -11567,33 +11605,31 @@ function initBuiltinTerminal() {
                 allowTransparency: false,
                 convertEol: true
             });
-            
+
             if (window.FitAddon && window.FitAddon.FitAddon) {
                 builtinTerminalFitAddon = new window.FitAddon.FitAddon();
                 builtinTerminal.loadAddon(builtinTerminalFitAddon);
             }
-            
+
             builtinTerminal.open(container);
             isTerminalInitialized = true;
             isTerminalInitializing = false;
             terminalNeedsFit = true;
-            if (container.style.display !== 'none') {
-                scheduleBuiltinTerminalFit(true);
-            }
-            
+            scheduleBuiltinTerminalFit(true);
+
             builtinTerminal.onData(data => {
                 window.api.writeBuiltinTerminal(data);
             });
-            
+
             window.addEventListener('resize', () => {
                 terminalNeedsFit = true;
-                if (currentTab === 'settings-view' && container && container.style.display !== 'none') scheduleBuiltinTerminalFit(true);
+                if (currentTab === 'terminal-view') scheduleBuiltinTerminalFit(true);
             });
-            
+
             window.api.onBuiltinTerminalData((data) => {
                 if (builtinTerminal) builtinTerminal.write(data);
             });
-            
+
             const currentLang = localStorage.getItem('setting_language') || 'zh-CN';
             window.api.startBuiltinTerminal(currentLang).then((res) => {
                 if (res && res.ok === false && builtinTerminal) {
@@ -11909,3 +11945,567 @@ function getLocalIP() {
         }
     });
 }
+
+// =========================
+// 全局角色配置（模型会话 + OpenClaw 渠道）
+// =========================
+let __roleConfigState = null;
+let __selectedRoleId = null;
+let __rolesUiBound = false;
+let __editingNewRole = false;
+
+function roleT(key, fallback, vars) {
+    let text = t(key);
+    if (!text || text === key) text = fallback || key;
+    if (vars && typeof vars === 'object') {
+        for (const [k, v] of Object.entries(vars)) {
+            text = text.replace(new RegExp('\\{' + k + '\\}', 'g'), String(v == null ? '' : v));
+        }
+    }
+    return text;
+}
+
+function getActiveRoleFromState() {
+    if (!__roleConfigState) return null;
+    if (__roleConfigState.activeRole) return __roleConfigState.activeRole;
+    const id = __roleConfigState.activeRoleId;
+    const roles = __roleConfigState.roles || [];
+    return roles.find((r) => r.id === id) || roles[0] || null;
+}
+
+function getActiveRoleChatAddon() {
+    const role = getActiveRoleFromState();
+    if (!role || !role.prompt) return '';
+    return [
+        '',
+        '【全局角色口吻】',
+        `当前启用角色：${role.name}${role.source ? `（${role.source}）` : ''}`,
+        '请在保持事实正确、安全边界与工具策略不变的前提下，用以下口吻回复用户：',
+        String(role.prompt)
+    ].join('\n');
+}
+
+function normalizeRoleCommandText(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[《》【】「」“”"'`·._\-\s]/g, '');
+}
+
+function findRolesForChatCommand(query) {
+    const roles = (__roleConfigState && __roleConfigState.roles) || [];
+    const needle = normalizeRoleCommandText(query)
+        .replace(/(?:这个)?角色$/u, '')
+        .replace(/口吻$/u, '');
+    if (!needle) return [];
+
+    const exact = roles.filter((role) =>
+        normalizeRoleCommandText(role.name) === needle
+        || normalizeRoleCommandText(role.id) === needle
+    );
+    if (exact.length) return exact;
+
+    return roles.filter((role) => {
+        const fields = [
+            role.name,
+            role.id,
+            role.source,
+            ...(role.tags || [])
+        ].map(normalizeRoleCommandText);
+        return fields.some((field) => field.includes(needle));
+    });
+}
+
+function parseChatRoleSwitchQuery(text) {
+    const source = String(text || '').trim();
+    const explicitPatterns = [
+        /^[/#]角色\s*[:：]?\s*(.+)$/iu,
+        /^[/#]role\s*[:：]?\s*(.+)$/iu,
+        /^(?:请)?(?:切换|更换|换|启用|使用)(?:模型)?角色(?:为|成|到)?\s*[:：]?\s*(.+)$/u,
+        /^(?:请)?(?:切换|更换|换)(?:为|成|到)\s*(.+)$/u,
+        /^(?:请)?(?:启用|使用)\s*(.+?)(?:角色|口吻)$/u,
+        /^(?:please\s+)?(?:switch|change)\s+(?:the\s+)?role\s+(?:to\s+)?(.+)$/iu,
+        /^(?:please\s+)?(?:switch|change)\s+to\s+(.+)$/iu,
+        /^(?:please\s+)?(?:use|activate)\s+(.+?)\s+(?:role|persona)$/iu
+    ];
+    for (const pattern of explicitPatterns) {
+        const match = source.match(pattern);
+        if (match && match[1] && match[1].trim()) {
+            return {
+                query: match[1].trim(),
+                explicit: /^[/#](?:角色|role)/iu.test(source) || /角色|role/iu.test(source)
+            };
+        }
+    }
+    return null;
+}
+
+async function handleChatRoleCommand(text) {
+    const source = String(text || '').trim();
+    if (!source) return false;
+
+    const asksCurrent = /^(?:当前|现在|目前)(?:使用的|启用的|是)?(?:什么|哪个)?(?:模型)?角色[？?]?$/u.test(source)
+        || /^(?:我)?(?:现在|当前)是什么口吻[？?]?$/u.test(source)
+        || /^(?:what(?:'s| is)\s+)?(?:the\s+)?current\s+(?:role|persona)[?]?$/iu.test(source);
+    const asksHelp = /^(?:角色指令|角色命令|怎么切换角色|如何切换角色)[？?]?$/u.test(source)
+        || /^(?:role commands?|how (?:do i|to) (?:switch|change) roles?)[?]?$/iu.test(source);
+    const parsedSwitch = parseChatRoleSwitchQuery(source);
+    if (!asksCurrent && !asksHelp && !parsedSwitch) return false;
+
+    // 命令执行前拉最新角色库，避免刚新建/改名后对话侧还是旧列表
+    if (typeof loadRoleConfigState === 'function') {
+        await loadRoleConfigState({ silent: true, preferActive: false, clearEditing: false });
+    }
+    if (!__roleConfigState) {
+        appendChatMessage('ai', t(
+            '角色配置暂时无法读取，请稍后重试。',
+            'Role configuration is temporarily unavailable. Please try again.',
+            '角色配置暫時無法讀取，請稍後重試。'
+        ));
+        return true;
+    }
+
+    if (asksCurrent) {
+        const active = getActiveRoleFromState();
+        appendChatMessage('ai', active
+            ? t(
+                `当前使用「${active.name}」角色（${active.source || '未标注出处'}）。`,
+                `The active role is “${active.name}” (${active.source || 'source not specified'}).`,
+                `目前使用「${active.name}」角色（${active.source || '未標註出處'}）。`
+            )
+            : t('当前未找到启用角色。', 'No active role was found.', '目前未找到啟用角色。'));
+        return true;
+    }
+
+    if (asksHelp) {
+        appendChatMessage('ai', t(
+            '你可以直接说：\n• 角色列表 / 角色列表 2\n• 搜索角色 贾维斯\n• 切换成贾维斯\n• 切换角色为王林\n• /角色 温暖教师\n• 当前是什么角色\n\n以上指令在微信/QQ/飞书等渠道同样可用；切换后全局生效。',
+            'You can say:\n• Role list / Role list 2\n• Search role Jarvis\n• Switch to Jarvis\n• Switch role to Wang Lin\n• /role Warm Teacher\n• What is the current role?\n\nThese commands also work on WeChat/QQ/Feishu; switching applies globally.',
+            '你可以直接說：\n• 角色列表 / 角色列表 2\n• 搜尋角色 賈維斯\n• 切換成賈維斯\n• 切換角色為王林\n• /角色 溫暖教師\n• 目前是什麼角色\n\n以上指令在微信/QQ/飛書等渠道同樣可用；切換後全域生效。'
+        ));
+        return true;
+    }
+
+    const matches = findRolesForChatCommand(parsedSwitch.query);
+    if (!matches.length) {
+        // “切换成英文”等普通自然语言不是角色命令，交回模型正常回答。
+        if (!parsedSwitch.explicit) return false;
+        appendChatMessage('ai', t(
+            `没有找到“${parsedSwitch.query}”角色。你可以到「模型角色」搜索，或输入“角色指令”查看用法。`,
+            `No role matching “${parsedSwitch.query}” was found. Search in Model Roles or type “role commands” for help.`,
+            `沒有找到「${parsedSwitch.query}」角色。你可以到「模型角色」搜尋，或輸入「角色指令」查看用法。`
+        ));
+        return true;
+    }
+
+    if (matches.length > 1) {
+        const names = matches.slice(0, 8).map((role) => `• ${role.name}（${role.source}）`).join('\n');
+        appendChatMessage('ai', t(
+            `找到多个相近角色，请说出完整名称：\n${names}${matches.length > 8 ? '\n• …' : ''}`,
+            `Multiple roles matched. Please use the full name:\n${names}${matches.length > 8 ? '\n• …' : ''}`,
+            `找到多個相近角色，請說出完整名稱：\n${names}${matches.length > 8 ? '\n• …' : ''}`
+        ));
+        return true;
+    }
+
+    const role = matches[0];
+    try {
+        const result = await window.api.saveRoleConfig({ action: 'activate', roleId: role.id });
+        if (!result || !result.success || !result.data) {
+            throw new Error((result && result.error) || 'unknown error');
+        }
+        applyRoleConfigState(result.data, {
+            preferActive: true,
+            selectRoleId: role.id,
+            clearEditing: true
+        });
+        appendChatMessage('ai', t(
+            `已切换为「${role.name}」角色。下一条消息起，我会使用这个口吻回复。`,
+            `Switched to the “${role.name}” role. I will use this persona from your next message.`,
+            `已切換為「${role.name}」角色。下一則訊息起，我會使用這個口吻回覆。`
+        ));
+        return true;
+    } catch (error) {
+        appendChatMessage('ai', t(
+            `角色切换失败：${error.message || error}`,
+            `Failed to switch role: ${error.message || error}`,
+            `角色切換失敗：${error.message || error}`
+        ));
+        return true;
+    }
+}
+
+function parseRoleTagsInput(value) {
+    return String(value || '')
+        .split(/[,，、]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 8);
+}
+
+function collectRoleFormValues() {
+    return {
+        id: __editingNewRole ? '' : (__selectedRoleId || ''),
+        name: (document.getElementById('role-input-name') || {}).value || '',
+        source: (document.getElementById('role-input-source') || {}).value || '',
+        summary: (document.getElementById('role-input-summary') || {}).value || '',
+        tags: parseRoleTagsInput((document.getElementById('role-input-tags') || {}).value || ''),
+        prompt: (document.getElementById('role-input-prompt') || {}).value || ''
+    };
+}
+
+function findRoleInState(roleId) {
+    if (!__roleConfigState || !Array.isArray(__roleConfigState.roles)) return null;
+    return __roleConfigState.roles.find((r) => r.id === roleId) || null;
+}
+
+function setRoleFormReadonly(readonly) {
+    ['role-input-name', 'role-input-source', 'role-input-summary', 'role-input-tags', 'role-input-prompt'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !!readonly;
+    });
+    const saveBtn = document.getElementById('btn-role-save');
+    const delBtn = document.getElementById('btn-role-delete');
+    if (saveBtn) saveBtn.style.display = readonly ? 'none' : '';
+    if (delBtn) delBtn.style.display = readonly ? 'none' : '';
+}
+
+function fillRoleEditor(role, opts = {}) {
+    const empty = document.getElementById('roles-editor-empty');
+    const form = document.getElementById('roles-editor-form');
+    if (!form) return;
+
+    if (!role) {
+        if (empty) empty.style.display = '';
+        form.style.display = 'none';
+        return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    form.style.display = '';
+
+    const builtinTag = document.getElementById('roles-builtin-tag');
+    if (builtinTag) builtinTag.style.display = role.builtin ? '' : 'none';
+
+    const nameEl = document.getElementById('role-input-name');
+    const sourceEl = document.getElementById('role-input-source');
+    const summaryEl = document.getElementById('role-input-summary');
+    const tagsEl = document.getElementById('role-input-tags');
+    const promptEl = document.getElementById('role-input-prompt');
+    if (nameEl) nameEl.value = role.name || '';
+    if (sourceEl) sourceEl.value = role.source || '';
+    if (summaryEl) summaryEl.value = role.summary || '';
+    if (tagsEl) tagsEl.value = (role.tags || []).join(', ');
+    if (promptEl) promptEl.value = role.prompt || '';
+
+    const readonly = !!role.builtin && !opts.forceEditable;
+    setRoleFormReadonly(readonly);
+
+    const activateBtn = document.getElementById('btn-role-activate');
+    if (activateBtn) {
+        const isActive = !!(__roleConfigState && __roleConfigState.activeRoleId === role.id && !__editingNewRole);
+        activateBtn.disabled = isActive || __editingNewRole;
+        activateBtn.textContent = isActive
+            ? roleT('roles.badge.enabled', '使用中')
+            : roleT('roles.btn.activate', '启用此角色');
+    }
+}
+
+let __roleSearchKeyword = '';
+
+function roleMatchesKeyword(role, keyword) {
+    if (!keyword) return true;
+    const haystack = [
+        role.name,
+        role.source,
+        role.summary,
+        ...(role.tags || [])
+    ].join(' ').toLowerCase();
+    // 支持空格分隔多关键词，全部命中才算匹配
+    return keyword.split(/\s+/).filter(Boolean).every((kw) => haystack.includes(kw));
+}
+
+function renderRolesList() {
+    const list = document.getElementById('roles-card-list');
+    const badge = document.getElementById('roles-active-badge');
+    if (!list) return;
+
+    const allRoles = (__roleConfigState && __roleConfigState.roles) || [];
+    const keyword = __roleSearchKeyword.trim().toLowerCase();
+    const roles = allRoles.filter((r) => roleMatchesKeyword(r, keyword));
+    const activeId = (__roleConfigState && __roleConfigState.activeRoleId) || '';
+    const activeRole = getActiveRoleFromState();
+    if (badge) badge.textContent = activeRole ? activeRole.name : '--';
+
+    list.innerHTML = '';
+    if (keyword && !roles.length) {
+        const emptyTip = document.createElement('div');
+        emptyTip.className = 'roles-search-empty';
+        emptyTip.textContent = roleT('roles.search.empty', '没有匹配的角色，换个关键词试试。');
+        list.appendChild(emptyTip);
+        return;
+    }
+    roles.forEach((role) => {
+        const card = document.createElement('div');
+        card.className = 'role-card' + ((__selectedRoleId === role.id && !__editingNewRole) ? ' active-selected' : '');
+        card.setAttribute('data-role-id', role.id);
+
+        const enabled = role.id === activeId;
+        const pillText = enabled
+            ? roleT('roles.badge.enabled', '使用中')
+            : (role.builtin ? roleT('roles.badge.builtin', '内置') : roleT('roles.badge.custom', '自定义'));
+
+        const tagsHtml = (role.tags || []).slice(0, 4).map((tag) => `<span class="role-tag">${escapeHtmlLite(tag)}</span>`).join('');
+        card.innerHTML = `
+            <div class="role-card-title">
+                <strong>${escapeHtmlLite(role.name || role.id)}</strong>
+                <span class="role-card-pill${enabled ? ' enabled' : ''}">${escapeHtmlLite(pillText)}</span>
+            </div>
+            <div class="role-card-source">${escapeHtmlLite(role.source || '')}</div>
+            <div class="role-card-summary">${escapeHtmlLite(role.summary || '')}</div>
+            <div class="role-card-tags">${tagsHtml}</div>
+        `;
+        card.addEventListener('click', () => {
+            __editingNewRole = false;
+            __selectedRoleId = role.id;
+            renderRolesList();
+            fillRoleEditor(role);
+        });
+        list.appendChild(card);
+    });
+}
+
+function escapeHtmlLite(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function applyRoleConfigState(data, opts = {}) {
+    if (!data) return null;
+    __roleConfigState = data;
+    const preferActive = opts.preferActive !== false;
+    const forceSelectId = opts.selectRoleId || null;
+
+    if (forceSelectId && findRoleInState(forceSelectId)) {
+        __selectedRoleId = forceSelectId;
+    } else if (preferActive && data.activeRoleId) {
+        __selectedRoleId = data.activeRoleId;
+    } else if (!__selectedRoleId || !findRoleInState(__selectedRoleId)) {
+        __selectedRoleId = data.activeRoleId
+            || (data.roles && data.roles[0] && data.roles[0].id)
+            || null;
+    }
+
+    if (opts.clearEditing !== false) __editingNewRole = false;
+    renderRolesList();
+    if (!__editingNewRole) {
+        fillRoleEditor(findRoleInState(__selectedRoleId));
+    }
+    updateChatActiveRoleBadge();
+    return __roleConfigState;
+}
+
+function updateChatActiveRoleBadge() {
+    const badge = document.getElementById('chat-active-role-badge');
+    if (!badge) return;
+    const active = getActiveRoleFromState();
+    if (!active) {
+        badge.textContent = '--';
+        badge.title = '';
+        return;
+    }
+    badge.textContent = active.name || '--';
+    badge.title = `${active.name}${active.source ? ` · ${active.source}` : ''}`;
+}
+
+async function loadRoleConfigState(opts = {}) {
+    if (!window.api || !window.api.readRoleConfig) {
+        if (!opts.silent) showToast(roleT('roles.toast.loaded_fail', '角色配置加载失败'));
+        return null;
+    }
+    try {
+        const result = await window.api.readRoleConfig();
+        if (!result || result.success === false || !result.data) {
+            if (!opts.silent) showToast(roleT('roles.toast.loaded_fail', '角色配置加载失败'));
+            return null;
+        }
+        return applyRoleConfigState(result.data, {
+            preferActive: !!opts.preferActive,
+            selectRoleId: opts.selectRoleId || null,
+            clearEditing: opts.clearEditing !== false
+        });
+    } catch (e) {
+        console.warn('[Roles] load failed:', e);
+        if (!opts.silent) showToast(roleT('roles.toast.loaded_fail', '角色配置加载失败'));
+        return null;
+    }
+}
+
+async function applyRoleAction(payload, successKey, successFallback, successVars) {
+    if (!window.api || !window.api.saveRoleConfig) {
+        showToast(roleT('roles.toast.error', '操作失败：{error}', { error: 'API unavailable' }));
+        return false;
+    }
+    try {
+        const result = await window.api.saveRoleConfig(payload);
+        if (!result || !result.success) {
+            showToast(roleT('roles.toast.error', '操作失败：{error}', { error: (result && result.error) || 'unknown' }));
+            return false;
+        }
+        let selectRoleId = null;
+        let preferActive = false;
+        if (payload.action === 'activate' || payload.action === 'reset-active') {
+            preferActive = true;
+            selectRoleId = result.data && result.data.activeRoleId;
+        } else if (payload.action === 'upsert' && result.data && result.data.roles) {
+            const savedName = (payload.role && payload.role.name) || '';
+            const custom = [...result.data.roles].reverse().find((r) => !r.builtin && r.name === savedName);
+            if (custom) selectRoleId = custom.id;
+            else if (payload.role && payload.role.id) selectRoleId = payload.role.id;
+        } else if (payload.action === 'delete') {
+            preferActive = true;
+            selectRoleId = result.data && result.data.activeRoleId;
+        }
+        applyRoleConfigState(result.data, { preferActive, selectRoleId, clearEditing: true });
+        showToast(roleT(successKey, successFallback, successVars));
+        return true;
+    } catch (e) {
+        showToast(roleT('roles.toast.error', '操作失败：{error}', { error: e.message || String(e) }));
+        return false;
+    }
+}
+
+function startCreateRole() {
+    __editingNewRole = true;
+    __selectedRoleId = null;
+    renderRolesList();
+    fillRoleEditor({
+        name: roleT('roles.new.name', '我的自定义角色'),
+        source: roleT('roles.new.source', '自定义'),
+        summary: roleT('roles.new.summary', '按你喜欢的口吻回复。'),
+        tags: [],
+        prompt: roleT('roles.new.prompt', '请用清晰、自然、有个性的口吻回复用户。保持事实正确与安全边界。'),
+        builtin: false
+    }, { forceEditable: true });
+    const activateBtn = document.getElementById('btn-role-activate');
+    if (activateBtn) activateBtn.disabled = true;
+}
+
+function initRolesUI() {
+    if (__rolesUiBound) return;
+    __rolesUiBound = true;
+
+    const searchInput = document.getElementById('role-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            __roleSearchKeyword = searchInput.value || '';
+            renderRolesList();
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                searchInput.value = '';
+                __roleSearchKeyword = '';
+                renderRolesList();
+            }
+        });
+    }
+
+    const btnNew = document.getElementById('btn-role-new');
+    const btnReset = document.getElementById('btn-role-reset-default');
+    const btnSave = document.getElementById('btn-role-save');
+    const btnActivate = document.getElementById('btn-role-activate');
+    const btnDup = document.getElementById('btn-role-duplicate');
+    const btnDel = document.getElementById('btn-role-delete');
+
+    if (btnNew) btnNew.addEventListener('click', () => startCreateRole());
+
+    if (btnReset) {
+        btnReset.addEventListener('click', async () => {
+            await applyRoleAction({ action: 'reset-active' }, 'roles.toast.reset', '已恢复为默认助手');
+        });
+    }
+
+    if (btnSave) {
+        btnSave.addEventListener('click', async () => {
+            const values = collectRoleFormValues();
+            if (!String(values.name || '').trim()) {
+                showToast(roleT('roles.toast.name_required', '请填写角色名称'));
+                return;
+            }
+            if (!String(values.prompt || '').trim()) {
+                showToast(roleT('roles.toast.prompt_required', '请填写详细口吻指令'));
+                return;
+            }
+            const current = findRoleInState(__selectedRoleId);
+            if (current && current.builtin && !__editingNewRole) {
+                showToast(roleT('roles.toast.builtin_readonly', '内置角色不可直接修改，请先“复制为自定义”'));
+                return;
+            }
+            const rolePayload = {
+                name: values.name.trim(),
+                source: values.source.trim() || roleT('roles.new.source', '自定义'),
+                summary: values.summary.trim(),
+                tags: values.tags,
+                prompt: values.prompt.trim()
+            };
+            if (!__editingNewRole && values.id) rolePayload.id = values.id;
+            await applyRoleAction({ action: 'upsert', role: rolePayload }, 'roles.toast.saved', '角色已保存');
+        });
+    }
+
+    if (btnActivate) {
+        btnActivate.addEventListener('click', async () => {
+            if (__editingNewRole || !__selectedRoleId) return;
+            const role = findRoleInState(__selectedRoleId);
+            await applyRoleAction(
+                { action: 'activate', roleId: __selectedRoleId },
+                'roles.toast.activated',
+                '已启用角色：{name}',
+                { name: (role && role.name) || __selectedRoleId }
+            );
+        });
+    }
+
+    if (btnDup) {
+        btnDup.addEventListener('click', async () => {
+            const base = __editingNewRole ? collectRoleFormValues() : findRoleInState(__selectedRoleId);
+            if (!base) return;
+            const rolePayload = {
+                name: String(base.name || 'Role') + ' Copy',
+                source: base.source || roleT('roles.new.source', '自定义'),
+                summary: base.summary || '',
+                tags: Array.isArray(base.tags) ? base.tags : parseRoleTagsInput(base.tags),
+                prompt: base.prompt || ''
+            };
+            const ok = await applyRoleAction({ action: 'upsert', role: rolePayload }, 'roles.toast.duplicated', '已复制为自定义角色');
+            if (ok) {
+                const selected = findRoleInState(__selectedRoleId);
+                if (selected) fillRoleEditor(selected);
+            }
+        });
+    }
+
+    if (btnDel) {
+        btnDel.addEventListener('click', async () => {
+            if (__editingNewRole) {
+                __editingNewRole = false;
+                __selectedRoleId = (__roleConfigState && __roleConfigState.activeRoleId) || null;
+                renderRolesList();
+                fillRoleEditor(findRoleInState(__selectedRoleId));
+                return;
+            }
+            const role = findRoleInState(__selectedRoleId);
+            if (!role) return;
+            if (role.builtin) {
+                showToast(roleT('roles.toast.builtin_readonly', '内置角色不可直接修改，请先“复制为自定义”'));
+                return;
+            }
+            if (!window.confirm(roleT('roles.toast.delete_confirm', '确定删除该自定义角色吗？'))) return;
+            await applyRoleAction({ action: 'delete', roleId: role.id }, 'roles.toast.deleted', '角色已删除');
+        });
+    }
+}
+

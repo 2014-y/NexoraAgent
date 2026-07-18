@@ -100,11 +100,15 @@
               </svg>
               <span data-i18n="nav.communication">通讯管理</span>
             </div>
-            <div class="nav-item" data-tab="plugins-view" id="tour-nav-plugins">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
-              <span data-i18n="nav.plugins">内置插件</span>
+
+            <div class="nav-item" data-tab="roles-view" id="btn-nav-roles">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <span data-i18n="nav.roles">模型角色</span>
             </div>
-            <div class="nav-item" data-tab="acceleration-view" id="tour-nav-acceleration">
+            <div class="nav-item" data-tab="acceleration-view" id="btn-nav-acceleration">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z"/></svg>
               <span data-i18n="nav.acceleration_channel">加速通道</span>
             </div>
@@ -129,9 +133,27 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               <span data-i18n="nav.stats">用量监控</span>
             </div>
- 
-            
-            
+            <div class="nav-item" data-tab="plugins-view" id="tour-nav-plugins">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
+              <span data-i18n="nav.plugins">内置插件</span>
+            </div>
+            <div class="nav-item" data-tab="terminal-view" id="btn-nav-terminal">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"/>
+                <line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
+              <span data-i18n="nav.terminal">内置终端</span>
+            </div>
+            <div class="nav-item" data-tab="syslogs-view" id="btn-nav-syslogs">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+              <span data-i18n="nav.syslogs">运行日志</span>
+            </div>
             <div class="nav-item" data-tab="settings-view" id="tour-nav-settings">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               <span data-i18n="nav.settings">系统设置</span>
@@ -536,6 +558,8 @@
             </div>
             
             <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 12px; color: var(--text-secondary);" data-i18n="chat.label.current_role">当前角色:</span>
+              <span id="chat-active-role-badge" class="chat-active-role-badge" title="">--</span>
               <span style="font-size: 12px; color: var(--text-secondary);" data-i18n="chat.label.current_model">当前模型:</span>
               <select id="chat-model-select" style="background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 8px; height: 32px; font-size: 12px; color: var(--text-primary) !important; padding: 0 8px; outline: none; min-width: 180px; transition: all 0.2s ease;">
                 <option value="">载入中...</option>
@@ -819,6 +843,70 @@
           </div>
         </section>
 
+        <!-- Tab: 模型角色 -->
+        <section class="tab-pane" id="roles-view">
+          <div class="view-header-row" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div class="view-header" style="flex: 1 1 280px; min-width: 240px;">
+              <h2 style="margin: 0;" data-i18n="roles.title">模型角色</h2>
+              <p style="margin: 6px 0 0 0; line-height: 1.2;" data-i18n="roles.desc">为 AI 选择或自定义回复口吻</p>
+            </div>
+            <div class="roles-toolbar">
+              <input type="text" id="role-search-input" class="roles-search-input" data-i18n-placeholder="roles.search.placeholder" placeholder="🔍 搜索角色 / 出处 / 标签" />
+              <button type="button" class="btn-secondary" id="btn-role-new" data-i18n="roles.btn.new">+ 新建角色</button>
+              <button type="button" class="btn-secondary" id="btn-role-reset-default" data-i18n="roles.btn.reset_default">恢复默认助手</button>
+            </div>
+          </div>
+
+          <div class="roles-layout">
+            <div class="roles-list-panel">
+              <div class="roles-list-header">
+                <span data-i18n="roles.list.title">角色列表</span>
+                <span class="roles-active-badge" id="roles-active-badge">--</span>
+              </div>
+              <div class="roles-card-list" id="roles-card-list"></div>
+            </div>
+
+            <div class="roles-editor-panel">
+              <div class="roles-editor-empty" id="roles-editor-empty" data-i18n="roles.editor.empty">请从左侧选择一个角色进行查看或编辑。</div>
+              <div class="roles-editor-form" id="roles-editor-form" style="display: none;">
+                <div class="roles-editor-title-row">
+                  <h3 id="roles-editor-heading" data-i18n="roles.editor.title">角色详情</h3>
+                  <span class="roles-builtin-tag" id="roles-builtin-tag" style="display: none;" data-i18n="roles.badge.builtin">内置</span>
+                </div>
+
+                <label class="roles-field">
+                  <span data-i18n="roles.field.name">名称</span>
+                  <input type="text" id="role-input-name" maxlength="40" />
+                </label>
+                <label class="roles-field">
+                  <span data-i18n="roles.field.source">出处</span>
+                  <input type="text" id="role-input-source" maxlength="60" />
+                </label>
+                <label class="roles-field">
+                  <span data-i18n="roles.field.summary">简介</span>
+                  <input type="text" id="role-input-summary" maxlength="160" />
+                </label>
+                <label class="roles-field">
+                  <span data-i18n="roles.field.tags">口吻标签（逗号分隔）</span>
+                  <input type="text" id="role-input-tags" maxlength="200" placeholder="沉稳, 克制" />
+                </label>
+                <label class="roles-field roles-field-prompt">
+                  <span data-i18n="roles.field.prompt">详细口吻指令</span>
+                  <textarea id="role-input-prompt" maxlength="4000" rows="10" spellcheck="false"></textarea>
+                </label>
+
+                <div class="roles-editor-actions">
+                  <button type="button" class="btn-primary" id="btn-role-activate" data-i18n="roles.btn.activate">启用此角色</button>
+                  <button type="button" class="btn-secondary" id="btn-role-save" data-i18n="roles.btn.save">保存</button>
+                  <button type="button" class="btn-secondary" id="btn-role-duplicate" data-i18n="roles.btn.duplicate">复制为自定义</button>
+                  <button type="button" class="btn-secondary roles-btn-danger" id="btn-role-delete" data-i18n="roles.btn.delete">删除</button>
+                </div>
+                <p class="roles-hint" data-i18n="roles.hint.apply">切换后从下一条消息开始生效，无需清空历史会话。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Tab 4: 用量统计 -->
         <section class="tab-pane" id="dashboard-view">
           <!-- 头部与工具过滤条 -->
@@ -949,9 +1037,33 @@
           </div>
         </section>
 
-        
+        <!-- Tab: 内置终端 -->
+        <section class="tab-pane" id="terminal-view">
+          <div class="view-header" style="margin-bottom: 16px; flex-shrink: 0;">
+            <h2 style="margin: 0;" data-i18n="terminal.title">内置沙箱终端</h2>
+            <p style="margin: 6px 0 0 0; line-height: 1.2;" data-i18n="terminal.desc">直接管理底层环境依赖与Nexora Agent运行时的命令行沙盒环境</p>
+          </div>
+          <div id="xterm-container" class="terminal-page-container"></div>
+        </section>
 
-        <!-- Tab 5.5: 系统设置 -->
+        <!-- Tab: 系统运行日志 -->
+        <section class="tab-pane" id="syslogs-view">
+          <div class="view-header-row" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-shrink: 0; gap: 12px;">
+            <div class="view-header" style="flex: 1 1 280px; min-width: 240px;">
+              <h2 style="margin: 0;" data-i18n="logs.title">📋 系统运行日志</h2>
+              <p style="margin: 6px 0 0 0; line-height: 1.2;" data-i18n="logs.desc">展示网关子进程拉起时的完整 stdout/stderr 原生输出（可用于问题排查与诊断）</p>
+            </div>
+            <div style="display: flex; gap: 8px; flex-shrink: 0;">
+              <button type="button" class="btn-secondary" id="btn-copy-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.copy">📋 复制日志</button>
+              <button type="button" class="btn-secondary" id="btn-clear-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: #ff5252; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.clear">🗑️ 清空日志</button>
+            </div>
+          </div>
+          <div class="system-logs-container syslogs-page-container">
+            <textarea id="system-raw-logs-area" readonly spellcheck="false" style="flex: 1; background: transparent; border: none; outline: none; color: #a5d6a7; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: none; overflow-y: auto; white-space: pre; margin: 0; padding: 0; box-sizing: border-box; font-weight: 500;" placeholder="等待网关子进程启动并喷吐系统日志..." data-i18n-placeholder="logs.placeholder"></textarea>
+          </div>
+        </section>
+
+        <!-- Tab: 系统设置 -->
         <section class="tab-pane" id="settings-view" style="overflow-y: auto; height: 100%; box-sizing: border-box; padding: 20px;">
           <div class="view-header" style="margin-bottom: 20px;">
             <h2 data-i18n="settings.title">系统偏好设置</h2>
@@ -1073,35 +1185,6 @@
               </label>
             </div>
 
-            <!-- 内置终端：直接嵌入系统设置，展开/折叠 -->
-            <div class="settings-terminal-card">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
-                <div>
-                  <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.terminal.title">⌨️ 内置终端</div>
-                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.terminal.desc">在当前页面直接管理底层沙箱、网关运行时与本地命令。</div>
-                </div>
-                <button type="button" id="btn-toggle-terminal" class="btn-secondary" style="height: 28px; padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: 12px; margin-top: 2px;" data-i18n="terminal.expand">展开</button>
-              </div>
-              <div id="xterm-container" class="settings-terminal-container" style="display: none;"></div>
-            </div>
-          </div>
-
-          <!-- 2. 系统运行日志板块 -->
-          <div class="form-group-section" style="width: 100%; margin-bottom: 24px; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <div>
-                <h3 style="margin: 0; border-left: 3px solid var(--accent-color); padding-left: 10px;" data-i18n="logs.title">📋 系统运行日志</h3>
-                <p style="margin: 4px 0 0 0; font-size: 11px; color: var(--text-secondary);" data-i18n="logs.desc">展示网关子进程拉起时的完整 stdout/stderr 原生输出（可用于问题排查与诊断）</p>
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <button type="button" class="btn-secondary" id="btn-copy-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.copy">📋 复制日志</button>
-                <button type="button" class="btn-secondary" id="btn-clear-system-logs" style="padding: 0 12px; font-size: 11px; font-weight: bold; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: #ff5252; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" data-i18n="logs.btn.clear">🗑️ 清空日志</button>
-              </div>
-            </div>
-            
-            <div class="system-logs-container" style="background: #0d0e15; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; height: 220px; display: flex; flex-direction: column; box-sizing: border-box; width: 100%;">
-              <textarea id="system-raw-logs-area" readonly spellcheck="false" style="flex: 1; background: transparent; border: none; outline: none; color: #a5d6a7; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: none; overflow-y: auto; white-space: pre; margin: 0; padding: 0; box-sizing: border-box; font-weight: 500;" placeholder="等待网关子进程启动并喷吐系统日志..." data-i18n-placeholder="logs.placeholder"></textarea>
-            </div>
           </div>
 
           <!-- 软件版本与检测更新 -->

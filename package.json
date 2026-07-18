@@ -117,6 +117,7 @@
       "token-usage-parse.js",
       "plugin-catalog.js",
       "gateway-boot-harden.js",
+      "role-config.js",
       "runtime-pack-manifest.js",
       "patch_gateway.js",
       "capture-desktop.ps1",
