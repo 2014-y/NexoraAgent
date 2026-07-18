@@ -7614,6 +7614,189 @@ async function loadChatModels() {
     }
 }
 
+// 为 AI 的气泡消息添加朗读操作按钮
+function addTtsToAiBubble(msgDiv, bubble) {
+    if (!msgDiv || !bubble) return;
+    // 检查是否已经有 actionRow 了，避免重复添加
+    if (bubble.parentNode && bubble.parentNode.querySelector('.tts-action-row')) return;
+
+    let bubbleWrapper;
+    if (bubble.parentNode && bubble.parentNode !== msgDiv && bubble.parentNode.classList.contains('bubble-wrapper')) {
+        bubbleWrapper = bubble.parentNode;
+    } else {
+        bubbleWrapper = document.createElement('div');
+        bubbleWrapper.className = 'bubble-wrapper';
+        bubbleWrapper.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-start;
+            min-width: 0;
+        `;
+        if (bubble.parentNode) {
+            bubble.parentNode.insertBefore(bubbleWrapper, bubble);
+        }
+        bubbleWrapper.appendChild(bubble);
+    }
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'tts-action-row';
+    actionRow.style.cssText = `
+        display: flex;
+        gap: 6px;
+        margin-top: 2px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        align-self: flex-start;
+    `;
+
+    msgDiv.addEventListener('mouseenter', () => actionRow.style.opacity = '0.8');
+    msgDiv.addEventListener('mouseleave', () => actionRow.style.opacity = '0');
+
+    const speakBtn = document.createElement('button');
+    speakBtn.title = '朗读消息';
+    speakBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+        outline: none;
+        padding: 0;
+    `;
+    speakBtn.addEventListener('mouseenter', () => {
+        speakBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        speakBtn.style.color = 'var(--text-primary)';
+    });
+    speakBtn.addEventListener('mouseleave', () => {
+        speakBtn.style.background = 'transparent';
+        speakBtn.style.color = 'var(--text-secondary)';
+    });
+
+    const speakerSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+    const stopSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect></svg>`;
+    
+    speakBtn.innerHTML = speakerSvg;
+
+    let isSpeaking = false;
+    let localVoiceStopListener = null;
+    let utterance = null; // 放在闭包中，防止播放期间被垃圾回收机制(GC)误杀导致播放中断
+
+    speakBtn.addEventListener('click', async () => {
+        if (isSpeaking) {
+            if (window.api && window.api.voice) {
+                try { await window.api.voice.stop(); } catch(e){}
+            }
+            window.speechSynthesis.cancel();
+            speakBtn.innerHTML = speakerSvg;
+            isSpeaking = false;
+            utterance = null;
+            if (localVoiceStopListener) {
+                localVoiceStopListener();
+                localVoiceStopListener = null;
+            }
+        } else {
+            if (window.api && window.api.voice) {
+                try { await window.api.voice.stop(); } catch(e){}
+            }
+            window.speechSynthesis.cancel();
+            
+            let textToSpeak = bubble.textContent || '';
+            textToSpeak = textToSpeak
+                .replace(/[\*\_\`\#]/g, '')
+                .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+                .replace(/AI 正在直连.*联络思考中\.\.\./g, '')
+                .replace(/思考中\.\.\./g, '')
+                .trim();
+
+            if (!textToSpeak) return;
+
+            window.dispatchEvent(new CustomEvent('global-tts-start', { detail: { activeBtn: speakBtn, defaultSvg: speakerSvg } }));
+
+            let useLocalVoice = false;
+            try {
+                // 只要主进程的语音 API 存在，并且用户在【语音管理】里开启了语音总开关，即可直接使用本地的高级语音引擎（无需拉起网关服务）
+                if (window.api && window.api.voice) {
+                    const voiceState = typeof __voiceState !== 'undefined' ? __voiceState : (await window.api.voice.getState()).data;
+                    if (voiceState && voiceState.settings && voiceState.settings.enabled && !voiceState.settings.muted) {
+                        useLocalVoice = true;
+                    }
+                }
+            } catch(e) {}
+
+            if (useLocalVoice) {
+                const activeRoleId = (typeof __roleConfigState !== 'undefined' && __roleConfigState && __roleConfigState.activeRoleId) || undefined;
+                try {
+                    await window.api.voice.speak({
+                        text: textToSpeak,
+                        source: 'desktop',
+                        roleId: activeRoleId
+                    });
+                    speakBtn.innerHTML = stopSvg;
+                    isSpeaking = true;
+
+                    if (window.api && window.api.voice && typeof window.api.voice.onStatus === 'function') {
+                        localVoiceStopListener = window.api.voice.onStatus((statusData) => {
+                            if (statusData && (statusData.status === 'idle' || statusData.speaking === false)) {
+                                speakBtn.innerHTML = speakerSvg;
+                                isSpeaking = false;
+                                if (localVoiceStopListener) {
+                                    localVoiceStopListener();
+                                    localVoiceStopListener = null;
+                                }
+                            }
+                        });
+                    }
+                } catch (e) {
+                    useLocalVoice = false;
+                }
+            }
+            
+            if (!useLocalVoice) {
+                // 回退到系统原生的 TTS 朗读，响应极其迅速，直连模式下完美运行
+                utterance = new SpeechSynthesisUtterance(textToSpeak);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.onend = () => {
+                    speakBtn.innerHTML = speakerSvg;
+                    isSpeaking = false;
+                    utterance = null;
+                };
+                utterance.onerror = (err) => {
+                    console.warn('SpeechSynthesis error:', err);
+                    speakBtn.innerHTML = speakerSvg;
+                    isSpeaking = false;
+                    utterance = null;
+                };
+                window.speechSynthesis.speak(utterance);
+                speakBtn.innerHTML = stopSvg;
+                isSpeaking = true;
+            }
+        }
+    });
+
+    window.addEventListener('global-tts-start', (e) => {
+        if (e.detail.activeBtn !== speakBtn && isSpeaking) {
+            speakBtn.innerHTML = speakerSvg;
+            isSpeaking = false;
+            if (localVoiceStopListener) {
+                localVoiceStopListener();
+                localVoiceStopListener = null;
+            }
+        }
+    });
+
+    actionRow.appendChild(speakBtn);
+    bubbleWrapper.appendChild(actionRow);
+}
+
 // 往聊天窗口追加气泡消息
 function appendChatMessage(sender, content, attachment = null, isHTML = false) {
     const container = document.getElementById('chat-messages-container');
@@ -7680,8 +7863,23 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
     }
     bubble.appendChild(textNode);
 
+    const bubbleWrapper = document.createElement('div');
+    bubbleWrapper.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: ${sender === 'user' ? 'flex-end' : 'flex-start'};
+        min-width: 0;
+    `;
+    bubbleWrapper.appendChild(bubble);
+
+    // AI消息的操作栏
+    if (sender !== 'user') {
+        addTtsToAiBubble(msgDiv, bubble);
+    }
+
     msgDiv.appendChild(avatar);
-    msgDiv.appendChild(bubble);
+    msgDiv.appendChild(bubbleWrapper);
     container.appendChild(msgDiv);
     
     container.scrollTop = container.scrollHeight;
@@ -7698,9 +7896,9 @@ function clearChatHistory() {
 
     // 重置为初始欢迎语
     const welcomeHtml = `
-        <div style="display: flex; gap: 12px; max-width: 80%; align-self: flex-start;">
+        <div id="welcome-message-row" style="display: flex; gap: 12px; max-width: 80%; align-self: flex-start;">
             <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #8c52ff, #00d2ff); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: white; flex-shrink: 0; box-shadow: 0 0 10px rgba(140,82,255,0.3);">AI</div>
-            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 12px 16px; color: var(--text-primary); font-size: 13px; line-height: 1.5; border-top-left-radius: 2px;">
+            <div id="welcome-message-bubble" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 12px 16px; color: var(--text-primary); font-size: 13px; line-height: 1.5; border-top-left-radius: 2px;">
                 <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw Nexora Agent未启动，请前往【控制台】启动Nexora Agent。</span>
                 <br><br>
                 <span data-i18n="chat.welcome.functions">在这里您可以：</span>
@@ -7714,6 +7912,13 @@ function clearChatHistory() {
     
     // 写入后，应用一次多语言渲染以展示正确语言
     applyLanguage(localStorage.getItem('setting_language') || 'zh-CN');
+
+    // 重新附加朗读按钮到欢迎语气泡
+    const welcomeRow = document.getElementById('welcome-message-row');
+    const welcomeBubble = document.getElementById('welcome-message-bubble');
+    if (welcomeRow && welcomeBubble) {
+        addTtsToAiBubble(welcomeRow, welcomeBubble);
+    }
 
     // 清除附件
     chatAttachmentBase64 = '';
@@ -13464,4 +13669,13 @@ if (document.readyState === 'loading') {
 } else {
     setTimeout(initVoiceModule, 800);
 }
+
+// 启动后为初始静态欢迎气泡绑定语音朗读功能
+setTimeout(() => {
+    const welcomeRow = document.getElementById('welcome-message-row');
+    const welcomeBubble = document.getElementById('welcome-message-bubble');
+    if (welcomeRow && welcomeBubble) {
+        addTtsToAiBubble(welcomeRow, welcomeBubble);
+    }
+}, 1200);
 

@@ -2595,7 +2595,7 @@ textarea.acc-input {
   color: var(--text-secondary);
   font-size: 12.5px;
   text-align: center;
-  padding-top: 30px;
+  margin: auto 0;
 }
 
 .activity-log-line {
