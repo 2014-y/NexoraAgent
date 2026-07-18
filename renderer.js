@@ -12863,7 +12863,227 @@ async function patchVoiceSettings(patch) {
     if (res && res.data) applyVoiceStateToUi(res.data);
 }
 
+let __localAudioContext = null;
+let __localAudioStream = null;
+let __localAudioProcessor = null;
+let __localAudioChunks = [];
+let __localSilenceStart = null;
+let __localSpeaking = false;
+let __localRmsThreshold = 0.015;
+
+function mergeAudioChunks(chunks) {
+    if (!chunks.length) return null;
+    let totalLength = 0;
+    for (const c of chunks) totalLength += c.length;
+    const result = new Float32Array(totalLength);
+    let offset = 0;
+    for (const c of chunks) {
+        result.set(c, offset);
+        offset += c.length;
+    }
+    return result;
+}
+
+function stopLocalVoiceRecognition() {
+    __voiceRecMode = 'off';
+    if (__localAudioProcessor) {
+        try { __localAudioProcessor.disconnect(); } catch (e) {}
+        __localAudioProcessor = null;
+    }
+    if (__localAudioStream) {
+        try {
+            __localAudioStream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        __localAudioStream = null;
+    }
+    if (__localAudioContext) {
+        try { __localAudioContext.close(); } catch (e) {}
+        __localAudioContext = null;
+    }
+    __localAudioChunks = [];
+    __localSpeaking = false;
+    __localSilenceStart = null;
+}
+
+function startLocalVoiceRecognition(mode) {
+    stopLocalVoiceRecognition();
+    
+    // 确保在线识别也已关闭
+    if (__voiceChatSilenceTimer) {
+        clearTimeout(__voiceChatSilenceTimer);
+        __voiceChatSilenceTimer = null;
+    }
+    if (__voiceRec) {
+        try { __voiceRec.onresult = null; } catch (e) {}
+        try { __voiceRec.onerror = null; } catch (e) {}
+        try { __voiceRec.onend = null; } catch (e) {}
+        try { __voiceRec.stop(); } catch (e) {}
+        __voiceRec = null;
+    }
+
+    __voiceRecMode = mode;
+    __voiceChatBuffer = '';
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        __localAudioStream = stream;
+        __localAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const source = __localAudioContext.createMediaStreamSource(stream);
+        __localAudioProcessor = __localAudioContext.createScriptProcessor(4096, 1, 1);
+
+        __localAudioChunks = [];
+        __localSilenceStart = null;
+        __localSpeaking = false;
+
+        __localAudioProcessor.onaudioprocess = (e) => {
+            if (__voiceRecMode === 'off') return;
+            const channelData = e.inputBuffer.getChannelData(0);
+
+            let sum = 0;
+            for (let i = 0; i < channelData.length; i++) {
+                sum += channelData[i] * channelData[i];
+            }
+            const rms = Math.sqrt(sum / channelData.length);
+
+            if (__voiceRecMode === 'chat') {
+                if (rms > __localRmsThreshold) {
+                    if (!__localSpeaking) {
+                        __localSpeaking = true;
+                        if (window.api && window.api.voice) {
+                            window.api.voice.setListenStatus('listening');
+                        }
+                    }
+                    __localSilenceStart = null;
+                } else {
+                    if (__localSpeaking) {
+                        if (!__localSilenceStart) {
+                            __localSilenceStart = Date.now();
+                        } else if (Date.now() - __localSilenceStart > 1500) {
+                            __localSpeaking = false;
+                            __localSilenceStart = null;
+                            const pcmData = mergeAudioChunks(__localAudioChunks);
+                            __localAudioChunks = [];
+                            if (pcmData && pcmData.length > 3200) {
+                                triggerLocalAsr(pcmData);
+                            } else {
+                                if (window.api && window.api.voice) {
+                                    window.api.voice.setListenStatus('listening');
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (__localSpeaking) {
+                    __localAudioChunks.push(new Float32Array(channelData));
+                }
+            } else if (__voiceRecMode === 'wake') {
+                if (rms > __localRmsThreshold) {
+                    if (!__localSpeaking) {
+                        __localSpeaking = true;
+                        if (window.api && window.api.voice) {
+                            window.api.voice.setListenStatus('listening_wake');
+                        }
+                    }
+                    __localSilenceStart = null;
+                } else {
+                    if (__localSpeaking) {
+                        if (!__localSilenceStart) {
+                            __localSilenceStart = Date.now();
+                        } else if (Date.now() - __localSilenceStart > 1200) {
+                            __localSpeaking = false;
+                            __localSilenceStart = null;
+                            const pcmData = mergeAudioChunks(__localAudioChunks);
+                            __localAudioChunks = [];
+                            if (pcmData && pcmData.length > 3200) {
+                                triggerLocalWakeAsr(pcmData);
+                            } else {
+                                if (window.api && window.api.voice) {
+                                    window.api.voice.setListenStatus('listening_wake');
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (__localSpeaking) {
+                    __localAudioChunks.push(new Float32Array(channelData));
+                }
+            }
+        };
+
+        source.connect(__localAudioProcessor);
+        __localAudioProcessor.connect(__localAudioContext.destination);
+
+        if (window.api && window.api.voice) {
+            window.api.voice.setListenStatus(mode === 'wake' ? 'listening_wake' : 'listening');
+        }
+    }).catch(err => {
+        console.error('[Voice] Local recording access error:', err);
+        showToast(voiceT('voice.toast.mic_denied', '无法访问麦克风，请在系统设置中允许'));
+        stopLocalVoiceRecognition();
+    });
+}
+
+async function triggerLocalAsr(pcmData) {
+    const statusText = document.getElementById('voice-status-text');
+    if (statusText) statusText.textContent = '正在识别中...';
+
+    const res = await window.api.voice.recognizeOffline(Array.from(pcmData));
+    if (res && res.success && res.text) {
+        const text = res.text.trim();
+        console.log('[Voice] Local ASR recognized:', text);
+        submitVoiceChatUtterance(text);
+    } else {
+        console.log('[Voice] Local ASR empty or failed:', res && res.error);
+        if (__voiceRecMode === 'chat') {
+            __localAudioChunks = [];
+            __localSpeaking = false;
+            __localSilenceStart = null;
+            if (window.api && window.api.voice) {
+                window.api.voice.setListenStatus('listening');
+            }
+        }
+    }
+}
+
+async function triggerLocalWakeAsr(pcmData) {
+    const res = await window.api.voice.recognizeOffline(Array.from(pcmData));
+    if (res && res.success && res.text) {
+        const heard = res.text.trim();
+        const settings = (__voiceState && __voiceState.settings) || {};
+        const wake = normalizeWakeText(settings.wakeWord || '你好 Nexora');
+        const got = normalizeWakeText(heard);
+        console.log('[Voice] Local Wake got:', got, 'target:', wake);
+        if (wake && got.includes(wake)) {
+            if (settings.voiceChat) {
+                enterVoiceChatListening();
+            } else {
+                showToast(voiceT('voice.status.listening_wake', '倾听唤醒词中') + ': OK');
+            }
+        } else {
+            if (__voiceRecMode === 'wake') {
+                __localAudioChunks = [];
+                __localSpeaking = false;
+                __localSilenceStart = null;
+                if (window.api && window.api.voice) {
+                    window.api.voice.setListenStatus('listening_wake');
+                }
+            }
+        }
+    } else {
+        if (__voiceRecMode === 'wake') {
+            __localAudioChunks = [];
+            __localSpeaking = false;
+            __localSilenceStart = null;
+            if (window.api && window.api.voice) {
+                window.api.voice.setListenStatus('listening_wake');
+            }
+        }
+    }
+}
+
 function stopVoiceRecognition() {
+    stopLocalVoiceRecognition();
     __voiceRecMode = 'off';
     __voiceChatBuffer = '';
     if (__voiceChatSilenceTimer) {
@@ -12891,6 +13111,11 @@ function createSpeechRecognition() {
 }
 
 function startVoiceRecognition(mode) {
+    if (__asrModelState && __asrModelState.installed) {
+        startLocalVoiceRecognition(mode);
+        return;
+    }
+    stopLocalVoiceRecognition();
     stopVoiceRecognition();
     const rec = createSpeechRecognition();
     if (!rec) {
@@ -13150,6 +13375,34 @@ function bindVoiceControlsOnce() {
     }
 }
 
+let __asrModelState = { installed: false, downloading: false, percent: 0 };
+
+function updateAsrUi() {
+    const statusText = document.getElementById('asr-model-status');
+    const downloadBtn = document.getElementById('btn-asr-download');
+    const progressContainer = document.getElementById('asr-progress-container');
+    const progressBar = document.getElementById('asr-progress-bar');
+    if (!statusText || !downloadBtn || !progressContainer || !progressBar) return;
+
+    if (__asrModelState.installed) {
+        statusText.textContent = '已下载 (离线识别就绪)';
+        statusText.style.color = '#52c41a';
+        downloadBtn.style.display = 'none';
+        progressContainer.style.display = 'none';
+    } else if (__asrModelState.downloading) {
+        statusText.textContent = `下载中... ${__asrModelState.percent}%`;
+        statusText.style.color = 'var(--accent-color)';
+        downloadBtn.style.display = 'none';
+        progressContainer.style.display = 'block';
+        progressBar.style.width = `${__asrModelState.percent}%`;
+    } else {
+        statusText.textContent = '未下载 (离线识别不可用，采用在线识别)';
+        statusText.style.color = 'var(--text-secondary)';
+        downloadBtn.style.display = 'inline-block';
+        progressContainer.style.display = 'none';
+    }
+}
+
 async function initVoiceModule() {
     bindVoiceControlsOnce();
     if (!window.api || !window.api.voice) return;
@@ -13159,6 +13412,31 @@ async function initVoiceModule() {
     } catch (e) {
         console.warn('[Voice] init failed:', e);
     }
+
+    try {
+        const asrRes = await window.api.voice.getAsrState();
+        if (asrRes && asrRes.success) {
+            __asrModelState = asrRes.data;
+            updateAsrUi();
+        }
+        window.api.voice.onAsrStateUpdated((state) => {
+            __asrModelState = state;
+            updateAsrUi();
+        });
+        const downloadBtn = document.getElementById('btn-asr-download');
+        if (downloadBtn) {
+            downloadBtn.onclick = async () => {
+                const res = await window.api.voice.downloadAsrModel();
+                if (!res || !res.success) {
+                    showToast('下载离线语音识别模型失败: ' + (res ? res.error : '未知错误'));
+                } else {
+                    showToast('离线语音识别模型下载成功！已自动切换为本地离线语音识别');
+                }
+            };
+        }
+    } catch (e) {
+        console.warn('[Voice] init asr failed:', e);
+    }
 }
 
 async function refreshVoicePanel() {
@@ -13167,6 +13445,14 @@ async function refreshVoicePanel() {
     const res = await window.api.voice.getState();
     if (res && res.data) applyVoiceStateToUi(res.data);
     else renderVoicePackGrids(__voiceState);
+
+    try {
+        const asrRes = await window.api.voice.getAsrState();
+        if (asrRes && asrRes.success) {
+            __asrModelState = asrRes.data;
+            updateAsrUi();
+        }
+    } catch (e) {}
 }
 
 // 启动后初始化语音（默认关闭，不占麦）

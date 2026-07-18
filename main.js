@@ -3715,6 +3715,30 @@ ipcMain.handle('voice-set-listen-status', async (event, status) => {
     }
 });
 
+ipcMain.handle('voice-get-asr-state', async () => {
+    try {
+        return { success: true, data: voiceRuntime.getAsrState() };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-download-asr-model', async () => {
+    try {
+        return await voiceRuntime.downloadAsrModel();
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('voice-recognize-offline', async (event, samples) => {
+    try {
+        return await voiceRuntime.recognizeOffline(samples);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('role-config-save', async (event, payload) => {
     try {
         const action = payload && payload.action;

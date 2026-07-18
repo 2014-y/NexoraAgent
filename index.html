@@ -933,6 +933,15 @@
                 <option value="6">极快</option>
               </select>
             </div>
+
+            <div class="voice-asr-row">
+              <span class="asr-model-label">离线识别模型 (ASR)</span>
+              <span class="asr-model-status" id="asr-model-status">检测中...</span>
+              <button type="button" class="btn-primary" id="btn-asr-download" style="display: none; margin-left: 15px;">下载离线识别模型 (33MB)</button>
+              <div class="asr-progress-container" id="asr-progress-container" style="display: none;">
+                <div id="asr-progress-bar" style="width: 0%;"></div>
+              </div>
+            </div>
           </div>
 
           <div class="voice-notice" data-i18n="voice.notice">

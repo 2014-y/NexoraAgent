@@ -6277,6 +6277,44 @@ input:focus, select:focus, textarea:focus {
   min-width: 140px;
 }
 
+.voice-asr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 5px;
+}
+
+.asr-model-label {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.asr-model-status {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  font-family: monospace;
+}
+
+.asr-progress-container {
+  flex: 1 1 200px;
+  min-width: 150px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#asr-progress-bar {
+  height: 100%;
+  background: var(--accent-color, #f08300);
+  width: 0%;
+  transition: width 0.1s ease-out;
+}
+
 .voice-notice {
   margin: 0 0 16px 0;
   padding: 12px 14px;

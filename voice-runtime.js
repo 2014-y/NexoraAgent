@@ -135,6 +135,9 @@ class VoiceRuntime extends EventEmitter {
         this._lastChannelSpeakAt = 0;
         this._lastChannelSpeakText = '';
         this._channelSpeakTimer = null;
+        this._asrDownloadingPercent = null;
+        this._asrRecognizer = null;
+        this._sherpa = null;
     }
 
     init(opts) {
@@ -158,6 +161,131 @@ class VoiceRuntime extends EventEmitter {
 
     get settingsPath() {
         return path.join(this._configDir || process.cwd(), 'nexora-voice.json');
+    }
+
+    get asrModelDir() {
+        return path.join(this.packsDir, 'asr-paraformer-zh');
+    }
+
+    _findAsrModelFiles() {
+        const dir = this.asrModelDir;
+        if (!fs.existsSync(dir)) return null;
+        let modelFile = null;
+        let tokensFile = null;
+        const stack = [dir];
+        while (stack.length) {
+            const cur = stack.pop();
+            let entries = [];
+            try { entries = fs.readdirSync(cur); } catch (e) { continue; }
+            for (const name of entries) {
+                const full = path.join(cur, name);
+                let st;
+                try { st = fs.statSync(full); } catch (e) { continue; }
+                if (st.isDirectory()) {
+                    stack.push(full);
+                } else {
+                    const lower = name.toLowerCase();
+                    if (lower.endsWith('.onnx') && !lower.endsWith('.json')) {
+                        if (!modelFile || lower.includes('int8') || st.size > fs.statSync(modelFile).size) {
+                            modelFile = full;
+                        }
+                    } else if (lower === 'tokens.txt') {
+                        tokensFile = full;
+                    }
+                }
+            }
+        }
+        if (modelFile && tokensFile) {
+            return { model: modelFile, tokens: tokensFile };
+        }
+        return null;
+    }
+
+    _loadSherpaOnnx() {
+        if (this._sherpa) return this._sherpa;
+        try {
+            const nativeDir = path.dirname(require.resolve('sherpa-onnx-win-x64/package.json'));
+            process.env.PATH = nativeDir + path.delimiter + (process.env.PATH || '');
+        } catch (e) {}
+        this._sherpa = require('sherpa-onnx-node');
+        return this._sherpa;
+    }
+
+    getAsrState() {
+        const files = this._findAsrModelFiles();
+        return {
+            installed: !!files,
+            downloading: this._asrDownloadingPercent !== null,
+            percent: this._asrDownloadingPercent || 0
+        };
+    }
+
+    async downloadAsrModel() {
+        if (this._asrDownloadingPercent !== null) {
+            return { success: false, error: 'ASR model download already in progress' };
+        }
+        this._asrDownloadingPercent = 0;
+        this._broadcast('voice-asr-state-updated', this.getAsrState());
+
+        const url = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2';
+        const archive = path.join(this.tmpDir, 'asr-paraformer-zh.tar.bz2');
+        const destDir = this.asrModelDir;
+
+        try {
+            fs.mkdirSync(this.tmpDir, { recursive: true });
+            await downloadFile(url, archive, (percent) => {
+                this._asrDownloadingPercent = percent;
+                this._broadcast('voice-asr-state-updated', this.getAsrState());
+            });
+            fs.mkdirSync(destDir, { recursive: true });
+            await extractTarBz2(archive, destDir);
+            try { fs.unlinkSync(archive); } catch (e) {}
+            this._asrDownloadingPercent = null;
+            this._broadcast('voice-asr-state-updated', this.getAsrState());
+            return { success: true };
+        } catch (e) {
+            this._asrDownloadingPercent = null;
+            try { fs.unlinkSync(archive); } catch (ex) {}
+            this._broadcast('voice-asr-state-updated', this.getAsrState());
+            return { success: false, error: e.message || String(e) };
+        }
+    }
+
+    async recognizeOffline(samples) {
+        try {
+            const files = this._findAsrModelFiles();
+            if (!files) {
+                return { success: false, error: 'ASR model not downloaded' };
+            }
+            const sherpa = this._loadSherpaOnnx();
+            if (!this._asrRecognizer) {
+                const config = {
+                    featConfig: {
+                        sampleRate: 16000,
+                        featureDim: 80,
+                    },
+                    modelConfig: {
+                        paraformer: {
+                            model: files.model,
+                        },
+                        tokens: files.tokens,
+                        numThreads: 2,
+                        debug: false,
+                        provider: 'cpu',
+                    }
+                };
+                this._asrRecognizer = new sherpa.OfflineRecognizer(config);
+            }
+            const stream = this._asrRecognizer.createStream();
+            const floatArray = Float32Array.from(samples);
+            stream.acceptWaveform({ samples: floatArray, sampleRate: 16000 });
+            await this._asrRecognizer.decodeAsync(stream);
+            const result = this._asrRecognizer.getResult(stream);
+            return { success: true, text: result.text || '' };
+        } catch (e) {
+            console.error('[VoiceRuntime] Offline ASR failed:', e);
+            return { success: false, error: e.message || String(e) };
+        }
     }
 
     getCatalog() {

@@ -122,6 +122,9 @@ contextBridge.exposeInMainWorld('api', {
         deleteCustomPack: (packId) => ipcRenderer.invoke('voice-delete-custom', packId),
         bindRole: (payload) => ipcRenderer.invoke('voice-bind-role', payload),
         setListenStatus: (status) => ipcRenderer.invoke('voice-set-listen-status', status),
+        getAsrState: () => ipcRenderer.invoke('voice-get-asr-state'),
+        downloadAsrModel: () => ipcRenderer.invoke('voice-download-asr-model'),
+        recognizeOffline: (samples) => ipcRenderer.invoke('voice-recognize-offline', samples),
         onStatus: (callback) => {
             const listener = (event, data) => callback(data);
             ipcRenderer.on('voice-status', listener);
@@ -136,6 +139,11 @@ contextBridge.exposeInMainWorld('api', {
             const listener = (event, data) => callback(data);
             ipcRenderer.on('voice-download-progress', listener);
             return () => ipcRenderer.removeListener('voice-download-progress', listener);
+        },
+        onAsrStateUpdated: (callback) => {
+            const listener = (event, data) => callback(data);
+            ipcRenderer.on('voice-asr-state-updated', listener);
+            return () => ipcRenderer.removeListener('voice-asr-state-updated', listener);
         },
         onSpeakError: (callback) => {
             const listener = (event, data) => callback(data);
