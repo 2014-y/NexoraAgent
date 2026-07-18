@@ -202,12 +202,27 @@ function ensureDirs() {
     }
 }
 
+let appIsQuitting = false;
+
+function setIsQuitting(val) {
+    appIsQuitting = !!val;
+}
+
 function init(electronApp) {
     appRef = electronApp;
     ensureDirs();
     installBundledCore();
     bootstrapSecondaryAccelerationFromPrimary();
     loadState();
+
+    if (state.enabled) {
+        console.log('[Acceleration] Auto-starting acceleration core on app launch...');
+        setTimeout(() => {
+            setEnabled(true, null, null).catch(err => {
+                console.warn('[Acceleration] Auto-start failed:', err.message);
+            });
+        }, 1000);
+    }
 }
 
 /** 多开第 2+ 实例：从主实例拷贝订阅与内核，避免空白起步 */
@@ -1608,7 +1623,7 @@ async function startCore(profileId, onProgress) {
             mihomoMemoryTimer = null;
         }
         lastMihomoMemoryText = 'INACTIVE';
-        if (state.enabled) {
+        if (state.enabled && !appIsQuitting) {
             state.enabled = false;
             saveState();
             // 内核意外退出时，必须立即清理系统代理，否则用户会断网
@@ -2509,6 +2524,7 @@ async function detectOutboundIp() {
 module.exports = {
     get MIXED_PORT() { return MIXED_PORT; },
     init,
+    setIsQuitting,
     ensureCore,
     isCoreReady,
     listProfiles,

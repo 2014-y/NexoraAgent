@@ -6357,6 +6357,7 @@ app.on('will-quit', async (e) => {
         voiceRuntime.dispose();
     } catch (err) {}
     try {
+        acceleration.setIsQuitting(true);
         const st = acceleration.getStatus();
         await acceleration.stopCore();
         if (st && st.systemProxy) {
