@@ -133,6 +133,7 @@
       "runtime-pack-manifest.js",
       "patch_gateway.js",
       "capture-desktop.ps1",
+      "desktop-control.ps1",
       "weixin-direct-login.mjs",
       "preload.js",
       "renderer.js",

@@ -41,6 +41,7 @@ const ROOT_FILES = [
   'patch_gateway.js',
   'token-usage-parse.js',
   'capture-desktop.ps1',
+  'desktop-control.ps1',
   'openclaw-state.js',
   'gateway-auth.js',
   'home-resolve.js',

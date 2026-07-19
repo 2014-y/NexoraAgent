@@ -711,7 +711,7 @@ function resolveWritableRuntimeDir() {
 function deployRuntimeArtifacts() {
     const dir = resolveWritableRuntimeDir();
     // 优先拷贝应用内最新补丁（asar/工程），再回退 gateway-runtime（可能是旧解压）
-    const names = ['patch_gateway.js', 'token-usage-parse.js', 'capture-desktop.ps1', 'openclaw-state.js', 'gateway-auth.js', 'gateway-boot-harden.js'];
+    const names = ['patch_gateway.js', 'token-usage-parse.js', 'capture-desktop.ps1', 'desktop-control.ps1', 'openclaw-state.js', 'gateway-auth.js', 'gateway-boot-harden.js'];
     for (const name of names) {
         const srcCandidates = [path.join(__dirname, name), resolveAppFsPath(name)];
         const src = srcCandidates.find((p) => {
