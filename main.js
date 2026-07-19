@@ -2003,12 +2003,9 @@ function prepareChannelPluginsBeforeGateway() {
             });
             if (!seed.seeded) {
                 console.warn(`[PluginSeed] Pre-gateway ${entry.id}:`, seed.reason);
-                // 种不进去就关闭，避免 Doctor 在沙箱缺 npm 时卡死启动
-                if (!config.plugins.entries[entry.id]) {
-                    config.plugins.entries[entry.id] = { enabled: false };
-                    needsSave = true;
-                } else if (config.plugins.entries[entry.id].enabled !== false) {
-                    config.plugins.entries[entry.id].enabled = false;
+                // 种不进去就彻底删除配置，避免 Doctor 在沙箱缺 npm 时卡死启动
+                if (config.plugins.entries[entry.id]) {
+                    delete config.plugins.entries[entry.id];
                     needsSave = true;
                 }
                 if (Array.isArray(config.plugins.allow)) {

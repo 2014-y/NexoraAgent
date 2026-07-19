@@ -80,8 +80,18 @@ function softenOpenClawStartupMigrationGuard(runtimeRoot) {
       const file = path.join(dist, name);
       let src = fs.readFileSync(file, 'utf8');
       const reLock = /if\s*\(\s*existing\s*\)\s*throw\s+new\s+Error\s*\(\s*`OpenClaw startup migrations are already running[\s\S]*?`\s*\)\s*;/g;
-      if (reLock.test(src)) {
-        const next = src.replace(reLock, '/* NEXORA_SOFT_MIGRATION_LOCK: bypass */');
+      const reExpire = /\.where\("expires_at",\s*"<=",\s*nowMs\)/g;
+      let next = src;
+      let changed = false;
+      if (reLock.test(next)) {
+        next = next.replace(reLock, '/* NEXORA_SOFT_MIGRATION_LOCK: bypass */');
+        changed = true;
+      }
+      if (reExpire.test(next)) {
+        next = next.replace(reExpire, '/* NEXORA_EXPIRE_BYPASS */');
+        changed = true;
+      }
+      if (changed) {
         fs.writeFileSync(file, next, 'utf8');
         patched += 1;
       }
