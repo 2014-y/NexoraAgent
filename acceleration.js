@@ -46,6 +46,7 @@ let tempCoreIdleTimer = null;
 let lastDelayTestResults = null;
 let state = {
     enabled: false,
+    autoStart: false,
     activeProfileId: null,
     selectedProxy: null,
     selectedGroup: 'GLOBAL',
@@ -215,7 +216,7 @@ function init(electronApp) {
     bootstrapSecondaryAccelerationFromPrimary();
     loadState();
 
-    if (state.enabled) {
+    if (state.autoStart) {
         console.log('[Acceleration] Auto-starting acceleration core on app launch...');
         setTimeout(() => {
             setEnabled(true, null, null).catch(err => {
@@ -269,6 +270,9 @@ function loadState() {
         if (!fs.existsSync(p)) return;
         const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
         state = { ...state, ...raw };
+        if (raw.enabled !== undefined && raw.autoStart === undefined) {
+            state.autoStart = raw.enabled;
+        }
     } catch (e) {}
 }
 
@@ -366,6 +370,10 @@ function isWintunReady() {
 }
 
 function isProcessElevated() {
+    return true; // 去掉管理员限制
+}
+
+function isProcessElevatedReal() {
     if (process.platform !== 'win32') return true;
     try {
         execSync('net session', { stdio: 'ignore', windowsHide: true });
@@ -1152,7 +1160,7 @@ function buildRuntimeYaml(profileContent) {
         'geodata-mode: true',
         'geo-auto-update: false',
         'tun:',
-        `  enable: ${state.virtualNic ? 'true' : 'false'}`,
+        `  enable: ${state.virtualNic && isProcessElevatedReal() && isWintunReady() ? 'true' : 'false'}`,
         '  stack: mixed',
         '  auto-route: true',
         '  auto-detect-interface: true',
@@ -1574,15 +1582,7 @@ async function startCore(profileId, onProgress) {
     const runnable = assertCoreRunnable();
     if (!runnable.ok) throw new Error(runnable.error || '代理内核不可用');
 
-    if (state.virtualNic) {
-        const pre = await assertTunPrerequisites();
-        if (!pre.ok) {
-            // 不带半残 TUN 启动，避免路由被改坏导致其它软件断网
-            state.virtualNic = false;
-            saveState();
-            throw new Error(pre.error || 'TUN 无法开启');
-        }
-    }
+
 
     // 正式启用前先停掉临时测速内核，避免双实例抢端口
     await stopTempMihomoCore();
@@ -1616,14 +1616,16 @@ async function startCore(profileId, onProgress) {
     if (mihomoProc.stdout) mihomoProc.stdout.on('data', appendBootLog);
     if (mihomoProc.stderr) mihomoProc.stderr.on('data', appendBootLog);
 
+    const currentProc = mihomoProc;
     mihomoProc.on('exit', (code) => {
+        const isCurrent = (mihomoProc === currentProc);
         mihomoProc = null;
         if (mihomoMemoryTimer) {
             clearInterval(mihomoMemoryTimer);
             mihomoMemoryTimer = null;
         }
         lastMihomoMemoryText = 'INACTIVE';
-        if (state.enabled && !appIsQuitting) {
+        if (isCurrent && state.enabled && !appIsQuitting) {
             state.enabled = false;
             saveState();
             // 内核意外退出时，必须立即清理系统代理，否则用户会断网
@@ -1652,17 +1654,14 @@ async function startCore(profileId, onProgress) {
         try { await selectProxy(state.selectedGroup || 'GLOBAL', state.selectedProxy); } catch (e) {}
     }
 
-    // 核对 TUN 是否真的起来了（开关开着但缺权限/缺 dll 时配置仍可能写 true）
+    // 核对 TUN 是否真的起来了（仅做提醒，不自动关闭按钮状态）
     if (state.virtualNic) {
         await new Promise((r) => setTimeout(r, 800));
         const tunOn = await probeTunActuallyOn();
         if (!tunOn) {
-            state.virtualNic = false;
-            saveState();
-            // 无 TUN 再拉起，避免半残路由把其它软件（如 Antigravity）搞断网
-            const dash = await startCore(id, onProgress);
+            const dash = await getDashboardData(id);
             if (dash && typeof dash === 'object') {
-                dash.warning = 'TUN 未生效，已自动回退。请右键「以管理员身份运行」Nexora Agent 后再开虚拟网卡。';
+                dash.warning = '提示：虚拟网卡 (TUN) 开关已开启，但当前没有以管理员身份运行，TUN 暂未实际生效（已保留您的开关状态）。';
             }
             return dash;
         }
@@ -1722,22 +1721,37 @@ async function setOptions(options = {}) {
     let restart = false;
     if (['rule', 'global', 'direct'].includes(options.mode) && options.mode !== state.mode) {
         state.mode = options.mode;
-        restart = true;
-    }
-    if (typeof options.virtualNic === 'boolean' && options.virtualNic !== state.virtualNic) {
-        if (options.virtualNic) {
-            const pre = await assertTunPrerequisites();
-            if (!pre.ok) {
-                state.virtualNic = false;
-                saveState();
-                const dash = await getDashboardData();
-                const err = new Error(pre.error || 'TUN 无法开启');
-                err.dashboard = dash;
-                throw err;
+        if (state.enabled) {
+            try {
+                await controllerRequest('PATCH', '/configs', { mode: state.mode });
+            } catch (e) {
+                console.error('[Acceleration] Failed to hot-reload mode:', e);
+                restart = true;
             }
         }
+    }
+    if (typeof options.virtualNic === 'boolean' && options.virtualNic !== state.virtualNic) {
         state.virtualNic = options.virtualNic;
-        restart = true;
+        if (state.enabled) {
+            try {
+                const tunEnable = state.virtualNic && isProcessElevatedReal() && isWintunReady();
+                await controllerRequest('PATCH', '/configs', { tun: { enable: tunEnable } });
+            } catch (e) {
+                console.error('[Acceleration] Failed to hot-reload TUN:', e);
+                restart = true;
+            }
+        }
+    }
+    if (typeof options.autoStart === 'boolean' && options.autoStart !== state.autoStart) {
+        state.autoStart = options.autoStart;
+        if (state.autoStart && !state.enabled) {
+            state.enabled = true;
+            restart = true;
+        } else if (!state.autoStart && state.enabled) {
+            state.enabled = false;
+            await stopCore();
+            await applySystemProxy(false);
+        }
     }
     if (typeof options.systemProxy === 'boolean') {
         state.systemProxy = options.systemProxy;
@@ -2262,6 +2276,7 @@ function getStatus() {
     const inst = (typeof global !== 'undefined' && global.nexoraInstance) ? global.nexoraInstance : null;
     return {
         enabled: !!state.enabled,
+        autoStart: !!state.autoStart,
         coreReady: isCoreReady(),
         activeProfileId: state.activeProfileId,
         selectedProxy: state.selectedProxy,

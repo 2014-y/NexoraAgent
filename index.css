@@ -5122,8 +5122,9 @@ input:focus, select:focus, textarea:focus {
   gap: 12px;
   min-width: 0;
   max-width: 100%;
-  overflow-y: auto !important;
-  overflow-x: hidden !important; /* 避免横向撑破，同时纵向支持自适应高度滚动 */
+  height: 100%;
+  min-height: 0;
+  overflow: hidden !important;
 }
 
 #acc-panel-dashboard.active {
@@ -5136,7 +5137,7 @@ input:focus, select:focus, textarea:focus {
   gap: 12px;
   margin-bottom: 0;
   flex: 1;
-  min-height: 350px;
+  min-height: 0;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -5263,8 +5264,8 @@ input:focus, select:focus, textarea:focus {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-start;
+  gap: 14px;
   padding: 16px;
   box-sizing: border-box;
   min-height: 0;
@@ -5613,14 +5614,179 @@ input:focus, select:focus, textarea:focus {
   color: var(--accent-color, #8c52ff) !important;
 }
 
-.acc-dash-side-toggles {
-  gap: 0;
+/* 统一配置与控制主卡片 */
+.acc-dash-unified-card {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  transition: all 0.25s ease;
 }
 
-.acc-dash-side-toggles .acc-dash-toggle-row + .acc-dash-toggle-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  padding-top: 10px;
-  margin-top: 10px;
+.acc-dash-unified-card:hover {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 4px 24px rgba(var(--accent-rgb), 0.03), 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* 卡片头部：状态与配置文件 */
+.acc-dash-unified-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.acc-dash-unified-card-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 活跃节点区 */
+.acc-dash-active-node-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.acc-dash-active-node-section .node-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.acc-dash-active-node-section .node-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.acc-dash-active-node-section .node-name-wrapper {
+  overflow: hidden;
+}
+
+/* 卡片分割线 */
+.acc-dash-card-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.04);
+  margin: 2px 0;
+}
+
+/* 卡片内开关选项 */
+.acc-dash-unified-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 底部状态与参数 */
+.acc-dash-side-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.acc-dash-side-footer .telemetry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.acc-dash-side-footer .telemetry-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.acc-dash-side-footer .acc-dash-kv-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  opacity: 0.85;
+}
+
+/* 实时活跃连接面板 */
+.acc-dash-mini-conn-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.acc-dash-mini-conn-card .card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.acc-dash-mini-conn-card .card-title-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acc-dash-mini-conn-card .flash-icon {
+  color: var(--accent-color, #8c52ff);
+  font-size: 12px;
+  animation: acc-pulse-glow 2s infinite alternate;
+}
+
+.acc-dash-mini-conn-card .count-badge {
+  font-size: 9px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.acc-dash-mini-conn-card .acc-dash-card-divider {
+  margin: 0;
+}
+
+.acc-dash-mini-conn-card .mini-conn-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.acc-dash-mini-conn-card .mini-conn-list .empty-tip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+@keyframes acc-pulse-glow {
+  from {
+    opacity: 0.6;
+    text-shadow: 0 0 2px var(--accent-color);
+  }
+  to {
+    opacity: 1;
+    text-shadow: 0 0 8px var(--accent-color);
+  }
 }
 
 /* 兼容旧类名（若别处仍引用） */

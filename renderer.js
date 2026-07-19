@@ -9731,6 +9731,23 @@ function updateAccelerationBusyUi() {
         delayBtn.textContent = t('acc.proxy.delay_btn');
     }
 
+    // 仅在执行关键状态切换（如启动中、关闭中、处理配置中）时禁用开关
+    // 背景任务如“测速中…”、“检测 IP 中…”不应阻塞开关点击
+    const isBackgroundBusy = busy && /检测|测速|Testing|Detecting/i.test(msg);
+    const shouldDisable = busy && !isBackgroundBusy;
+
+    const systemProxyToggle = document.getElementById('acc-system-proxy-toggle');
+    const tunToggle = document.getElementById('acc-tun-toggle');
+    const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
+    const dashTunToggle = document.getElementById('acc-dash-tun-toggle');
+    const pageToggle = document.getElementById('acc-page-enabled-toggle');
+    const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
+    const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
+
+    [systemProxyToggle, tunToggle, dashSystemProxyToggle, dashTunToggle, pageToggle, controlsToggle, dashEnabledToggle].forEach(el => {
+        if (el) el.disabled = shouldDisable;
+    });
+
     const progressEl = document.getElementById('acc-delay-progress');
     if (progressEl) {
         if (isDelay) {
@@ -10052,12 +10069,15 @@ function renderConnections(data) {
     // 仪表盘 Canvas 流量占比环形图重绘
     drawDashboardTrafficRing(data.uploadTotal || 0, data.downloadTotal || 0);
 
+    // 渲染仪表盘右侧迷你实时活跃连接面板
+    renderMiniConnectionsFeed(list);
+
     if (!tbody) return;
     
     const query = String(connSearchText || '').trim().toLowerCase();
     const filtered = list.filter(c => {
         if (!query) return true;
-
+        const meta = c.metadata || {};
         return String(meta.host || '').toLowerCase().includes(query) ||
                String(meta.destinationIP || '').toLowerCase().includes(query) ||
                String(meta.sourceIP || '').toLowerCase().includes(query) ||
@@ -10106,6 +10126,54 @@ function renderConnections(data) {
                     <button type="button" class="btn-secondary acc-danger-btn" style="padding: 3px 8px; font-size: 10px;" onclick="closeSingleConnection('${c.id}')">断开</button>
                 </td>
             </tr>
+        `;
+    }).join('');
+}
+
+function renderMiniConnectionsFeed(list) {
+    const container = document.getElementById('acc-dash-mini-conn-list');
+    const countEl = document.getElementById('acc-dash-mini-conn-count');
+    if (!container) return;
+
+    if (countEl) {
+        countEl.textContent = `${list.length} 个活动`;
+    }
+
+    if (!list || !list.length) {
+        container.innerHTML = `<div class="empty-tip">${t('当前无活动流量', 'No active connections', '目前無活動流量')}</div>`;
+        return;
+    }
+
+    // Sort by start time descending (newest first)
+    const sorted = [...list].sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+    // Take the top 5
+    const topConns = sorted.slice(0, 5);
+
+    container.innerHTML = topConns.map(c => {
+        const meta = c.metadata || {};
+        const dest = meta.host ? `${meta.host}:${meta.destinationPort}` : `${meta.destinationIP}:${meta.destinationPort}`;
+        const type = meta.type || 'RAW';
+        const proto = meta.network ? String(meta.network).toUpperCase() : 'TCP';
+        
+        let chainStr = '直连';
+        if (Array.isArray(c.chains) && c.chains.length) {
+            chainStr = c.chains[c.chains.length - 1];
+        }
+
+        return `
+            <div class="mini-conn-row" style="display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; padding: 6px 8px; border-radius: 6px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.03); transition: all 0.2s ease;">
+              <div style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                <div style="font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(dest)}">${escapeHtml(dest)}</div>
+                <div style="font-size: 9px; color: var(--text-secondary); opacity: 0.65; display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  <span style="background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-size: 8px;">${escapeHtml(proto)}/${escapeHtml(type)}</span>
+                  <span>➔ ${escapeHtml(chainStr)}</span>
+                </div>
+              </div>
+              <div style="text-align: right; flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; line-height: 1.25;">
+                <div style="color: #ff758f;">↑ ${formatBytes(c.upload)}</div>
+                <div style="color: #00f5ff;">↓ ${formatBytes(c.download)}</div>
+              </div>
+            </div>
         `;
     }).join('');
 }
@@ -10382,19 +10450,19 @@ function renderAccelerationChannel(data) {
     const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
     const systemProxyToggle = document.getElementById('acc-system-proxy-toggle');
     const tunToggle = document.getElementById('acc-tun-toggle');
-    if (settingToggle) settingToggle.checked = enabled;
+    if (settingToggle) settingToggle.checked = !!(data && data.autoStart);
     if (pageToggle) pageToggle.checked = running;
     if (controlsToggle) controlsToggle.checked = running;
-    if (systemProxyToggle) systemProxyToggle.checked = running && !!data.systemProxy;
-    if (tunToggle) tunToggle.checked = running && !!data.virtualNic;
+    if (systemProxyToggle) systemProxyToggle.checked = !!data.systemProxy;
+    if (tunToggle) tunToggle.checked = !!data.virtualNic;
 
     // 仪表盘开关同步
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
     const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
     const dashTunToggle = document.getElementById('acc-dash-tun-toggle');
     if (dashEnabledToggle) dashEnabledToggle.checked = running;
-    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = running && !!data.systemProxy;
-    if (dashTunToggle) dashTunToggle.checked = running && !!data.virtualNic;
+    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = !!data.systemProxy;
+    if (dashTunToggle) dashTunToggle.checked = !!data.virtualNic;
 
     // 仪表盘出站模式同步
     const mode = data.mode || 'rule';
@@ -11260,16 +11328,7 @@ function initAccelerationChannel() {
     const syncEnable = (e) => setAccelerationEnabledFromUi(e.target.checked);
     if (settingToggle) {
         settingToggle.addEventListener('change', async (e) => {
-            const checked = e.target.checked;
-            if (checked) {
-                // 这个设置开 就把这几个开关全部打开
-                try {
-                    await window.api.setAccelerationOptions({ systemProxy: true, virtualNic: true });
-                } catch (err) {
-                    console.warn('[Acceleration] failed to pre-enable options:', err.message);
-                }
-            }
-            await setAccelerationEnabledFromUi(checked);
+            await setAccelerationProxyMode('autoStart', e.target.checked);
         });
     }
     if (pageToggle) pageToggle.addEventListener('change', syncEnable);
@@ -11647,10 +11706,17 @@ function initAccelerationChannel() {
     }
 
     async function setAccelerationProxyMode(kind, on) {
-        const payload = kind === 'system' ? { systemProxy: on } : { virtualNic: on };
-        const okText = kind === 'system'
-            ? (on ? '系统代理已开启' : '系统代理已关闭')
-            : (on ? 'TUN 已开启' : '虚拟网卡已关闭');
+        let payload, okText;
+        if (kind === 'system') {
+            payload = { systemProxy: on };
+            okText = on ? '系统代理已开启' : '系统代理已关闭';
+        } else if (kind === 'virtualNic') {
+            payload = { virtualNic: on };
+            okText = on ? 'TUN 已开启' : '虚拟网卡已关闭';
+        } else {
+            payload = { autoStart: on };
+            okText = on ? '自启动已开启' : '自启动已关闭';
+        }
         const res = await handleAccelerationResult(window.api.setAccelerationOptions(payload), okText);
         if (res && res.warning) showToast(res.warning);
         if (res && res.success && accelerationState) renderAccelerationChannel(res);

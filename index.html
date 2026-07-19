@@ -1466,77 +1466,88 @@
                     </div>
                   </div>
 
-                  <div class="acc-dash-side-section acc-dash-side-meta">
-                    <!-- 核心节点信息卡片 (主卡片) -->
-                    <div class="acc-dash-info-card">
-                      <div class="acc-dash-info-card-header">
-                        <div class="acc-dash-info-card-header-left">
-                          <span class="acc-dash-info-card-dot"></span>
-                          <span class="acc-dash-info-card-title" data-i18n="acc.dash.profile">主通道配置</span>
-                        </div>
-                        <span id="acc-dash-active-profile" class="acc-dash-info-card-profile">--</span>
-                      </div>
-                      
-                      <div class="acc-dash-info-card-body">
-                        <div class="acc-dash-node-row">
-                          <div class="acc-dash-node-meta">
-                            <span class="acc-dash-node-label" data-i18n="acc.dash.active_node">活跃节点</span>
-                            <div class="acc-dash-node-value">
-                              <strong id="acc-dash-current-proxy" class="acc-dash-kv-accent">--</strong>
-                            </div>
-                          </div>
-                          <div class="acc-dash-node-latency-wrapper">
-                            <span id="acc-dash-current-delay" class="acc-node-delay">--</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 参数明细 (副卡片) -->
-                    <div class="acc-dash-telemetry-flex-container">
-                      <div class="acc-dash-telemetry-row">
-                        <div class="acc-dash-telemetry-item">
-                          <span class="acc-dash-telemetry-label" data-i18n="acc.dash.mixed">本地代理</span>
-                          <strong id="acc-dash-mixed-port" class="acc-dash-kv-mono">--</strong>
-                        </div>
-                        <div class="acc-dash-telemetry-item">
-                          <span class="acc-dash-telemetry-label" data-i18n="acc.dash.controller">控制端口</span>
-                          <strong id="acc-dash-controller" class="acc-dash-kv-mono">--</strong>
-                        </div>
-                      </div>
-                      <div class="acc-dash-telemetry-item acc-dash-telemetry-item-full">
-                        <span class="acc-dash-telemetry-label" data-i18n="acc.dash.run_status">加速运行状态</span>
+                  <!-- Unified Control & Telemetry Card -->
+                  <div class="acc-dash-unified-card">
+                    <!-- Status & Profile -->
+                    <div class="acc-dash-unified-card-header">
+                      <div class="header-left">
                         <div class="acc-dash-status-indicator">
                           <span class="acc-dash-status-dot"></span>
                           <strong id="acc-dash-run-status" data-i18n="acc.status.disabled">未启用</strong>
                         </div>
                       </div>
+                      <span id="acc-dash-active-profile" class="acc-dash-info-card-profile">--</span>
+                    </div>
+
+                    <!-- Active Node -->
+                    <div class="acc-dash-active-node-section">
+                      <div class="node-meta">
+                        <span class="node-label" data-i18n="acc.dash.active_node">活跃节点</span>
+                        <div class="node-name-wrapper">
+                          <strong id="acc-dash-current-proxy" class="acc-dash-kv-accent">--</strong>
+                        </div>
+                      </div>
+                      <div class="acc-dash-node-latency-wrapper">
+                        <span id="acc-dash-current-delay" class="acc-node-delay">--</span>
+                      </div>
+                    </div>
+
+                    <div class="acc-dash-card-divider"></div>
+
+                    <!-- Switches -->
+                    <div class="acc-dash-unified-toggles">
+                      <div class="acc-dash-toggle-row">
+                        <label class="toggle-info" for="acc-dash-system-proxy-toggle" style="cursor: pointer;">
+                          <div class="toggle-name" data-i18n="acc.toggle.system_proxy">系统代理</div>
+                          <div class="toggle-desc" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.toggle.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
+                        </label>
+                        <label class="switch-slider-btn">
+                          <input type="checkbox" id="acc-dash-system-proxy-toggle">
+                          <span class="slider-knob"></span>
+                        </label>
+                      </div>
+                      <div class="acc-dash-toggle-row">
+                        <label class="toggle-info" for="acc-dash-tun-toggle" style="cursor: pointer;">
+                          <div class="toggle-name" data-i18n="acc.toggle.tun">虚拟网卡 TUN</div>
+                          <div class="toggle-desc" title="需管理员权限，并安装 wintun.dll；未提权时无法真正接管流量" data-i18n="acc.toggle.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
+                        </label>
+                        <label class="switch-slider-btn">
+                          <input type="checkbox" id="acc-dash-tun-toggle">
+                          <span class="slider-knob"></span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="acc-dash-card-divider"></div>
+
+                    <!-- Telemetry Parameters -->
+                    <div class="acc-dash-side-footer">
+                      <div class="telemetry-row">
+                        <span class="telemetry-label" data-i18n="acc.dash.mixed">本地代理</span>
+                        <strong id="acc-dash-mixed-port" class="acc-dash-kv-mono">--</strong>
+                      </div>
+                      <div class="telemetry-row">
+                        <span class="telemetry-label" data-i18n="acc.dash.controller">控制端口</span>
+                        <strong id="acc-dash-controller" class="acc-dash-kv-mono">--</strong>
+                      </div>
                     </div>
                   </div>
 
-                  <div class="acc-dash-side-section acc-dash-side-toggles">
-
-                    <div class="acc-dash-toggle-row">
-                      <div class="toggle-info">
-                        <div class="toggle-name" data-i18n="acc.toggle.system_proxy">系统代理</div>
-                        <div class="toggle-desc" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.toggle.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
-                      </div>
-                      <label class="switch-slider-btn">
-                        <input type="checkbox" id="acc-dash-system-proxy-toggle">
-                        <span class="slider-knob"></span>
-                      </label>
+                  <!-- 实时活跃连接面板 -->
+                  <div class="acc-dash-unified-card acc-dash-mini-conn-card" id="acc-dash-mini-conn-card">
+                    <div class="card-header-row">
+                      <span class="card-title-text">
+                        <span class="flash-icon">⚡</span>
+                        <span data-i18n="acc.dash.mini_conn_title">实时活跃连接</span>
+                      </span>
+                      <span id="acc-dash-mini-conn-count" class="count-badge">0 个活动</span>
                     </div>
-                    <div class="acc-dash-toggle-row">
-                      <div class="toggle-info">
-                        <div class="toggle-name" data-i18n="acc.toggle.tun">虚拟网卡 TUN</div>
-                        <div class="toggle-desc" title="需管理员权限，并安装 wintun.dll；未提权时无法真正接管流量" data-i18n="acc.toggle.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
-                      </div>
-                      <label class="switch-slider-btn">
-                        <input type="checkbox" id="acc-dash-tun-toggle">
-                        <span class="slider-knob"></span>
-                      </label>
+                    <div class="acc-dash-card-divider"></div>
+                    <div id="acc-dash-mini-conn-list" class="mini-conn-list">
+                      <div class="empty-tip" data-i18n="acc.dash.no_conn">加速未启用或无活动流量</div>
                     </div>
                   </div>
+
                 </div>
               </div>
             </div>
@@ -1775,20 +1786,20 @@
                   <div class="acc-controls-card-body">
 
                     <div class="acc-control-row">
-                      <div style="flex: 1; min-width: 0; padding-right: 12px;">
+                      <label for="acc-system-proxy-toggle" style="flex: 1; min-width: 0; padding-right: 12px; cursor: pointer; display: block;">
                         <div data-i18n="acc.control.system_proxy">系统代理</div>
                         <div class="acc-muted" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.control.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
-                      </div>
+                      </label>
                       <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
                         <input type="checkbox" id="acc-system-proxy-toggle">
                         <span class="slider-knob"></span>
                       </label>
                     </div>
                     <div class="acc-control-row">
-                      <div style="flex: 1; min-width: 0; padding-right: 12px;">
+                      <label for="acc-tun-toggle" style="flex: 1; min-width: 0; padding-right: 12px; cursor: pointer; display: block;">
                         <div data-i18n="acc.control.tun">虚拟网卡 TUN</div>
                         <div class="acc-muted" title="需管理员权限，并安装 wintun.dll" data-i18n="acc.control.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
-                      </div>
+                      </label>
                       <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
                         <input type="checkbox" id="acc-tun-toggle">
                         <span class="slider-knob"></span>
