@@ -4601,6 +4601,15 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
     const spec = resolveAsyncChannelLoginSpec(pluginIdOrOpts);
     if (!spec) return { success: false, error: '无效的渠道插件 ID' };
 
+    // 如果沙箱还没好，阻塞等待它好（最大 20 秒），实现“即点即用，底层自动等待”
+    if (!getAvailableNodePath()) {
+        const startWait = Date.now();
+        while (Date.now() - startWait < 20000) {
+            if (getAvailableNodePath()) break;
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+
     stopActiveChannelLogin({ suppressFail: true });
     clearWeChatQrWaitTimer();
     wechatQrEmitted = false;
