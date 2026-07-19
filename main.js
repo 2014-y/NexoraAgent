@@ -4403,7 +4403,11 @@ function startDirectWeixinChannelLogin(spec) {
         return { success: false, error: '缺少微信直连登录脚本，请更新/重装 Nexora Agent' };
     }
 
-    const nodeExePath = getAvailableNodePath() || process.execPath;
+    const nodeExePath = getAvailableNodePath();
+    if (!nodeExePath) {
+        return { success: false, error: '内置 Node 引擎仍在初始化中（或被安全软件拦截）。请等待 10~15 秒环境就绪后重试。' };
+    }
+    
     const { spawn } = require('child_process');
     const env = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
     for (const key of Object.keys(env)) {
@@ -4413,11 +4417,6 @@ function startDirectWeixinChannelLogin(spec) {
     // 让插件能解析到同级的 openclaw/plugin-sdk
     const appNm = resolveAppFsPath('node_modules');
     env.NODE_PATH = env.NODE_PATH ? `${appNm}${path.delimiter}${env.NODE_PATH}` : appNm;
-
-    // 如果 fallback 到了 Electron 主程序，必须设置此环境变量使其以 Node 模式运行脚本，否则将弹出一个新 GUI 实例并挂死
-    if (nodeExePath === process.execPath) {
-        env.ELECTRON_RUN_AS_NODE = '1';
-    }
 
     const child = spawn(nodeExePath, [scriptPath], {
         cwd: CONFIG_DIR,
