@@ -5766,14 +5766,22 @@ function updateGatewayStatusUI(status) {
         statusLabel.innerText = t('sidebar.status.starting');
         btnIconStart.style.display = 'block';
         btnIconStop.style.display = 'none';
-        btnLabelText.setAttribute('data-i18n', 'sidebar.status.starting');
-        btnLabelText.innerText = t('sidebar.status.starting');
+        btnLabelText.removeAttribute('data-i18n');
+        btnLabelText.innerHTML = '<span class="starting-pulse-text" data-i18n="sidebar.status.starting_deep">深度初始化加载中...</span>';
         gatewayToggleBtn.className = 'status-badge-container starting';
 
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
             systemLogsArea.value += `\n>>> [系统消息] Nexora Agent核心服务于 ${new Date().toLocaleString()} 开始拉起运行...\n`;
             systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
+        }
+
+        const streamList = document.getElementById('dash-activity-stream-list');
+        if (streamList) {
+            const emptyEl = streamList.querySelector('.activity-item-empty');
+            if (emptyEl || streamList.innerHTML.trim() === '') {
+                streamList.innerHTML = `<div class="starting-activity-item" data-i18n="console.dash.starting_tips">首次启动或深度初始化环境可能需要较长时间，请耐心等待...</div>`;
+            }
         }
 
         if (chatWelcomeText) {

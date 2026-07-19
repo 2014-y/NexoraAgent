@@ -6571,3 +6571,42 @@ input:focus, select:focus, textarea:focus {
   color: var(--text-secondary);
   line-height: 1.6;
 }
+
+/* 启动动画和高亮文字 */
+@keyframes neonPulseGlow {
+  0% { color: #8c9eff; text-shadow: 0 0 5px rgba(140, 158, 255, 0.4); }
+  50% { color: #b388ff; text-shadow: 0 0 15px rgba(179, 136, 255, 0.8), 0 0 30px rgba(179, 136, 255, 0.5); }
+  100% { color: #8c9eff; text-shadow: 0 0 5px rgba(140, 158, 255, 0.4); }
+}
+
+@keyframes rainbowBgGlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.starting-pulse-text {
+  animation: neonPulseGlow 1.5s infinite alternate ease-in-out;
+  font-weight: bold;
+}
+
+.starting-activity-item {
+  background: linear-gradient(270deg, rgba(140, 158, 255, 0.1), rgba(179, 136, 255, 0.15), rgba(140, 158, 255, 0.1));
+  background-size: 200% 200%;
+  animation: rainbowBgGlow 2s ease infinite;
+  border-left: 3px solid #b388ff !important;
+  color: #fff !important;
+  font-weight: 500;
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.starting-activity-item::before {
+  content: '⚙️';
+  font-size: 14px;
+  animation: spin 3s linear infinite;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
