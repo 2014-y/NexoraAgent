@@ -215,7 +215,8 @@ function clearSaveBtnDirtyState(btn, label) {
 }
 
 // 自定义精美弹窗重写
-window.alert = function (message, title = '系统提示') {
+window.alert = function (message, title = null) {
+    const finalTitle = title || t('系统提示', 'System Notification', '系統提示');
     return new Promise(resolve => {
         // 创建 DOM 元素
         const overlay = document.createElement('div');
@@ -250,11 +251,11 @@ window.alert = function (message, title = '系统提示') {
         modal.innerHTML = `
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
                 <span style="font-size: 20px; line-height: 1;">🔔</span>
-                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${title}</h3>
+                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${finalTitle}</h3>
             </div>
             <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap; word-break: break-all;">${message}</div>
             <div style="display: flex; justify-content: flex-end;">
-                <button id="custom-alert-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">确定</button>
+                <button id="custom-alert-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">${t('确定', 'Confirm', '確定')}</button>
             </div>
         `;
 
@@ -283,7 +284,8 @@ window.alert = function (message, title = '系统提示') {
     });
 };
 
-window.confirm = function (message, title = '操作确认') {
+window.confirm = function (message, title = null) {
+    const finalTitle = title || t('操作确认', 'Operation Confirmation', '操作確認');
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = `
@@ -316,12 +318,12 @@ window.confirm = function (message, title = '操作确认') {
         modal.innerHTML = `
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
                 <span style="font-size: 20px; line-height: 1;">❓</span>
-                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${title}</h3>
+                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${finalTitle}</h3>
             </div>
             <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap; word-break: break-all;">${message}</div>
             <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                <button id="custom-confirm-cancel" style="background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 20px; font-size: 13px; border-radius: 8px; cursor: pointer; outline: none; transition: background 0.1s;">取消</button>
-                <button id="custom-confirm-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">确定</button>
+                <button id="custom-confirm-cancel" style="background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 20px; font-size: 13px; border-radius: 8px; cursor: pointer; outline: none; transition: background 0.1s;">${t('取消', 'Cancel', '取消')}</button>
+                <button id="custom-confirm-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">${t('确定', 'Confirm', '確定')}</button>
             </div>
         `;
 
@@ -1727,9 +1729,9 @@ async function init() {
             const systemLogsArea = document.getElementById('system-raw-logs-area');
             if (systemLogsArea && systemLogsArea.value) {
                 navigator.clipboard.writeText(systemLogsArea.value);
-                showToast('📋 已将完整系统运行日志成功复制到剪贴板！');
+                showToast(t('📋 已将完整系统运行日志成功复制到剪贴板！', '📋 Copying complete system logs to clipboard succeeded!', '📋 已將完整系統運行日誌成功複製到剪貼板！'));
             } else {
-                showToast('⚠️ 当前无任何系统运行日志可复制');
+                showToast(t('⚠️ 当前无任何系统运行日志可复制', '⚠️ No system logs to copy', '⚠️ 目前無任何系統運行日誌可複製'));
             }
         });
     }
@@ -1737,19 +1739,23 @@ async function init() {
     const btnClearSystemLogs = document.getElementById('btn-clear-system-logs');
     if (btnClearSystemLogs) {
         btnClearSystemLogs.addEventListener('click', async () => {
-            const confirmClear = await confirm('确定要清空本地所有的历史系统运行日志文件吗？\n\n此操作不可恢复！');
+            const confirmClear = await confirm(
+                t('确定要清空本地所有的历史系统运行日志文件吗？\n\n此操作不可恢复！',
+                  'Are you sure you want to clear all local historical system runtime log files?\n\nThis action cannot be undone!',
+                  '確定要清空本地所有的歷史系統運行日誌文件嗎？\n\n此操作不可恢復！')
+            );
             if (!confirmClear) return;
             try {
                 const result = await window.api.clearSystemLogs();
                 if (result.success) {
                     const systemLogsArea = document.getElementById('system-raw-logs-area');
                     if (systemLogsArea) systemLogsArea.value = '';
-                    showToast('🗑️ 系统运行日志与本地日志文件已成功清空');
+                    showToast(t('🗑️ 系统运行日志与本地日志文件已成功清空', '🗑️ System runtime logs and local log files have been successfully cleared.', '🗑️ 系統運行日誌與本地日誌文件已成功清空'));
                 } else {
-                    showToast('⚠️ 清空失败：' + result.error);
+                    showToast(t('⚠️ 清空失败：', '⚠️ Clear failed: ', '⚠️ 清空失敗：') + result.error);
                 }
             } catch (err) {
-                showToast('⚠️ 清空操作异常：' + err.message);
+                showToast(t('⚠️ 清空操作异常：', '⚠️ Exception during clearing: ', '⚠️ 清空操作異常：') + err.message);
             }
         });
     }
