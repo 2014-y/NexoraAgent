@@ -71,6 +71,8 @@ const ERROR_PATTERNS = [
   'delivery-recovery',
   'send_attempt_started',
   'refusing blind replay',
+  'gateway startup failed',
+  'shutdown',
 ];
 
 function isErrorMessage(text) {
