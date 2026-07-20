@@ -74,7 +74,7 @@ const LOCAL_MODEL_NO_TOOL_GUARD =
     '[LocalModelGuard] 禁止输出任何函数/工具调用 JSON（例如 {"name":"...","arguments":{...}}）。只用自然语言直接回复用户。不要调用 tts、update_goal 或其它工具。';
 
 const SYSTEM_CAPABILITY_PROMPT =
-    '[SystemCapability] 当用户要求你进行屏幕截图（如“截个图”、“截图”等）时，你必须调用 "exec" 工具去执行系统命令 "screen-capture"。你只需在 exec 工具的 command 参数中填入 "screen-capture" 这一个词即可，系统底层会自动接管截图逻辑。绝对不要自己手写任何 powershell、python 或 C# 的截图脚本代码。当工具成功执行并返回截图文件的绝对路径后，你必须在你的文本回复的顶部（第一行），以纯文本、单独成行的格式输出 "MEDIA:<exec工具返回的实际绝对路径>"（注意冒号为半角，不要使用 Markdown 语法或代码块包裹，例如：MEDIA:C:/Users/Administrator/.openclaw/openclaw-screenshot-latest.png）。随后在下方新起一行再用正常话语告知用户截图已完成即可。绝对不能输出 [[image]] 占位符！\n此外，当用户要求你打开浏览器、访问网页、或进行搜索时，你必须调用 "exec" 工具并在 command 参数中指定 "start <URL>" 命令去拉起网页（例如：百度搜索“仙逆”应执行 "start https://www.baidu.com/s?wd=仙逆"；访问“google.com”应执行 "start https://google.com"）。系统会自动在后台安全拉起用户的默认浏览器并直接呈现网页。告知用户已为您拉起浏览器即可。';
+    '[SystemCapability] 当用户要求你进行屏幕截图（如“截个图”、“截图”等）时，你必须调用 "exec" 工具去执行系统命令 "screen-capture"。你只需在 exec 工具的 command 参数中填入 "screen-capture" 这一个词即可，系统底层会自动接管截图逻辑。绝对不要自己手写任何 powershell、python 或 C# 的截图脚本代码。当工具或插件成功生成/保存图片、视频或文件并返回绝对路径后，你必须在你的文本回复的顶部（第一行），以纯文本、单独成行的格式输出 "MEDIA:<文件的实际绝对路径>"（注意冒号为半角，不要使用 Markdown 语法或代码块包裹，例如：MEDIA:C:/Users/Administrator/.openclaw/video-output/video_123.mp4）。随后在下方新起一行再用正常话语告知用户处理结果即可。绝对不能输出 [[image]] 占位符！\n此外，当用户要求你打开浏览器、访问网页、或进行搜索时，你必须调用 "exec" 工具并在 command 参数中指定 "start <URL>" 命令去拉起网页（例如：百度搜索“仙逆”应执行 "start https://www.baidu.com/s?wd=仙逆"；访问“google.com”应执行 "start https://google.com"）。系统会自动在后台安全拉起用户的默认浏览器并直接呈现网页。告知用户已为您拉起浏览器即可。';
 
 /** 清洗历史脏数据 + 对本地模型剥离 tools。返回是否改动过 body。 */
 function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
