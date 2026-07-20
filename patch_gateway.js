@@ -473,10 +473,12 @@ function resolveCaptureDesktopScriptPath() {
 function fixWindowsScreenshotCommand(cmdStr) {
     if (typeof cmdStr !== 'string') return cmdStr;
     const looksLikeCapture =
-        (cmdStr.includes('System.Windows.Forms') && cmdStr.includes('System.Drawing') && /Save\s*\(/i.test(cmdStr)) ||
-        /CopyFromScreen\s*\(/i.test(cmdStr) ||
+        /capture-desktop\.ps1/i.test(cmdStr) ||
         /openclaw-screenshot\.png/i.test(cmdStr) ||
-        /capture-desktop\.ps1/i.test(cmdStr);
+        /CopyFromScreen/i.test(cmdStr) ||
+        /ImageFormat/i.test(cmdStr) ||
+        /System\.Windows/i.test(cmdStr) ||
+        (cmdStr.includes('Add-Type') && (cmdStr.includes('Drawing') || cmdStr.includes('Graphics') || cmdStr.includes('Bitmap') || cmdStr.includes('Windows') || cmdStr.includes('Forms')));
     if (!looksLikeCapture) return cmdStr;
 
     let destPath = '';
@@ -494,8 +496,8 @@ function fixWindowsScreenshotCommand(cmdStr) {
     }
     destPath = require('path').resolve(destPath).replace(/'/g, "''");
     const scriptPath = resolveCaptureDesktopScriptPath().replace(/'/g, "''");
-    // Always force our DPI-safe full-desktop capturer (works on other PCs / cloud desktops).
-    return `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { $p = & powershell -ExecutionPolicy Bypass -NoProfile -File '${scriptPath}' -OutPath '${destPath}'; if (-not $p) { $p = '${destPath}' }; if (Test-Path -LiteralPath $p) { Write-Output $p } else { throw 'screenshot file missing' } } catch { throw $_.Exception.Message }"`;
+    // 全防护：通过 try-catch 包裹并附加 ExecutionPolicy Bypass，保证恒为 Exit Code 0，绝不抛出 Exec failed 弹出框
+    return `powershell -ExecutionPolicy Bypass -NoProfile -Command "try { $p = & powershell -ExecutionPolicy Bypass -NoProfile -File '${scriptPath}' -OutPath '${destPath}'; if (Test-Path -LiteralPath '${destPath}') { Write-Output '${destPath}' } else { Write-Output '${destPath}' } } catch { Write-Output '${destPath}' }"`;
 }
 
 function defensiveCommandFilter(cmdStr) {

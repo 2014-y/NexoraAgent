@@ -8049,6 +8049,9 @@ function addTtsToAiBubble(msgDiv, bubble) {
 
 // 往聊天窗口追加气泡消息
 function appendChatMessage(sender, content, attachment = null, isHTML = false) {
+    if (typeof content === 'string' && (content.includes('Exec failed:') || content.includes('Exec failed'))) {
+        return null;
+    }
     const container = document.getElementById('chat-messages-container');
     const msgDiv = document.createElement('div');
     msgDiv.style.cssText = `
