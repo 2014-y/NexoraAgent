@@ -58,13 +58,19 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "ollama/qwen2.5-coder:7b",
+        "primary": "agnes-ai/agnes-2.0-flash",
         "fallbacks": [
-          "ollama/qwen2.5:7b"
+          "agnes-ai/agnes-1.5-flash"
         ]
       },
       "imageModel": {
         "primary": "agnes-ai/agnes-2.0-flash"
+      },
+      "imageGenerationModel": {
+        "primary": "agnes-ai/agnes-image-2.0-flash"
+      },
+      "videoGenerationModel": {
+        "primary": "agnes-ai/agnes-video-v2.0"
       },
       "maxConcurrent": 4,
       "bootstrapMaxChars": 8000,
@@ -115,6 +121,12 @@
   },
   "plugins": {
     "entries": {
+      "image-generator": {
+        "enabled": true
+      },
+      "video-generator": {
+        "enabled": true
+      },
       "error-filter": {
         "enabled": true
       },
@@ -284,6 +296,8 @@
       }
     },
     "allow": [
+      "image-generator",
+      "video-generator",
       "openclaw-weixin",
       "error-filter",
       "weixin-reconnect",

@@ -14,7 +14,7 @@ The default duration is 5 seconds. If the user requests a specific duration, you
 ## Usage
 
 ```bash
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" video --prompt "鎻忚堪" [options]
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "鎻忚堪" [options]
 ```
 
 ## Options
@@ -32,13 +32,13 @@ node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" video --prompt "�
 
 ```bash
 # Generate a 5-second 720p video (default duration)
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a golden retriever playing in the park"
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a golden retriever playing in the park"
 
 # Generate a 20-second 720p horizontal video
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a golden retriever playing in the park" --duration 20
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a golden retriever playing in the park" --duration 20
 
 # Generate a 10-second 1080p vertical video
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a beautiful sunset over the ocean" --duration 10 --resolution 1080p --aspect 9:16
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a beautiful sunset over the ocean" --duration 10 --resolution 1080p --aspect 9:16
 ```
 
 ## Output

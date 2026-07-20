@@ -5,6 +5,10 @@
 
 import path from "node:path";
 import os from "node:os";
+import fs from "node:fs";
+import https from "node:https";
+import http from "node:http";
+
 const API_BASE = "https://apihub.agnes-ai.com/v1/images/generations";
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
   || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw');
@@ -20,11 +24,6 @@ const API_KEYS = [
   "sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F", // agnes-ai-5
   "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh", // agnes-ai-6
 ];
-
-import fs from "node:fs";
-import path from "node:path";
-import https from "node:https";
-import http from "node:http";
 
 export default function createSkill(runtime) {
   if (!fs.existsSync(SAVE_DIR)) {

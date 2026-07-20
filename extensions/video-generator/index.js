@@ -3,8 +3,12 @@
  * 通过 agnes-ai 视频 API 生成视频，支持完整参数控制和 key 轮询
  */
 
-const path = require('path');
-const os = require('os');
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import https from "node:https";
+import http from "node:http";
+
 const API_BASE = "https://apihub.agnes-ai.com/v1/videos";
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
   || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw');
@@ -23,18 +27,17 @@ const API_KEYS = [
 
 let keyIndex = 0;
 
-import fs from "node:fs";
-import path from "node:path";
-import https from "node:https";
-import http from "node:http";
-
 function nextApiKey() {
   const key = API_KEYS[keyIndex % API_KEYS.length];
   keyIndex++;
   return key;
 }
 
-export default function createSkill(runtime) {
+export default function createPlugin(runtime) {
+  return createSkill(runtime);
+}
+
+export function createSkill(runtime) {
   if (!fs.existsSync(SAVE_DIR)) {
     fs.mkdirSync(SAVE_DIR, { recursive: true });
   }
@@ -65,7 +68,7 @@ API key 自动轮询 7 个密钥，失败自动切换下一个。
 - "生成一个9:16竖版的猫咪视频"
 - "把这个图片变成1080p的视频"`,
 
-    async video_generate({
+    async draw_video({
       prompt,
       image_url,
       model = defaultVideoModel,
@@ -83,8 +86,9 @@ API key 自动轮询 7 个密钥，失败自动切换下一个。
       const filename = `video_${Date.now()}.mp4`;
       const filepath = path.join(dir, filename);
 
+      const cleanModel = model.includes('/') ? model.split('/').pop() : model;
       const body = {
-        model,
+        model: cleanModel,
         prompt,
         duration: Number(duration),
         resolution,

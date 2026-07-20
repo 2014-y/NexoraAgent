@@ -6,8 +6,12 @@
  *   node agnes-media-cli.js image --prompt "描述" [--model agnes-image-2.0-flash] [--size 1024x1024] [--quality standard] [--style vivid] [--count 1]
  */
 
-const path = require('path');
-const os = require('os');
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import https from "node:https";
+import http from "node:http";
+
 const API_BASE = "https://apihub.agnes-ai.com/v1";
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
   || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw');
@@ -22,11 +26,6 @@ const API_KEYS = [
   "sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F",
   "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh",
 ];
-
-import fs from "node:fs";
-import path from "node:path";
-import https from "node:https";
-import http from "node:http";
 
 // --- Helpers ---
 

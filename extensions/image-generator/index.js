@@ -3,8 +3,12 @@
  * 通过 agnes-ai 图像 API 生成图片，支持完整参数控制和 key 轮询
  */
 
-const path = require('path');
-const os = require('os');
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import https from "node:https";
+import http from "node:http";
+
 const API_BASE = "https://apihub.agnes-ai.com/v1/images/generations";
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
   || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw');
@@ -21,12 +25,11 @@ const API_KEYS = [
   "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh", // agnes-ai-6
 ];
 
-import fs from "node:fs";
-import path from "node:path";
-import https from "node:https";
-import http from "node:http";
+export default function createPlugin(runtime) {
+  return createSkill(runtime);
+}
 
-export default function createSkill(runtime) {
+export function createSkill(runtime) {
   if (!fs.existsSync(SAVE_DIR)) {
     fs.mkdirSync(SAVE_DIR, { recursive: true });
   }
@@ -52,7 +55,7 @@ API key 自动轮询 7 个密钥，失败自动切换下一个。
 - "生成一张风景图，16:9 宽屏"
 - "用 2.1 模型画一张高清照片"`,
 
-    async image_generate({
+    async draw_picture({
       prompt,
       model = "agnes-image-2.0-flash",
       size = "1024x1024",
@@ -69,8 +72,9 @@ API key 自动轮询 7 个密钥，失败自动切换下一个。
       const timestamp = Date.now();
       const results = [];
 
+      const cleanModel = model.includes('/') ? model.split('/').pop() : model;
       const body = {
-        model,
+        model: cleanModel,
         prompt,
         size,
         n: Number(n),

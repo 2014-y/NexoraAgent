@@ -10,7 +10,7 @@ Generate images using the agnes-ai image API.
 ## Usage
 
 ```bash
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" image --prompt "鎻忚堪" [options]
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" image --prompt "鎻忚堪" [options]
 ```
 
 ## Options
@@ -27,10 +27,10 @@ node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" image --prompt "�
 
 ```bash
 # Generate a standard image
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a cute cat sitting on a windowsill"
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a cute cat sitting on a windowsill"
 
 # Generate 2 HD images
-node "$env:USERPROFILE/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a modern living room interior" --quality hd --count 2
+node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a modern living room interior" --quality hd --count 2
 ```
 
 ## Output
