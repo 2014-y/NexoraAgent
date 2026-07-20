@@ -119,6 +119,7 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
             delete parsedBody.tools;
             hasModified = true;
         }
+    }
         // 系统提示处理：仅对真正端侧小模型添加禁用工具警示；给正常云端模型添加截图与浏览器能力支持提示
         if (Array.isArray(parsedBody.messages)) {
             const isLocal = isLocalModelRequest(parsedBody.model, hostOrUrl);
