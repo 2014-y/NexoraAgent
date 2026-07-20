@@ -2112,9 +2112,13 @@ function processActivityLogQueue() {
         const temp = document.createElement('span');
         temp.innerHTML = lineHtml;
         const textLen = (temp.textContent || '').length;
-        const totalSteps = Math.min(textLen, 50);
+
+        const queueLen = __activityLogQueue.length;
+        const stepInterval = queueLen > 15 ? 8 : (queueLen > 5 ? 12 : 16);
+        const totalSteps = Math.min(textLen, 40);
         let step = 0;
-        item.style.transition = 'clip-path 0.15s ease-out, opacity 0.25s ease-out';
+        
+        item.style.transition = 'clip-path 0.1s linear';
         item.style.clipPath = 'inset(0 100% 0 0)';
 
         const typeTimer = setInterval(() => {
@@ -2127,17 +2131,15 @@ function processActivityLogQueue() {
                 clearInterval(typeTimer);
                 item.style.clipPath = 'none';
                 item.classList.remove('typing');
+
+                // 🌟 严格规范：前一条日志 100% 打字/揭开完成后，暂停一小会，再启动下一条！
+                const nextPause = queueLen > 15 ? 40 : (queueLen > 5 ? 90 : 160);
+                setTimeout(() => {
+                    processActivityLogQueue();
+                }, nextPause);
             }
-        }, 22);
+        }, stepInterval);
     }
-
-    // 自适应优雅延时：正常推送时每条沉浸展示 550ms，积压多时微调放行
-    const queueLen = __activityLogQueue.length;
-    const nextDelay = queueLen > 15 ? 120 : (queueLen > 5 ? 250 : 550);
-
-    setTimeout(() => {
-        processActivityLogQueue();
-    }, nextDelay);
 }
 
 // 🔍 小白友好型日志汉化过滤与清洗转化器
@@ -6042,12 +6044,9 @@ function setupTabSwitching() {
                             if (streamList) {
                                 const emptyTips = streamList.querySelector('.activity-item-empty');
                                 if (emptyTips) emptyTips.remove();
-                                chunk.forEach((lineHtml) => {
-                                    const item = document.createElement('div');
-                                    item.className = 'activity-log-line';
-                                    item.innerHTML = lineHtml;
-                                    streamList.appendChild(item);
-                                });
+                            chunk.forEach((lineHtml) => {
+                                enqueueActivityLog(lineHtml);
+                            });
                                 while (streamList.children.length > 150) {
                                     streamList.removeChild(streamList.firstChild);
                                 }
