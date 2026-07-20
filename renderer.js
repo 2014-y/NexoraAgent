@@ -2181,7 +2181,7 @@ function formatLogForUser(text) {
         return `[⚙️ 系统核心] 📩 正在处理并分析接收到的即时聊天消息...`;
     }
 
-    // 遇到报错（非 Bonjour、error-filter、model-pricing、voice-bridge 等容易被误报的警告）
+    // 遇到报错（非 Bonjour、error-filter、model-pricing、voice-bridge、sessions.delete 等容易被误报的警告）
     if (lowerLine.includes('error') || lowerLine.includes('exception') || lowerLine.includes('failed')) {
         if (
             lowerLine.includes('bonjour') || 
@@ -2191,7 +2191,9 @@ function formatLogForUser(text) {
             lowerLine.includes('voice-bridge') ||
             lowerLine.includes('speak failed') ||
             lowerLine.includes('econnrefused') ||
-            lowerLine.includes('18791')
+            lowerLine.includes('18791') ||
+            lowerLine.includes('cannot delete the main session') ||
+            lowerLine.includes('sessions.delete')
         ) return null;
         return `[⚠️ 系统警报] ⚠️ 系统运行警告：${cleanLine}`;
     }

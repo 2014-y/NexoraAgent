@@ -79,6 +79,10 @@ const ERROR_PATTERNS = [
   'speak failed',
   'ECONNREFUSED',
   '18791',
+
+  // Session deletion protection warnings
+  'Cannot delete the main session',
+  'sessions.delete',
 ];
 
 function isErrorMessage(text) {
