@@ -66,6 +66,11 @@ const ERROR_PATTERNS = [
   // Heartbeat notifications
   'HEARTBEAT_OK',
   'HEARTBEAT',
+  
+  // Delivery recovery logs on startup
+  'delivery-recovery',
+  'send_attempt_started',
+  'refusing blind replay',
 ];
 
 function isErrorMessage(text) {
