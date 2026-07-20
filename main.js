@@ -15,6 +15,7 @@ const {
 } = require('./home-resolve');
 const { ensureLatencySafeConfig } = require('./latency-tune');
 const { ensureVisionModelConfig } = require('./vision-model-config');
+const { sanitizeQqbotConfig } = require('./channel-config-sanitize');
 const {
     isPluginPathStaleOnThisMachine,
     looksLikeOfficialOpenClawChannelPath,
@@ -2705,6 +2706,7 @@ function prepareChannelPluginsBeforeGateway() {
             }
         }
         if (config.channels && config.channels.qqbot) {
+            if (sanitizeQqbotConfig(config)) needsSave = true;
             const q = config.channels.qqbot;
             const hasQ = !!(q.appId || q.appSecret || q.clientId
                 || (q.accounts && Object.keys(q.accounts).length));
@@ -4193,6 +4195,13 @@ function ensureOpenClawConfigInitialized() {
             }
         } catch (e) {}
 
+        try {
+            if (sanitizeQqbotConfig(config)) {
+                needsSave = true;
+                console.log('[QqbotFix] Normalized qqbot account ids for outbound media');
+            }
+        } catch (e) {}
+
         if (needsSave) {
             try {
                 fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
@@ -4607,6 +4616,17 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         try {
             cleanConfig = ensureVisionModelConfig(cleanConfig).config;
         } catch (e) {}
+
+        try {
+            if (sanitizeFeishuConfig(cleanConfig)) {
+                console.log('[FeishuFix] Sanitized on config-save');
+            }
+        } catch (e) {}
+        try {
+            if (sanitizeQqbotConfig(cleanConfig)) {
+                console.log('[QqbotFix] Sanitized account ids on config-save');
+            }
+        } catch (e) {}
         
         // 读取原本的文件尺寸
         const originalBytes = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).size : 39500;
@@ -4634,7 +4654,7 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             console.warn('[ModelSync] Session/model sync skipped:', e.message);
         }
 
-        return { success: true };
+        return { success: true, config: cleanConfig };
     } catch (e) {
         console.error('Failed to save config:', e);
         return { success: false, error: e.message };

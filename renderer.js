@@ -749,6 +749,21 @@ function renderQqbotAccounts() {
         window.api.saveConfig(configData).catch(() => {});
     }
 
+    // 中文/非法账号 ID：触发保存，主进程 sanitize 后回写 configData
+    try {
+        const accounts = configData.channels.qqbot.accounts || {};
+        const bad = Object.keys(accounts).filter((id) => !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(id));
+        if (bad.length > 0) {
+            window.api.saveConfig(configData).then((r) => {
+                if (r && r.success && r.config) {
+                    configData = r.config;
+                    renderQqbotAccounts();
+                }
+            }).catch(() => {});
+            return;
+        }
+    } catch (e) {}
+
     if (!configData.channels.qqbot.accounts) configData.channels.qqbot.accounts = {};
 
     const accounts = configData.channels.qqbot.accounts;
@@ -1684,6 +1699,11 @@ async function init() {
             const accountId = values.accountId ? values.accountId.trim() : '';
             if (!accountId) {
                 showToast(t('comm.account.empty_err'));
+                return;
+            }
+            // OpenClaw 出站发图会把账号 ID 规范化为 [a-z0-9_-]；中文会被洗成 default 导致「missing appId」
+            if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(accountId)) {
+                showToast('QQ 账号 ID 只能用英文/数字/下划线（如 youlingzi、qqbot-1），不要用中文');
                 return;
             }
             if (!values.appId || !values.clientSecret) {

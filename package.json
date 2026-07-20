@@ -139,6 +139,7 @@
       "gateway-auth.js",
       "openclaw-model-sync.js",
       "latency-tune.js",
+      "channel-config-sanitize.js",
       "token-usage-parse.js",
       "plugin-catalog.js",
       "gateway-boot-harden.js",
