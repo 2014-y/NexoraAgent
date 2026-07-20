@@ -8454,7 +8454,14 @@ async function handleSendMessage() {
                 reply = JSON.stringify(result);
             }
             
-            aiBubble.innerText = reply;
+            if (typeof reply === 'string' && (reply.includes('[[image]]') || reply.includes('[image]'))) {
+                let html = reply.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                html = html.replace(/\[\[image\]\]/gi, `<img src="./openclaw-screenshot-latest.png?t=${Date.now()}" style="max-width: 100%; border-radius: 8px; margin-top: 8px; display: block; border: 1px solid rgba(255,255,255,0.1);" />`);
+                html = html.replace(/\[image\]/gi, `<img src="./openclaw-screenshot-latest.png?t=${Date.now()}" style="max-width: 100%; border-radius: 8px; margin-top: 8px; display: block; border: 1px solid rgba(255,255,255,0.1);" />`);
+                aiBubble.innerHTML = html;
+            } else {
+                aiBubble.innerText = reply;
+            }
 
             chatSessionHistory.push({
                 role: 'assistant',
