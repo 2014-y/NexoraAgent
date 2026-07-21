@@ -2,15 +2,18 @@
 
 <br />
 
-<!-- ⚡ 终极赛博霓虹动态 Header ⚡ -->
-<img src="https://capsule-render.vercel.app/api?type=rect&color=gradient&customColorList=0,2,10,24,30&height=220&section=header&text=NEXORA%20AGENT&fontSize=72&fontColor=ffffff&animation=twinkling&fontAlignY=36&desc=%E2%9A%A1%20SOVEREIGN%20AUTONOMOUS%20LOCAL%20AI%20INTELLIGENCE%20MATRIX%20%E2%9A%A1&descSize=16&descAlignY=65" width="100%" alt="Nexora Cyberpunk Header" />
+<!-- ⚡ 终极赛博高光 Header ⚡ -->
+<img src="https://capsule-render.vercel.app/api?type=rect&color=gradient&customColorList=0,2,10,24,30&height=180&section=header&text=NEXORA%20AGENT&fontSize=68&fontColor=ffffff&animation=twinkling&fontAlignY=38&desc=%E2%9A%A1%20SOVEREIGN%20AUTONOMOUS%20LOCAL%20AI%20INTELLIGENCE%20MATRIX%20%E2%9A%A1&descSize=15&descAlignY=68" width="100%" alt="Nexora Cyberpunk Header" />
 
 <br />
 <br />
 
+<!-- 🚀 8K 赛博黑科技控制台实机全景展示图 🚀 -->
 <p align="center">
-  <img src="config/icon.ico" width="130" height="130" alt="Nexora Agent Logo" />
+  <img src="docs/images/nexora_agent_showcase.jpg" width="100%" style="border-radius: 12px;" alt="Nexora Agent High-Tech Interface Showcase" />
 </p>
+
+<br />
 
 ### 🌌 Autonomous, Self-Healing & Distributed Local AI Intelligence Matrix
 
@@ -139,7 +142,7 @@ flowchart LR
 ### 3. 绑定大模型“大脑” (API Key)
 * 点击左侧菜单栏 **「模型配置」**；
 * 在供应商列表中勾选您使用的服务商（如 `agnes-ai` / `DeepSeek` / `阿里云百炼`）；
-* 粘贴您申请到的 API Key（格式如 `sk-xxxxxxxxx`）并点击 **「保存配置」**；
+* 粘贴您申请到的 API Key（格式如 `sk-xxxxxxxxx`）；
 * 点击左侧 **「模型会话」** 发送“你好”，若收到回复，代表 AI 大脑已成功连通！
 
 ### 4. 手机扫码，一键托管微信 / 飞书 / QQ
