@@ -2,15 +2,62 @@
 
 <br />
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,10,24,30&height=220&section=header&text=NEXORA%20AGENT&fontSize=70&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Sovereign%20Autonomous%20Multi-Channel%20AI%20Intelligence%20Matrix&descSize=20&descAlignY=62" width="100%" alt="Nexora Header" />
+<!-- ⚡ 动态赛博打字机 & 高频科技 Header ⚡ -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 240" width="100%" height="240">
+  <defs>
+    <linearGradient id="cyber-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7928CA" />
+      <stop offset="50%" stop-color="#FF0080" />
+      <stop offset="100%" stop-color="#00DFD8" />
+    </linearGradient>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0D17" />
+      <stop offset="100%" stop-color="#040509" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- 背景暗黑光影卡片 -->
+  <rect width="1000" height="240" rx="16" fill="url(#bg-grad)" stroke="url(#cyber-grad)" stroke-width="2" />
+  
+  <!-- 脉冲粒子点矩阵 -->
+  <circle cx="920" cy="40" r="4" fill="#00DFD8" opacity="0.8">
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="2s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="940" cy="40" r="4" fill="#FF0080" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="2s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="960" cy="40" r="4" fill="#7928CA" opacity="0.8">
+    <animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- 动态霓虹发光 Logo 标题 -->
+  <text x="500" y="95" text-anchor="middle" fill="url(#cyber-grad)" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="54" letter-spacing="4" filter="url(#glow)">
+    NEXORA AGENT
+  </text>
+  
+  <!-- 动态打字光标字幕 -->
+  <text x="500" y="150" text-anchor="middle" fill="#A0AEC0" font-family="'Fira Code', 'Courier New', monospace" font-size="18" letter-spacing="2">
+    > SOVEREIGN LOCAL AI INTELLIGENCE MATRIX
+    <tspan fill="#00DFD8">_</tspan>
+    <animate attributeName="opacity" values="1;0;1" dur="0.8s" repeatCount="indefinite" />
+  </text>
+  
+  <text x="500" y="190" text-anchor="middle" fill="#4A5568" font-family="system-ui, sans-serif" font-size="13" letter-spacing="1">
+    Zero-Trust • Auto-Healing • Multi-Channel • Physical Win32 Control • Offline Voice
+  </text>
+</svg>
+
+<br />
 
 <p align="center">
-  <img src="config/icon.ico" width="140" height="140" alt="Nexora Agent Logo" />
+  <img src="config/icon.ico" width="120" height="120" alt="Nexora Agent Logo" />
 </p>
 
-### 🌌 The Sovereign, Distributed & Autonomous Multi-Channel AI Matrix
-
-**下一代企业级与个人专属的全离线、分布式、自愈型多渠道 AI 智能体控制中枢**
+### 🌌 Autonomous, Self-Healing & Distributed Local AI Intelligence Matrix
 
 *Engineered for Absolute Privacy. Powered by Local Intelligence. Driven by Zero-Trust Architecture.*
 
