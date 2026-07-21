@@ -359,6 +359,20 @@ function ensureLatencySafeConfig(config, opts = {}) {
     cfg.agents.defaults.timeoutSeconds = 600;
     changes.push('agents.defaults.timeoutSeconds: -> 600');
   }
+
+  // 生视频轮询最长约 10 分钟；默认 stuckSessionAbort≈6min 会误杀 draw_video
+  if (!isObject(cfg.diagnostics)) cfg.diagnostics = {};
+  const diag = cfg.diagnostics;
+  const stuckWarnMs = Number(diag.stuckSessionWarnMs);
+  if (!Number.isFinite(stuckWarnMs) || stuckWarnMs < 300000) {
+    diag.stuckSessionWarnMs = 300000;
+    changes.push('diagnostics.stuckSessionWarnMs: -> 300000');
+  }
+  const stuckAbortMs = Number(diag.stuckSessionAbortMs);
+  if (!Number.isFinite(stuckAbortMs) || stuckAbortMs < 900000) {
+    diag.stuckSessionAbortMs = 900000;
+    changes.push('diagnostics.stuckSessionAbortMs: -> 900000');
+  }
   // 同步抬高 agnes-ai 请求超时，避免工具跑着模型侧先 idle Abort
   if (isObject(cfg.models) && isObject(cfg.models.providers) && isObject(cfg.models.providers['agnes-ai'])) {
     const prov = cfg.models.providers['agnes-ai'];

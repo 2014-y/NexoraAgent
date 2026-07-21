@@ -1,0 +1,35 @@
+{
+  "providers": {
+    "my-image-api": {
+      "kind": "image",
+      "apiBase": "https://api.example.com/v1/images/generations",
+      "providerOptions": {
+        "requestMapping": {
+          "prompt": "prompt",
+          "model": "model",
+          "size": "size",
+          "n": "n"
+        },
+        "responseDataPath": "data"
+      }
+    },
+    "my-video-api": {
+      "kind": "video",
+      "apiBase": "https://api.example.com/v1/videos",
+      "providerOptions": {
+        "requestMapping": {
+          "prompt": "prompt",
+          "model": "model",
+          "duration": "seconds"
+        },
+        "pollUrlTemplate": "https://api.example.com/v1/videos/{id}",
+        "responseIdPaths": ["id", "task_id", "video_id"],
+        "responseUrlPaths": ["metadata.url", "output.url", "url"],
+        "successStatuses": ["succeeded", "completed", "success"],
+        "failedStatuses": ["failed", "error"],
+        "pollIntervalMs": 5000,
+        "pollMaxAttempts": 120
+      }
+    }
+  }
+}

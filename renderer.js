@@ -2340,11 +2340,43 @@ function processActivityLogQueue() {
     }
 }
 
+// 生图/生视频底层重试与网络报错：不在活动流/终端里刷屏
+function isMediaApiNoiseLog(text) {
+    const l = String(text || '').toLowerCase();
+    return (
+        l.includes('[video-generator]') ||
+        l.includes('[image-generator]') ||
+        l.includes('[media-http]') ||
+        l.includes('[media-cli]') ||
+        l.includes('draw_video failed') ||
+        l.includes('draw_picture failed') ||
+        (l.includes('built-in key') && l.includes('failed')) ||
+        (l.includes('[tools]') && (l.includes('draw_video') || l.includes('draw_picture'))) ||
+        l.includes('unsupportedparamserror') ||
+        l.includes('all image api keys failed') ||
+        l.includes('all video api keys failed') ||
+        l.includes('parseerror') ||
+        l.includes('unexpected token') ||
+        l.includes('failed to load plugin') ||
+        l.includes('extensions/image-generator') ||
+        l.includes('extensions/video-generator') ||
+        l.includes('extensions\\image-generator') ||
+        l.includes('extensions\\video-generator') ||
+        (l.includes('etimedout') && (l.includes('198.18.') || l.includes('agnes') || l.includes('apihub'))) ||
+        (l.includes('connect etimedout') && l.includes(':443')) ||
+        (l.includes('stalled session') && l.includes('draw_video')) ||
+        l.includes('stuck session recovery') ||
+        l.includes('embedded abort settle timed out') ||
+        (l.includes('lane task error') && l.includes('reply operation aborted'))
+    );
+}
+
 // 🔍 小白友好型日志汉化过滤与清洗转化器
 function formatLogForUser(text) {
     if (!text) return null;
     // 移除颜色控制字符并修剪两端
     const cleanLine = text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
+    if (isMediaApiNoiseLog(cleanLine)) return null;
     const lowerLine = cleanLine.toLowerCase();
 
     // 1. 过滤完全无需展示给小白的日志 (底层噪音调试日志)
@@ -2546,7 +2578,8 @@ function formatLogForUser(text) {
             lowerLine.includes('refusing blind replay') ||
             lowerLine.includes('sendinputnotify') ||
             lowerLine.includes('exceeded 30000ms') ||
-            (lowerLine.includes('qqbot') && (lowerLine.includes('websocket') || lowerLine.includes('gateway error') || lowerLine.includes('timeout')))
+            (lowerLine.includes('qqbot') && (lowerLine.includes('websocket') || lowerLine.includes('gateway error') || lowerLine.includes('timeout'))) ||
+            isMediaApiNoiseLog(cleanLine)
         ) return null;
         return `[⚠️ 系统警报] ⚠️ 系统运行警告：${cleanLine}`;
     }
@@ -2644,7 +2677,7 @@ function setupIpcListeners() {
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) {
             const trimmed = text.trim();
-            if (trimmed) {
+            if (trimmed && !isMediaApiNoiseLog(trimmed)) {
                 systemLogsArea.value += trimmed + '\n';
                 // 限制最大行数防止内存泄漏 (限制在 5000 行)
                 const lines = systemLogsArea.value.split('\n');
@@ -2668,6 +2701,7 @@ function setupIpcListeners() {
         // 🌟 过滤冗余的未安装插件警告、框架表格线与垃圾说明，使终端日志框只保留核心关键步骤
         const filteredLines = text.split('\n').filter(line => {
             const cleanLine = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
+            if (isMediaApiNoiseLog(cleanLine)) return false;
             return !(
                 cleanLine.includes('|') || 
                 cleanLine.includes('plugin not installed') || 
@@ -3007,6 +3041,11 @@ function setupIpcListeners() {
         } 
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
+            // 每次网关（重新）进入 running 都清掉活动流里的旧警报，避免修完插件后还看到旧 ParseError
+            if (oldStatus !== 'running' && logTerminal) {
+                logTerminal.innerHTML = '';
+                gatewayLogReadyTail = '';
+            }
             // 冷启动：维持 starting，同时开始端口探测，避免卡在 97%
             if (currentProgress > 0 && !gatewayFullyReady) {
                 gatewayStatus = 'starting';

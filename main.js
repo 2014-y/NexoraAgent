@@ -930,10 +930,11 @@ const BUNDLED_EXTENSION_PLUGINS = [
     'video-generator'
 ];
 
-const MEDIA_TOOLS_MARKER = '<!-- nexora-media-tools-v2 -->';
+const MEDIA_TOOLS_MARKER = '<!-- nexora-media-tools-v3 -->';
 const MEDIA_MEMORY_MARKER = '<!-- nexora-media-memory-v1 -->';
-const MEDIA_AGENTS_MARKER = '<!-- nexora-media-agents-v1 -->';
+const MEDIA_AGENTS_MARKER = '<!-- nexora-media-agents-v2 -->';
 const MEDIA_TOOLS_MARKER_LEGACY = '<!-- nexora-media-tools-v1 -->';
+const MEDIA_AGENTS_MARKER_LEGACY = '<!-- nexora-media-agents-v1 -->';
 const MEDIA_IMAGE_PREFS_FILE = 'media-generator.json';
 const MEDIA_VIDEO_PREFS_FILE = 'video-generator.json';
 const DEFAULT_MEDIA_IMAGE_PREFS = {
@@ -1106,6 +1107,45 @@ function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeou
 
 function isNetworkProbeError(errOrMsg) {
     return /timeout|超时|ETIMEDOUT|ECONNRESET|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|socket hang up|代理 CONNECT|AbortError|aborted/i.test(String(errOrMsg || ''));
+}
+
+/** 生图/生视频底层重试与网络报错：不写入 UI 日志流 */
+function isMediaApiNoiseLog(text) {
+    const l = String(text || '').toLowerCase();
+    return (
+        l.includes('[video-generator]') ||
+        l.includes('[image-generator]') ||
+        l.includes('[media-http]') ||
+        l.includes('[media-cli]') ||
+        l.includes('draw_video failed') ||
+        l.includes('draw_picture failed') ||
+        (l.includes('built-in key') && l.includes('failed')) ||
+        (l.includes('[tools]') && (l.includes('draw_video') || l.includes('draw_picture'))) ||
+        l.includes('unsupportedparamserror') ||
+        l.includes('all image api keys failed') ||
+        l.includes('all video api keys failed') ||
+        l.includes('parseerror') ||
+        l.includes('unexpected token') ||
+        l.includes('failed to load plugin') ||
+        l.includes('extensions/image-generator') ||
+        l.includes('extensions/video-generator') ||
+        l.includes('extensions\\image-generator') ||
+        l.includes('extensions\\video-generator') ||
+        (l.includes('etimedout') && (l.includes('198.18.') || l.includes('agnes') || l.includes('apihub'))) ||
+        (l.includes('connect etimedout') && l.includes(':443')) ||
+        (l.includes('stalled session') && l.includes('draw_video')) ||
+        l.includes('stuck session recovery') ||
+        l.includes('embedded abort settle timed out') ||
+        (l.includes('lane task error') && l.includes('reply operation aborted'))
+    );
+}
+
+function filterGatewayLogText(text) {
+    if (!text || typeof text !== 'string') return text;
+    const lines = text.split('\n');
+    const kept = lines.filter((line) => !isMediaApiNoiseLog(line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim()));
+    if (kept.length === lines.length) return text;
+    return kept.length ? kept.join('\n') : '';
 }
 
 async function verifyBuiltInAgnesRequest(mode = 'key') {
@@ -1765,8 +1805,28 @@ function syncBundledPluginFiles(pluginId) {
         }
         ensurePluginPackageJson(destDir, pluginId);
         ensurePluginManifestJson(destDir, pluginId);
+        syncMediaHttpHelper(destDir);
+        if (pluginId === 'image-generator' || pluginId === 'video-generator') {
+            syncMediaCoreBundle();
+        }
     } catch (e) {
         console.warn(`[PluginSeed] syncBundledPluginFiles(${pluginId}) failed:`, e.message);
+    }
+}
+
+function syncMediaHttpHelper(destDir) {
+    try {
+        const srcCandidates = [
+            path.join(__dirname, 'extensions', 'media-http.js'),
+            path.join(__dirname, 'extensions', path.basename(destDir), 'media-http.js'),
+            resolveAppFsPath('extensions', 'media-http.js'),
+            resolveAppFsPath('extensions', path.basename(destDir), 'media-http.js'),
+        ];
+        const src = srcCandidates.find((p) => p && fs.existsSync(p));
+        if (!src || !destDir) return;
+        fs.copyFileSync(src, path.join(destDir, 'media-http.js'));
+    } catch (e) {
+        console.warn('[PluginSeed] syncMediaHttpHelper failed:', e && e.message);
     }
 }
 
@@ -1882,7 +1942,8 @@ Be helpful and concise. Prefer short answers.
 ## 图片/视频
 ${MEDIA_AGENTS_MARKER}
 - 用户要画图/视频：**优先** \`draw_picture\` / \`draw_video\`；否则 \`exec\` 运行 \`node <用户目录>/.openclaw/media-cli/agnes-media-cli.js image|video --prompt "描述"\`
-- **禁止** \`image_generate\` / \`video_generate\`；完成后回复加 \`MEDIA:文件路径\`
+- **禁止** \`image_generate\` / \`video_generate\`；完成后回复首行加 \`MEDIA:绝对文件路径\`
+- **禁止**输出 \`[[video_media]]\` / \`[[image_media]]\` / \`[[image]]\` / \`[[video]]\` 等占位符（通道不会渲染）
 `;
 
 function seedDefaultMemoryFile(memFile) {
@@ -2194,7 +2255,8 @@ function buildMediaAgentsSection() {
 ## 图片/视频
 ${MEDIA_AGENTS_MARKER}
 - 用户要画图/视频：**优先** \`draw_picture\` / \`draw_video\`；否则 \`exec\` 运行 \`node "${cliPath}" image|video --prompt "描述"\`
-- **禁止** \`image_generate\` / \`video_generate\`；完成后回复加 \`MEDIA:文件路径\`
+- **禁止** \`image_generate\` / \`video_generate\`；完成后回复首行加 \`MEDIA:绝对路径\`（半角冒号）
+- **禁止**输出 \`[[video_media]]\` / \`[[image_media]]\` / \`[[image]]\` / \`[[video]]\` 等占位符（通道无法渲染）
 - **禁止**复用历史里的旧 \`MEDIA:\` 路径；只能发送本次生成命令刚返回的新文件
 `;
 }
@@ -2205,8 +2267,23 @@ function ensureMediaAgentsGuidance(wsDir) {
         const agentsPath = path.join(wsDir, 'AGENTS.md');
         const section = buildMediaAgentsSection().trim() + '\n';
         if (!fs.existsSync(agentsPath)) return;
-        const cur = fs.readFileSync(agentsPath, 'utf8');
+        let cur = fs.readFileSync(agentsPath, 'utf8');
         if (cur.includes(MEDIA_AGENTS_MARKER)) return;
+        // 升级旧版 media agents 块（含 v1），补上禁止占位符规则
+        if (cur.includes(MEDIA_AGENTS_MARKER_LEGACY) || /##\s*图片\/视频/.test(cur)) {
+            const stripped = cur
+                .replace(/<!--\s*nexora-media-agents-v\d+\s*-->[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
+                .replace(/##\s*图片\/视频[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
+                .trim();
+            // 若 marker 在段落中间，上面第一条替换可能留下残缺；再清一遍含 marker 的旧段
+            const cleaned = stripped
+                .replace(/##\s*图片\/视频[\s\S]*?<!--\s*nexora-media-agents-v\d+\s*-->[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
+                .trim();
+            cur = cleaned + (cleaned ? '\n\n' : '') + section;
+            fs.writeFileSync(agentsPath, cur, 'utf8');
+            console.log('[PluginSeed] Upgraded workspace AGENTS.md media guidance (v2)');
+            return;
+        }
         fs.appendFileSync(agentsPath, '\n' + section, 'utf8');
         console.log('[PluginSeed] Appended media guidance to workspace AGENTS.md');
     } catch (e) {
@@ -2271,7 +2348,8 @@ function buildMediaToolsSection() {
 - 用户要生成图片或视频时，**优先**调用工具 \`draw_picture\` / \`draw_video\`
 - 若不可用，用 \`exec\`：\`node "${cliPath}" image --prompt "描述"\` 或 \`node "${cliPath}" video --prompt "描述"\`
 - **禁止**调用内置 \`image_generate\` / \`video_generate\`（默认无 Google Key，会失败）
-- 生成完成后在回复中加入 \`MEDIA:完整文件路径\`（视频同理，发 QQ/飞书 才看得到文件）
+- 生成完成后在回复**首行**加入 \`MEDIA:完整绝对路径\`（半角冒号，不要 Markdown/代码块）
+- **禁止**输出 \`[[video_media]]\` / \`[[image_media]]\` / \`[[image]]\` / \`[[video]]\` 等占位符——通道不会渲染它们
 - 图片约 30–90 秒；**视频常需 2–10 分钟**。用 \`exec\` 时 \`timeout\` 至少 **600**，并用 \`process poll\` 等待
 `;
 }
@@ -2288,15 +2366,19 @@ function ensureMediaWorkspaceGuidance(wsDir) {
         }
         let cur = fs.readFileSync(toolsPath, 'utf8');
         if (cur.includes(MEDIA_TOOLS_MARKER)) return;
-        // 升级旧版 media tools 块（含 v1），避免视频超时说明过短
-        if (cur.includes(MEDIA_TOOLS_MARKER_LEGACY) || /##\s*图片\/视频生成/.test(cur)) {
+        // 升级旧版 media tools 块（含 v1/v2），补上禁止占位符规则
+        if (
+            cur.includes(MEDIA_TOOLS_MARKER_LEGACY)
+            || cur.includes('<!-- nexora-media-tools-v2 -->')
+            || /##\s*图片\/视频生成/.test(cur)
+        ) {
             const stripped = cur
                 .replace(/<!--\s*nexora-media-tools-v\d+\s*-->[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
                 .replace(/##\s*图片\/视频生成[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
                 .trim();
             cur = section + (stripped ? '\n\n' + stripped + '\n' : '\n');
             fs.writeFileSync(toolsPath, cur, 'utf8');
-            console.log('[PluginSeed] Upgraded workspace TOOLS.md media guidance (v2)');
+            console.log('[PluginSeed] Upgraded workspace TOOLS.md media guidance (v3)');
             return;
         }
         fs.writeFileSync(toolsPath, section + '\n\n' + cur, 'utf8');
@@ -2367,6 +2449,56 @@ function syncMediaCliBundle() {
     }
 }
 
+function syncMediaCoreBundle() {
+    try {
+        const destExtCore = path.join(CONFIG_DIR, 'extensions', 'media-core');
+        const destResolve = path.join(CONFIG_DIR, 'extensions', 'media-core-resolve.js');
+        const srcCoreCandidates = [
+            path.join(__dirname, 'extensions', 'media-core'),
+            path.join(__dirname, 'media-cli', 'media-core'),
+            resolveAppFsPath('extensions', 'media-core'),
+            resolveAppFsPath('media-cli', 'media-core'),
+        ];
+        const srcCore = srcCoreCandidates.find((p) => p && fs.existsSync(path.join(p, 'index.js')));
+        if (!srcCore) {
+            console.warn('[PluginSeed] media-core source not found in app bundle');
+            return;
+        }
+        fs.mkdirSync(destExtCore, { recursive: true });
+        for (const name of fs.readdirSync(srcCore)) {
+            const from = path.join(srcCore, name);
+            const to = path.join(destExtCore, name);
+            const st = fs.statSync(from);
+            if (st.isDirectory()) {
+                fs.cpSync(from, to, { recursive: true, force: true });
+            } else {
+                fs.copyFileSync(from, to);
+            }
+        }
+        const httpCandidates = [
+            path.join(__dirname, 'extensions', 'media-http.js'),
+            path.join(srcCore, 'media-http.js'),
+            resolveAppFsPath('extensions', 'media-http.js'),
+        ];
+        const httpSrc = httpCandidates.find((p) => p && fs.existsSync(p));
+        if (httpSrc) {
+            fs.copyFileSync(httpSrc, path.join(destExtCore, 'media-http.js'));
+        }
+        const resolveCandidates = [
+            path.join(__dirname, 'extensions', 'media-core-resolve.js'),
+            resolveAppFsPath('extensions', 'media-core-resolve.js'),
+        ];
+        const resolveSrc = resolveCandidates.find((p) => p && fs.existsSync(p));
+        if (resolveSrc) {
+            fs.mkdirSync(path.dirname(destResolve), { recursive: true });
+            fs.copyFileSync(resolveSrc, destResolve);
+        }
+        console.log('[PluginSeed] Synced media-core to', destExtCore);
+    } catch (e) {
+        console.warn('[PluginSeed] syncMediaCoreBundle failed:', e.message);
+    }
+}
+
 function forceSyncWorkspaceSkill(skillName) {
     try {
         const srcCandidates = [
@@ -2406,6 +2538,7 @@ function ensureMediaAgentDefaults(config) {
 function seedMediaRuntimeArtifacts(appVersion) {
     try {
         syncMediaCliBundle();
+        syncMediaCoreBundle();
         ensureMediaOutputDirs();
         ensureDefaultMediaGeneratorPrefs();
         migrateMediaGeneratorPrefs();
@@ -3622,6 +3755,9 @@ async function startGatewayProcess() {
                 if (!text.trim()) return;
 
                 // OpenClaw 偶发弹出「* Install xxx plugin?」；必须选「用本地内置」而不是 Skip，否则渠道会报 does not support login
+                text = filterGatewayLogText(text);
+                if (!text) return;
+
                 tryAutoAnswerInstallPluginPrompt(gatewayProcess, text, 'Gateway');
                 
                 // 实时保存流日志用于诊断

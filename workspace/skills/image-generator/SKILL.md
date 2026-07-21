@@ -10,7 +10,8 @@ Generate images using the agnes-ai image API.
 ## Preferred: `draw_picture` tool
 
 When available, call the `draw_picture` tool with at least `prompt`.  
-When done, include `MEDIA:<absolute filepath>` in the reply so the channel can deliver the file.
+When done, include a first-line `MEDIA:<absolute filepath>` in the reply so the channel can deliver the file.  
+Never output placeholders like `[[image]]` or `[[image_media]]`.
 
 ## Fallback CLI
 
@@ -40,7 +41,19 @@ node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a cu
 node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" image --prompt "a modern living room interior" --quality hd --count 2
 ```
 
-## Output
+## Configuration
+
+Provider settings live in `%USERPROFILE%/.openclaw/media-generator.json`:
+
+| Field | Description |
+|-------|-------------|
+| `provider` | Optional. `agnes-image`, `openai-image`, `generic-image`, `gateway-image`, `custom-image`, or a name from `media-providers.json` |
+| `apiBase` | API endpoint (auto-detected if omitted) |
+| `apiKey` | Bearer token (omit for built-in Agnes keys) |
+| `model` | Model id |
+| `providerOptions` | For `custom-image` or entries in `media-providers.json` |
+
+If `provider` is omitted, it is inferred from `apiBase` (OpenAI, Agnes, localhost gateway, or generic).
 
 Plugin saves to `$env:USERPROFILE/.openclaw/image-output/`.  
 CLI may save under `media-output/`. Always use the path returned by the tool/CLI in `MEDIA:`.

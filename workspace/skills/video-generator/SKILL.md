@@ -11,7 +11,8 @@ Generate short videos using the agnes-ai video API.
 
 When available, call the `draw_video` tool with at least `prompt`.  
 Generation often takes **2–10 minutes** — wait for completion; do not cancel early.  
-When done, include `MEDIA:<absolute filepath>` in the reply so the channel can deliver the file.
+When done, include a first-line `MEDIA:<absolute filepath>` in the reply so the channel can deliver the file.  
+Never output placeholders like `[[video]]` or `[[video_media]]`.
 
 ## Fallback CLI
 
@@ -48,6 +49,20 @@ node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a go
 # Generate a 10-second 1080p vertical video
 node "%USERPROFILE%/.openclaw/media-cli/agnes-media-cli.js" video --prompt "a beautiful sunset over the ocean" --duration 10 --resolution 1080p --aspect 9:16
 ```
+
+## Configuration
+
+Provider settings live in `%USERPROFILE%/.openclaw/video-generator.json`:
+
+| Field | Description |
+|-------|-------------|
+| `provider` | Optional. `agnes-video`, `openai-video`, `generic-video`, `gateway-video`, `custom-video`, or a name from `media-providers.json` |
+| `apiBase` | API endpoint (auto-detected if omitted) |
+| `apiKey` | Bearer token (omit for built-in Agnes keys) |
+| `model` | Model id |
+| `providerOptions` | Poll URL template, field mapping, etc. |
+
+Custom vendors: copy `config/media-providers.json.example` to `%USERPROFILE%/.openclaw/media-providers.json`, define your provider, then set `"provider": "your-provider-id"` in `video-generator.json`.
 
 ## Output
 
