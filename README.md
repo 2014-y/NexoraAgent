@@ -2,18 +2,95 @@
 
 <br />
 
-<!-- ⚡ 终极赛博高光 Header ⚡ -->
-<img src="https://capsule-render.vercel.app/api?type=rect&color=gradient&customColorList=0,2,10,24,30&height=180&section=header&text=NEXORA%20AGENT&fontSize=68&fontColor=ffffff&animation=twinkling&fontAlignY=38&desc=%E2%9A%A1%20SOVEREIGN%20AUTONOMOUS%20LOCAL%20AI%20INTELLIGENCE%20MATRIX%20%E2%9A%A1&descSize=15&descAlignY=68" width="100%" alt="Nexora Cyberpunk Header" />
+<!-- ⚡ 终极 100% 全动态赛博黑客网络矩阵 Canvas ⚡ -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="100%" height="320">
+  <defs>
+    <!-- 渐变色彩定义 -->
+    <linearGradient id="cyber-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7928CA" />
+      <stop offset="50%" stop-color="#FF0080" />
+      <stop offset="100%" stop-color="#00DFD8" />
+    </linearGradient>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#05070F" />
+      <stop offset="100%" stop-color="#090C19" />
+    </linearGradient>
+    <linearGradient id="line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7928CA" stop-opacity="0.1" />
+      <stop offset="50%" stop-color="#00DFD8" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#FF0080" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- 霓虹发光滤镜 -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- 背景暗黑面板 -->
+  <rect width="1200" height="320" rx="16" fill="url(#bg-grad)" stroke="url(#cyber-grad)" stroke-width="2" />
+  
+  <!-- 动态科技网格背景线条 -->
+  <g stroke="url(#line-grad)" stroke-width="1" opacity="0.3">
+    <line x1="0" y1="40" x2="1200" y2="40" />
+    <line x1="0" y1="80" x2="1200" y2="80" />
+    <line x1="0" y1="120" x2="1200" y2="120" />
+    <line x1="0" y1="160" x2="1200" y2="160" />
+    <line x1="0" y1="200" x2="1200" y2="200" />
+    <line x1="0" y1="240" x2="1200" y2="240" />
+    <line x1="0" y1="280" x2="1200" y2="280" />
+
+    <line x1="150" y1="0" x2="150" y2="320" />
+    <line x1="300" y1="0" x2="300" y2="320" />
+    <line x1="450" y1="0" x2="450" y2="320" />
+    <line x1="600" y1="0" x2="600" y2="320" />
+    <line x1="750" y1="0" x2="750" y2="320" />
+    <line x1="900" y1="0" x2="900" y2="320" />
+    <line x1="1050" y1="0" x2="1050" y2="320" />
+  </g>
+
+  <!-- 动态数据脉冲光斑网络 (数据包穿梭) -->
+  <circle cx="150" cy="80" r="6" fill="#00DFD8" filter="url(#glow)">
+    <animate attributeName="cx" values="150;600;1050;150" dur="6s" repeatCount="indefinite" />
+    <animate attributeName="cy" values="80;200;80;80" dur="6s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="1050" cy="240" r="5" fill="#FF0080" filter="url(#glow)">
+    <animate attributeName="cx" values="1050;300;150;1050" dur="8s" repeatCount="indefinite" />
+    <animate attributeName="cy" values="240;120;240;240" dur="8s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="600" cy="160" r="7" fill="#7928CA" filter="url(#glow)">
+    <animate attributeName="r" values="3;9;3" dur="2s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="2s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- 动态霓虹发光 Logo 标题 -->
+  <text x="600" y="130" text-anchor="middle" fill="url(#cyber-grad)" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="64" letter-spacing="6" filter="url(#glow)">
+    NEXORA AGENT
+  </text>
+  
+  <!-- 动态命令行打字字幕 -->
+  <text x="600" y="190" text-anchor="middle" fill="#00DFD8" font-family="'Fira Code', 'Courier New', monospace" font-weight="bold" font-size="20" letter-spacing="3">
+    ⚡ AUTONOMOUS LOCAL AI INTELLIGENCE MATRIX ⚡
+  </text>
+  
+  <!-- 状态感知节点 -->
+  <text x="600" y="240" text-anchor="middle" fill="#A0AEC0" font-family="system-ui, sans-serif" font-size="14" letter-spacing="2">
+    Zero-Trust • Auto-Healing • Multi-Channel • Physical Control • Offline Voice
+  </text>
+
+  <!-- 实时运行状态光点 -->
+  <circle cx="50" cy="30" r="5" fill="#00DFD8">
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="1s" repeatCount="indefinite" />
+  </circle>
+  <text x="65" y="34" fill="#00DFD8" font-family="monospace" font-size="12">KERNEL: ONLINE 🟢</text>
+</svg>
 
 <br />
-<br />
 
-<!-- 🚀 8K 赛博黑科技控制台实机全景展示图 🚀 -->
 <p align="center">
-  <img src="docs/images/nexora_agent_showcase.jpg" width="100%" style="border-radius: 12px;" alt="Nexora Agent High-Tech Interface Showcase" />
+  <img src="config/icon.ico" width="120" height="120" alt="Nexora Agent Logo" />
 </p>
-
-<br />
 
 ### 🌌 Autonomous, Self-Healing & Distributed Local AI Intelligence Matrix
 
