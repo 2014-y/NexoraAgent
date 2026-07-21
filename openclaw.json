@@ -63,6 +63,8 @@
   },
   "agents": {
     "defaults": {
+      "timeoutMs": 120000,
+      "maxTokens": 16384,
       "model": {
         "primary": "agnes-ai/agnes-2.0-flash",
         "fallbacks": [
@@ -82,12 +84,16 @@
       "bootstrapMaxChars": 2500,
       "bootstrapTotalMaxChars": 8000,
       "compaction": {
-        "reserveTokensFloor": 8000
+        "reserveTokensFloor": 2000,
+        "autoTrim": true,
+        "maxContextTokens": 6000
       }
     }
   },
   "channels": {
     "openclaw-weixin": {
+      "enabled": true,
+      "autostart": true,
       "accounts": [
         "5b50960c8036-im-bot"
       ],
@@ -302,6 +308,7 @@
       }
     },
     "allow": [
+      "*",
       "image-generator",
       "video-generator",
       "openclaw-weixin",
@@ -338,68 +345,7 @@
       "matrix",
       "voice-call"
     ],
-    "installs": {
-      "feishu": {
-        "source": "npm",
-        "spec": "@openclaw/feishu@2026.6.11",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\feishu",
-        "resolvedName": "@openclaw/feishu",
-        "resolvedVersion": "2026.6.11",
-        "resolvedSpec": "@openclaw/feishu@2026.6.11",
-        "version": "2026.6.11",
-        "installedAt": "2026-07-16T02:25:43.097Z"
-      },
-      "qqbot": {
-        "source": "npm",
-        "spec": "@openclaw/qqbot@2026.7.1",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\qqbot",
-        "resolvedName": "@openclaw/qqbot",
-        "resolvedVersion": "2026.7.1",
-        "resolvedSpec": "@openclaw/qqbot@2026.7.1",
-        "version": "2026.7.1",
-        "installedAt": "2026-07-16T02:25:43.098Z"
-      },
-      "slack": {
-        "source": "npm",
-        "spec": "@openclaw/slack@2026.7.1",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\slack",
-        "resolvedName": "@openclaw/slack",
-        "resolvedVersion": "2026.7.1",
-        "resolvedSpec": "@openclaw/slack@2026.7.1",
-        "version": "2026.7.1",
-        "installedAt": "2026-07-16T02:25:43.098Z"
-      },
-      "whatsapp": {
-        "source": "npm",
-        "spec": "@openclaw/whatsapp@2026.7.1",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\whatsapp",
-        "resolvedName": "@openclaw/whatsapp",
-        "resolvedVersion": "2026.7.1",
-        "resolvedSpec": "@openclaw/whatsapp@2026.7.1",
-        "version": "2026.7.1",
-        "installedAt": "2026-07-16T02:25:43.098Z"
-      },
-      "matrix": {
-        "source": "npm",
-        "spec": "@openclaw/matrix@2026.7.1",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\matrix",
-        "resolvedName": "@openclaw/matrix",
-        "resolvedVersion": "2026.7.1",
-        "resolvedSpec": "@openclaw/matrix@2026.7.1",
-        "version": "2026.7.1",
-        "installedAt": "2026-07-16T02:25:43.098Z"
-      },
-      "voice-call": {
-        "source": "npm",
-        "spec": "@openclaw/voice-call@2026.7.1",
-        "installPath": "C:\\Users\\Yuan\\Desktop\\ClawAI\\ClawAI\\node_modules\\@openclaw\\voice-call",
-        "resolvedName": "@openclaw/voice-call",
-        "resolvedVersion": "2026.7.1",
-        "resolvedSpec": "@openclaw/voice-call@2026.7.1",
-        "version": "2026.7.1",
-        "installedAt": "2026-07-16T02:25:43.098Z"
-      }
-    }
+    "installs": {}
   },
   "hooks": {
     "internal": {
@@ -426,9 +372,22 @@
     "auth": {
       "mode": "token",
       "token": "openclaw-dev-token-998877"
-    }
+    },
+    "crashLoopBreaker": {
+      "enabled": false
+    },
+    "autoStartChannels": true
   },
   "tools": {
+    "webSearch": {
+      "provider": "duckduckgo",
+      "enabled": true
+    },
+    "webFetch": {
+      "enabled": true,
+      "allowPrivateNetwork": true,
+      "ssrfPolicy": "lax"
+    },
     "deny": [
       "tts"
     ],

@@ -2029,6 +2029,19 @@ async function init() {
         });
     }
 
+    // 监听主进程发起的启动清空日志信号
+    if (window.api && window.api.onGatewayClearLogs) {
+        window.api.onGatewayClearLogs(() => {
+            const streamList = document.getElementById('dash-activity-stream-list');
+            if (streamList) {
+                streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
+            }
+            const logTerminal = document.getElementById('builtin-terminal-logs');
+            if (logTerminal) logTerminal.innerHTML = '';
+            gatewayLogReadyTail = '';
+        });
+    }
+
     // Nexora Agent开关按钮监听
     gatewayToggleBtn.addEventListener('click', () => {
         if (window.isTogglingGateway) return;
@@ -2039,6 +2052,16 @@ async function init() {
             gatewayToggleBtn.style.pointerEvents = 'none';
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
+
+            // 每次启动自动先清空实时系统活动监测流与终端日志
+            const streamList = document.getElementById('dash-activity-stream-list');
+            if (streamList) {
+                streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
+            }
+            const logTerminal = document.getElementById('builtin-terminal-logs');
+            if (logTerminal) logTerminal.innerHTML = '';
+            gatewayLogReadyTail = '';
+
             window.api.gatewayAction('start');
             
             window.toggleLockTimeout = setTimeout(() => {
@@ -2328,7 +2351,6 @@ function processActivityLogQueue() {
                 item.style.clipPath = 'none';
                 item.classList.remove('typing');
 
-                // 🌟 严格规范：前一条日志 100% 打字/揭开完成后，暂停一小会，再启动下一条！
                 const nextPause = backlog > 5 ? 90 : 160;
                 setTimeout(() => {
                     processActivityLogQueue();
@@ -11043,18 +11065,36 @@ function accelerationCountryFilterLabel(filter) {
     return map[key] || key;
 }
 
+function getNodeCountryCode(n) {
+    if (!n) return '';
+    const flag = String(n.flag || '').toLowerCase();
+    if (flag && ACC_KNOWN_COUNTRY_FLAGS.includes(flag)) return flag;
+    const name = String(n.name || '').toLowerCase();
+    if (name.includes('hk') || name.includes('香港') || name.includes('hongkong')) return 'hk';
+    if (name.includes('jp') || name.includes('日本') || name.includes('japan')) return 'jp';
+    if (name.includes('sg') || name.includes('新加坡') || name.includes('singapore')) return 'sg';
+    if (name.includes('us') || name.includes('美国') || name.includes('america') || name.includes('united states')) return 'us';
+    if (name.includes('tw') || name.includes('台湾') || name.includes('taiwan')) return 'tw';
+    if (name.includes('kr') || name.includes('韩国') || name.includes('korea')) return 'kr';
+    if (name.includes('gb') || name.includes('uk') || name.includes('英国') || name.includes('london')) return 'gb';
+    return flag || 'other';
+}
+
 function filterAccelerationNodesByCountry(nodes, countryFilter) {
     const filter = countryFilter || 'all';
     const list = (nodes || []).filter((n) => n && !isAccelerationInfoNode(n));
     if (!filter || filter === 'all') return list;
     if (filter === 'other') {
-        return list.filter((n) => !ACC_KNOWN_COUNTRY_FLAGS.includes(String(n.flag || '').toLowerCase()));
+        return list.filter((n) => {
+            const code = getNodeCountryCode(n);
+            return !['hk', 'tw', 'jp', 'sg', 'us'].includes(code);
+        });
     }
     const want = String(filter).toLowerCase();
-    return list.filter((n) => String(n.flag || '').toLowerCase() === want);
+    return list.filter((n) => getNodeCountryCode(n) === want);
 }
 
-/** 在当前地区标签范围内选延迟最低的可用节点 */
+/** 在当前选中的地区分类标签范围内，挑选延迟最低的可用节点 */
 function pickLowestLatencyNodeInCountryFilter(nodes, countryFilter) {
     const list = filterAccelerationNodesByCountry(nodes, countryFilter)
         .filter((n) => typeof n.latency === 'number' && n.latency > 0);

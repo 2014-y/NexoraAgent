@@ -1562,16 +1562,17 @@ body.theme-custom.has-custom-bg .title-bar {
 }
 
 .acc-proxy-interval .acc-select {
-  min-width: auto;
-  width: 96px;
+  min-width: 118px;
+  width: auto;
   height: 32px;
-  padding: 0 8px;
-  font-size: 11px;
+  padding: 0 24px 0 10px;
+  font-size: 12px;
   border-radius: 8px;
 }
 
 .acc-proxy-interval #acc-auto-select-threshold {
-  width: 110px;
+  min-width: 118px;
+  width: auto;
 }
 
 @media (max-width: 900px) {
