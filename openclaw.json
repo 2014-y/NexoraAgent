@@ -379,15 +379,6 @@
     "autoStartChannels": true
   },
   "tools": {
-    "webSearch": {
-      "provider": "duckduckgo",
-      "enabled": true
-    },
-    "webFetch": {
-      "enabled": true,
-      "allowPrivateNetwork": true,
-      "ssrfPolicy": "lax"
-    },
     "deny": [
       "tts"
     ],
@@ -409,6 +400,17 @@
           "mode": "all"
         },
         "enabled": true
+      }
+    },
+    "web": {
+      "search": {
+        "provider": "duckduckgo",
+        "enabled": true
+      },
+      "fetch": {
+        "enabled": true,
+        "allowPrivateNetwork": true,
+        "ssrfPolicy": "lax"
       }
     }
   }

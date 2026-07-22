@@ -2394,12 +2394,20 @@ function isMediaApiNoiseLog(text) {
 }
 
 // 🔍 小白友好型日志汉化过滤与清洗转化器
+function isTransientWeixinLongPollError(cleanLine) {
+    const lower = String(cleanLine || '').toLowerCase();
+    if (!lower.includes('weixin getupdates')) return false;
+    if (!/(\(1\/3\)|\(2\/3\))/.test(lower)) return false;
+    return lower.includes('tls handshake') || lower.includes('und_err_socket') || lower.includes('fetch failed');
+}
+
 function formatLogForUser(text) {
     if (!text) return null;
     // 移除颜色控制字符并修剪两端
     const cleanLine = text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
     if (isMediaApiNoiseLog(cleanLine)) return null;
     const lowerLine = cleanLine.toLowerCase();
+    if (isTransientWeixinLongPollError(cleanLine)) return null;
 
     // 1. 过滤完全无需展示给小白的日志 (底层噪音调试日志)
     // 模型空闲超时 / Abort / rotate_profile 属于网关自愈过程，刷屏会导致活动流卡死

@@ -503,6 +503,51 @@ function resolveConfiguredGatewayPort() {
 }
 
 /** 移除 OpenClaw 根 Schema 不接受的扩展字段，防止网关启动/热重载失败 */
+function normalizeWebToolsConfig(config) {
+    let changed = false;
+    if (!config || typeof config !== 'object') return false;
+    if (!config.tools || typeof config.tools !== 'object') {
+        config.tools = {};
+        changed = true;
+    }
+    if (!config.tools.web || typeof config.tools.web !== 'object') {
+        config.tools.web = {};
+        changed = true;
+    }
+    if (!config.tools.web.search || typeof config.tools.web.search !== 'object') {
+        config.tools.web.search = {};
+        changed = true;
+    }
+    if (!config.tools.web.fetch || typeof config.tools.web.fetch !== 'object') {
+        config.tools.web.fetch = {};
+        changed = true;
+    }
+
+    if (config.tools.webSearch && typeof config.tools.webSearch === 'object') {
+        Object.assign(config.tools.web.search, config.tools.webSearch);
+        delete config.tools.webSearch;
+        changed = true;
+    }
+    if (config.tools.webFetch && typeof config.tools.webFetch === 'object') {
+        Object.assign(config.tools.web.fetch, config.tools.webFetch);
+        delete config.tools.webFetch;
+        changed = true;
+    }
+    if (config.tools.web.search.enabled !== true) {
+        config.tools.web.search.enabled = true;
+        changed = true;
+    }
+    if (!config.tools.web.search.provider) {
+        config.tools.web.search.provider = 'duckduckgo';
+        changed = true;
+    }
+    if (config.tools.web.fetch.enabled !== true) {
+        config.tools.web.fetch.enabled = true;
+        changed = true;
+    }
+    return changed;
+}
+
 function stripNonSchemaOpenClawConfig(config) {
     let changed = false;
     if (!config || typeof config !== 'object') return false;
@@ -518,6 +563,7 @@ function stripNonSchemaOpenClawConfig(config) {
             changed = true;
         }
     }
+    if (normalizeWebToolsConfig(config)) changed = true;
     return changed;
 }
 
@@ -4306,6 +4352,13 @@ function ensureOpenClawConfigInitialized() {
             if (pruned.changed) {
                 needsSave = true;
                 console.log('[PluginSeed] Pruned stale plugins.entries / duplicate weixin install');
+            }
+        } catch (e) {}
+
+        try {
+            if (normalizeWebToolsConfig(config)) {
+                needsSave = true;
+                console.log('[WebSearch] Normalized tools.web.search/fetch config');
             }
         } catch (e) {}
 

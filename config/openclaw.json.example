@@ -427,6 +427,15 @@
         },
         "enabled": true
       }
+    },
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo"
+      },
+      "fetch": {
+        "enabled": true
+      }
     }
   }
 }

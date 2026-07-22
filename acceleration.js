@@ -193,6 +193,111 @@ function stripYamlTopLevelBlocks(body, dropKeys, blockDropKeys) {
     return lines.join('\n');
 }
 
+function sanitizeTopLevelYamlScalars(body) {
+    const lines = String(body || '').split(/\r?\n/);
+    const out = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || /^#/.test(trimmed) || /^\s/.test(line)) {
+            out.push(line);
+            continue;
+        }
+        if (!/^[-A-Za-z0-9_"'][^:]*\s*:/.test(line)) {
+            console.warn('[Acceleration] Dropped invalid top-level YAML line from subscription: ' + trimmed.slice(0, 120));
+            continue;
+        }
+        out.push(line);
+    }
+    return out.join('\n');
+}
+
+function yamlDoubleQuote(value) {
+    return '"' + String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function yamlListBlock(items, indent) {
+    const pad = ' '.repeat(indent);
+    const list = (items || []).filter(Boolean);
+    if (!list.length) return pad + '[]';
+    return list.map((item) => pad + '- ' + yamlDoubleQuote(item)).join('\n');
+}
+
+function sanitizeInlineProxyNameLine(line) {
+    if (!/^\s*-\s*\{/.test(line)) return line;
+    if (/name\s*:\s*['"]/.test(line)) return line;
+    const nextKey = '(?:type|server|port|uuid|cipher|password|sni|udp|network|alterId|flow|tls|skip-cert-verify)';
+    const re = new RegExp('name\\s*:\\s*([^,{}]+?)(\\s*,\\s*' + nextKey + '\\s*:|\\s+' + nextKey + '\\s*:)', 'i');
+    return line.replace(re, (match, rawName, sep) => {
+        const normalizedSep = sep.trim().replace(/^,\s*/, '');
+        return 'name: ' + yamlDoubleQuote(stripYamlScalar(rawName)) + ', ' + normalizedSep;
+    });
+}
+
+function sanitizeProxyYamlBlock(proxyBlock) {
+    return String(proxyBlock || '').split(/\r?\n/).map(sanitizeInlineProxyNameLine).join('\n');
+}
+
+function extractTopLevelYamlBlock(yamlText, key) {
+    const lines = String(yamlText || '').split(/\r?\n/);
+    const startRe = new RegExp('^' + String(key || '').replace(/[^A-Za-z0-9_-]/g, '') + '\\s*:');
+    const out = [];
+    let inBlock = false;
+    for (const line of lines) {
+        if (!inBlock) {
+            if (startRe.test(line.trim())) {
+                inBlock = true;
+                out.push(line);
+            }
+            continue;
+        }
+        if (/^\S/.test(line) && !startRe.test(line.trim())) break;
+        out.push(line);
+    }
+    return out.join('\n');
+}
+
+function buildGeneratedProxyGroups(profileContent) {
+    const nodes = parseProxiesFromYaml(profileContent)
+        .map((p) => p && p.name ? String(p.name).trim() : '')
+        .filter((name) => name && !isInfoProxyName(name));
+    const uniqueNodes = Array.from(new Set(nodes));
+    const selectEntries = ['DIRECT', ...uniqueNodes];
+    return [
+        'proxy-groups:',
+        '  - name: "GLOBAL"',
+        '    type: select',
+        '    proxies:',
+        yamlListBlock(selectEntries, 6),
+        'rules:',
+        '  - MATCH,GLOBAL',
+        ''
+    ].join('\n');
+}
+
+function buildMihomoProfileBody(profileContent) {
+    let body = String(profileContent || '').replace(/^\uFEFF/, '');
+    const proxyBlock = extractTopLevelYamlBlock(body, 'proxies');
+    if (proxyBlock && proxyBlock.includes('-')) {
+        return sanitizeProxyYamlBlock(sanitizeTopLevelYamlScalars(proxyBlock)) + '\n' + buildGeneratedProxyGroups(body);
+    }
+    return sanitizeTopLevelYamlScalars(body);
+}
+
+
+function formatMihomoBootError(logText, runtimeYamlPath) {
+    const hint = String(logText || '').trim().replace(/\s+/g, ' ').slice(0, 180);
+    const lineMatch = hint.match(/yaml:\s*line\s*(\d+)/i);
+    if (!lineMatch) return hint;
+    const lineNo = Number(lineMatch[1]);
+    if (!lineNo || !runtimeYamlPath) return hint;
+    try {
+        const lines = fs.readFileSync(runtimeYamlPath, 'utf8').split(/\r?\n/);
+        const badLine = (lines[lineNo - 1] || '').trim();
+        if (badLine) return hint + '; bad line ' + lineNo + ': ' + badLine.slice(0, 120);
+    } catch (e) {}
+    return hint;
+}
+
 function getStatePath() {
     return path.join(getRootDir(), 'state.json');
 }
@@ -1052,6 +1157,7 @@ function buildTempRuntimeYaml(profileContent, tempControllerPort, mixedPort = 0)
     ];
     const blockDropKeys = [/^tun\s*:/i, /^dns\s*:/i, /^geox-url\s*:/i];
     body = stripYamlTopLevelBlocks(body, dropKeys, blockDropKeys);
+    body = buildMihomoProfileBody(body);
 
     const port = Number(mixedPort) > 0 ? Number(mixedPort) : 0;
     const header = [
@@ -1144,6 +1250,7 @@ function buildRuntimeYaml(profileContent) {
     // 需要整块剔除的顶层 YAML 节点（包含其所有缩进子行）
     const blockDropKeys = [/^tun\s*:/i, /^geox-url\s*:/i, /^dns\s*:/i];
     body = stripYamlTopLevelBlocks(body, dropKeys, blockDropKeys);
+    body = buildMihomoProfileBody(body);
     body = forceSoftSwitchInProxyGroups(body);
 
     const mode = ['rule', 'global', 'direct'].includes(state.mode) ? state.mode : 'rule';
@@ -2098,9 +2205,7 @@ async function startTempMihomoCore() {
 
         const ready = await waitControllerReady(15000);
         if (!ready) {
-            const hint = bootLog.trim()
-                ? bootLog.trim().replace(/\s+/g, ' ').slice(0, 180)
-                : '';
+            const hint = formatMihomoBootError(bootLog, getRuntimeConfigPath());
             await stopTempMihomoCore();
             return {
                 ok: false,
