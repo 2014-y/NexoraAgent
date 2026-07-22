@@ -99,7 +99,6 @@
     "win": {
       "icon": "config/icon.ico",
       "publisherName": "Nexora Agent",
-      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
