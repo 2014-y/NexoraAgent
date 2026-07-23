@@ -267,7 +267,8 @@ function ensureLatencySafeConfig(config, opts = {}) {
     changes.push('tools.byProvider.ollama.profile: -> minimal');
   }
   if (!Array.isArray(cfg.tools.deny)) cfg.tools.deny = [];
-  for (const toolName of ['tts', 'browser']) {
+  // 禁用 OpenClaw 核心生图/生视频（常走 Google 且无有效 Key）；统一走 draw_picture / draw_video
+  for (const toolName of ['tts', 'browser', 'image_generate', 'video_generate']) {
     if (!cfg.tools.deny.includes(toolName)) {
       cfg.tools.deny.push(toolName);
       changes.push(`tools.deny += ${toolName}`);
@@ -301,6 +302,8 @@ function ensureLatencySafeConfig(config, opts = {}) {
       'gateway',
       'tts',
       'browser',
+      'image_generate',
+      'video_generate',
       'pdf',
       'feishu',
       'qqbot',

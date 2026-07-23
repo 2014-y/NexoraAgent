@@ -380,7 +380,10 @@
   },
   "tools": {
     "deny": [
-      "tts"
+      "tts",
+      "browser",
+      "image_generate",
+      "video_generate"
     ],
     "byProvider": {
       "ollama": {

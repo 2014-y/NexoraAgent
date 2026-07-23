@@ -1162,6 +1162,11 @@ body.theme-custom.has-custom-bg .title-bar {
   min-width: 0;
 }
 
+/* OpenClaw 内置面板铺满视口，避免外层 padding 挤压 webview */
+.content-viewport:has(#openclaw-panel-view.active) {
+  padding: 0;
+}
+
 .tab-pane {
   display: none;
   height: 100%;

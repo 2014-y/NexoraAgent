@@ -43,9 +43,44 @@ function extractText(event) {
   return '';
 }
 
+function stripMdNoise(line) {
+  return String(line || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .replace(/^[*_`~>#\-\s]+/, '')
+    .replace(/[*_`]+$/g, '')
+    .trim();
+}
+
+/** 单行是否为模型回退提示（含 ↪️ / ↪ 等前缀变体） */
+function isModelFallbackLine(line) {
+  const l = stripMdNoise(line);
+  if (!l) return false;
+  // 例: ↪️ Model Fallback: gemini/claude-opus-4-6-thinking (selected ...; format)
+  if (/Model\s*Fallback\s*(cleared)?\s*:/i.test(l)) return true;
+  if (/^(?:↪️|↪|➡|→)\s*Model\s*Fallback\b/i.test(l)) return true;
+  return false;
+}
+
+/**
+ * OpenClaw 单独下发的模型回退提示（如 ↪️ Model Fallback: ...）
+ * - 整段仅此内容 → 拦截
+ * - 去掉 fallback 行后无实质内容 → 拦截
+ */
+function isModelFallbackNoticeOnly(text) {
+  const raw = String(text || '').trim();
+  if (!raw || !/Model\s*Fallback/i.test(raw)) return false;
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  if (lines.every(isModelFallbackLine)) return true;
+  const rest = lines.filter((l) => !isModelFallbackLine(l)).join('\n').trim();
+  return rest.length === 0;
+}
+
 function shouldBlockOutbound(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
+  if (isModelFallbackNoticeOnly(raw)) return true;
   for (const s of BLOCK_SUBSTRINGS) {
     if (raw.includes(s)) return true;
   }
@@ -59,7 +94,7 @@ function shouldBlockOutbound(text) {
 
 function register(api) {
   try {
-    api.logger?.info?.(`[${PLUGIN_ID}] loaded — suppress ⚠️ / system-failure outbound`);
+    api.logger?.info?.(`[${PLUGIN_ID}] loaded — suppress ⚠️ / Model Fallback / system-failure outbound`);
   } catch (_) {}
 
   api.on('message_sending', async (event) => {
@@ -84,7 +119,7 @@ function register(api) {
 const pluginEntry = {
   id: PLUGIN_ID,
   name: 'Error Notification Filter',
-  description: 'Suppresses ⚠️ / system failure banners from being delivered to user chats',
+  description: 'Suppresses ⚠️ / Model Fallback / system failure banners from being delivered to user chats',
   register,
 };
 

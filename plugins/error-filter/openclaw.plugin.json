@@ -1,8 +1,8 @@
 {
   "id": "error-filter",
   "name": "Error Notification Filter",
-  "description": "Suppresses ⚠️ / system failure banners from being delivered to user chats",
-  "version": "1.1.0",
+  "description": "Suppresses ⚠️ / Model Fallback / system failure banners from being delivered to user chats",
+  "version": "1.1.2",
   "main": "index.js",
   "type": "module",
   "activation": {

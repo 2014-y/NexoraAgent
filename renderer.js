@@ -2446,6 +2446,9 @@ function formatLogForUser(text) {
         (cleanLine.includes('provider-transport-fetch') && (lowerLine.includes('error') || lowerLine.includes('abort'))) ||
         cleanLine.includes('[model-fetch] error') ||
         cleanLine.includes('failover decision') ||
+        cleanLine.includes('model fallback decision') ||
+        /Model\s*Fallback\s*(cleared)?\s*:/i.test(cleanLine) ||
+        /(?:↪️|↪)\s*Model\s*Fallback/i.test(cleanLine) ||
         cleanLine.includes('rotate_profile') ||
         cleanLine.includes('LLM idle timeout') ||
         cleanLine.includes('This operation was aborted') ||
@@ -6468,7 +6471,13 @@ function setupTabSwitching() {
 
             const nextTab = tab.getAttribute('data-tab');
             if (nextTab === currentTab && tab.classList.contains('active')) {
-                return; // 同页不重复切
+                // 已在 OpenClaw：再点一次强制刷新控制台（空白页可自愈）
+                if (nextTab === 'openclaw-panel-view' && gatewayFullyReady) {
+                    Promise.resolve()
+                        .then(() => loadOpenclawControlUi(true, { clearSession: false }))
+                        .catch((err) => console.error(err));
+                }
+                return;
             }
 
             // 轻量切换：只动当前/目标，避免全量 query + 动画
@@ -6580,7 +6589,10 @@ function setupTabSwitching() {
                 }
 
                 if (currentTab === 'openclaw-panel-view') {
-                    Promise.resolve().then(() => loadOpenclawControlUi(false)).catch((err) => console.error(err));
+                    // 每次进入都自动加载；不清 session，避免反复清 Cookie 触发限流
+                    Promise.resolve()
+                        .then(() => loadOpenclawControlUi(true, { clearSession: false }))
+                        .catch((err) => console.error(err));
                 }
 
                 if (currentTab === 'syslogs-view') {
@@ -10176,17 +10188,17 @@ const OPENCLAW_TRANSPARENT_PANEL_CSS = [
     ':root, html, body, [data-theme], [class*="theme"] { --background: transparent !important; --foreground: #f8fafc !important; --card: transparent !important; --card-foreground: #f8fafc !important; --muted: transparent !important; --muted-foreground: #cbd5e1 !important; --border: rgba(255, 255, 255, 0.15) !important; --input: rgba(255, 255, 255, 0.1) !important; --sidebar-background: rgba(18, 24, 38, 0.85) !important; --sidebar-foreground: #f8fafc !important; --sidebar-primary: #38bdf8 !important; --sidebar-primary-foreground: #f8fafc !important; --sidebar-accent-foreground: #f8fafc !important; --sidebar-muted: #cbd5e1 !important; --sidebar-border: rgba(255, 255, 255, 0.1) !important; --tw-text-opacity: 1 !important; --color-bg-layout: transparent !important; --color-bg-container: transparent !important; --color-fill: transparent !important; --color-fill-secondary: transparent !important; --color-fill-tertiary: transparent !important; --color-fill-quaternary: transparent !important; --color-bg-text-hover: transparent !important; --color-bg-text-active: transparent !important; --color-text: #f8fafc !important; --color-text-secondary: #cbd5e1 !important; --color-text-tertiary: #94a3b8 !important; }',
     '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
     'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="backdrop"], [class*="overlay"], .ant-card-head, .ant-card-head-wrapper, .ant-list-header, .ant-table-thead > tr > th, [class*="header"], [class*="head"], [class*="toolbar"], [class*="title-bar"] { background: transparent !important; background-color: transparent !important; box-shadow: none !important; }',
-    'aside, nav, [class*="bg-sidebar"] { background: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; backdrop-filter: blur(16px) !important; -webkit-backdrop-filter: blur(16px) !important; border-right: 1px solid rgba(255,255,255,0.08) !important; position: relative !important; z-index: 100 !important; }',
+    'aside, nav, [class*="bg-sidebar"] { background: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; backdrop-filter: blur(16px) !important; -webkit-backdrop-filter: blur(16px) !important; border-right: 1px solid rgba(255,255,255,0.08) !important; }',
     '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
     'body { color-scheme: dark !important; }',
     'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: #f8fafc !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
     '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: #cbd5e1 !important; opacity: 1 !important; }',
-    '[class*="opacity-"], [style*="opacity"] { opacity: 1 !important; }',
-    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: #cbd5e1 !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
+    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: #cbd5e1 !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
     '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; color: #ffffff !important; opacity: 1 !important; box-shadow: none !important; }',
     '[class*="bg-white"], [style*="background: white"], [style*="background-color: white"], [style*="background: #fff"], [style*="background-color: #fff"], [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"] { background: transparent !important; background-color: transparent !important; }',
     '.ant-segmented-thumb, [class*="indicator"], [class*="slider"] { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; box-shadow: none !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 6px !important; }',
-    'button, [role="button"], [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
+    'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
+    '.session-action { border: none !important; box-shadow: none !important; }',
     '.ant-segmented { background: transparent !important; background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }',
     'button:not([data-state="active"]):not([data-state="checked"]):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
     'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: #38bdf8 !important; }',
@@ -10200,7 +10212,12 @@ const OPENCLAW_TRANSPARENT_PANEL_CSS = [
     '::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; -webkit-appearance: none !important; }',
     '::-webkit-scrollbar-corner { background: transparent !important; }',
     '.simplebar-scrollbar::before, .ms-thumb, .os-scrollbar-handle { background-color: rgba(148, 163, 184, 0.4) !important; border-radius: 9999px !important; }',
-    '* { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
+    '.sidebar-recent-sessions { margin-right: 0 !important; }',
+    '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
+    '.sidebar-recent-session__aside, .session-row-aside { padding-right: 8px !important; flex-shrink: 0 !important; }',
+    '.session-row-actions, .session-action { flex-shrink: 0 !important; }',
+    '.sidebar-nav, .sidebar-sessions { scrollbar-width: thin !important; }',
+    '.sidebar-nav::-webkit-scrollbar, .sidebar-sessions::-webkit-scrollbar { width: 6px !important; }',
     'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"], body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: #121826 !important; background-color: #121826 !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
 ].join('\n');
 
@@ -10278,10 +10295,7 @@ function syncOpenclawThemeToWebview() {
                     '  color: ${textSecondary} !important;',
                     '  opacity: 1 !important;',
                     '}',
-                    '[class*="opacity-"], [style*="opacity"] {',
-                    '  opacity: 1 !important;',
-                    '}',
-                    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) {',
+                    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) {',
                     '  color: ${textSecondary} !important;',
                     '  opacity: 0.95 !important;',
                     '  background: transparent !important;',
@@ -10294,7 +10308,7 @@ function syncOpenclawThemeToWebview() {
                     '  opacity: 1 !important;',
                     '  box-shadow: none !important;',
                     '}',
-                    '.ant-segmented-thumb, [class*="thumb"], [class*="indicator"], [class*="slider"] {',
+                    '.ant-segmented-thumb, .ant-segmented [class*="indicator"], .ant-segmented [class*="slider"] {',
                     '  background: rgba(255, 255, 255, 0.1) !important;',
                     '  background-color: rgba(255, 255, 255, 0.1) !important;',
                     '  box-shadow: none !important;',
@@ -10305,9 +10319,14 @@ function syncOpenclawThemeToWebview() {
                     '  background-color: rgba(0, 0, 0, 0.2) !important;',
                     '  border: 1px solid rgba(255, 255, 255, 0.1) !important;',
                     '}',
-                    'button, [role="button"], [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item {',
+                    'button:not(.session-action):not(.sidebar-brand__new-thread):not(.nav-collapse-toggle):not(.topbar-icon-btn), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item {',
                     '  border: 1px solid ${borderColor} !important;',
                     '  box-shadow: none !important;',
+                    '}',
+                    '.session-action, .session-action:hover, .session-action:focus, .session-action:disabled {',
+                    '  border: none !important;',
+                    '  box-shadow: none !important;',
+                    '  background: transparent !important;',
                     '}',
                     'textarea, input, [contenteditable="true"] {',
                     '  background-color: rgba(0, 0, 0, 0.2) !important;',
@@ -10322,6 +10341,21 @@ function syncOpenclawThemeToWebview() {
                     'svg {',
                     '  color: ${accentColor} !important;',
                     '  opacity: 1 !important;',
+                    '}',
+                    '.session-action svg, .session-row-badge svg, .session-row-trail svg {',
+                    '  color: currentColor !important;',
+                    '}',
+                    '.sidebar-recent-sessions { margin-right: 0 !important; }',
+                    '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
+                    '.sidebar-recent-session__aside, .session-row-aside {',
+                    '  padding-right: 8px !important;',
+                    '  margin-right: 0 !important;',
+                    '  flex-shrink: 0 !important;',
+                    '}',
+                    '.session-row-actions, .session-action {',
+                    '  flex-shrink: 0 !important;',
+                    '  position: relative !important;',
+                    '  z-index: 3 !important;',
                     '}'
                 ].join('\\n');
                 if (style.textContent !== css) style.textContent = css;
@@ -10329,11 +10363,11 @@ function syncOpenclawThemeToWebview() {
                 // 动态探测侧边栏并赋予不透明背景类
                 if (!window.__nexora_sidebar_observer) {
                     window.__nexora_sidebar_observer = setInterval(function() {
-                        var elements = document.querySelectorAll('div, aside, section');
+                        var elements = document.querySelectorAll('.shell-nav, .sidebar, aside, nav, div, section');
                         for (var i = 0; i < elements.length; i++) {
                             var el = elements[i];
                             var rect = el.getBoundingClientRect();
-                            if (rect.left === 0 && rect.top <= 0 && rect.height >= window.innerHeight * 0.9 && rect.width >= 180 && rect.width <= 350) {
+                            if (rect.left === 0 && rect.top <= 0 && rect.height >= window.innerHeight * 0.9 && rect.width >= 180 && rect.width <= 280) {
                                 if (el.id === 'root' || el.id === '__next' || el.tagName === 'BODY' || el.tagName === 'HTML') continue;
                                 if (!el.classList.contains('nexora-solid-sidebar')) {
                                     el.classList.add('nexora-solid-sidebar');
@@ -10371,10 +10405,11 @@ function syncOpenclawThemeToWebview() {
     } catch (e) {}
 }
 
-async function loadOpenclawControlUi(forceReload = false) {
+async function loadOpenclawControlUi(forceReload = false, opts = {}) {
     const webview = document.getElementById('openclaw-iframe');
     if (!webview || __openclawPanelLoading) return;
     __openclawPanelLoading = true;
+    const options = (opts && typeof opts === 'object') ? opts : {};
     try {
         const url = await window.api.getDashboardUrl();
         const currentSrc = (webview.getAttribute('src') || '').trim();
@@ -10383,14 +10418,34 @@ async function loadOpenclawControlUi(forceReload = false) {
             syncOpenclawThemeToWebview();
             return;
         }
-        showToast(forceReload ? '正在重新免密登录控制台…' : '正在连接Nexora Agent控制台面板…');
-        // 首次进入或强制重载：清掉 guest 里过期 token，避免「失败尝试过多」
-        if ((forceReload || !currentSrc) && window.api.clearOpenclawPanelSession) {
+        const isFirstLoad = !currentSrc;
+        showToast(
+            forceReload && !isFirstLoad
+                ? '正在加载 OpenClaw 控制台…'
+                : '正在连接Nexora Agent控制台面板…'
+        );
+        // 仅首次进入时清 session；日常进入只重载 URL，避免反复清 Cookie 触发限流
+        const shouldClearSession = options.clearSession === true
+            || (options.clearSession !== false && isFirstLoad);
+        if (shouldClearSession && window.api.clearOpenclawPanelSession) {
             try { await window.api.clearOpenclawPanelSession(); } catch (e) {}
         }
         __openclawPanelLastUrl = url;
-        webview.src = url;
-        
+        // 同 URL 也要重新赋值，否则空白 webview 不会真正刷新
+        if (currentSrc === url) {
+            try {
+                if (typeof webview.reload === 'function') webview.reload();
+                else {
+                    webview.src = 'about:blank';
+                    webview.src = url;
+                }
+            } catch (_) {
+                webview.src = url;
+            }
+        } else {
+            webview.src = url;
+        }
+
         injectWebviewUpdateInterceptor(webview);
         syncOpenclawThemeToWebview();
     } catch (err) {
@@ -10404,23 +10459,39 @@ async function loadOpenclawControlUi(forceReload = false) {
     }
 }
 
-function injectWebviewUpdateInterceptor(webview) {
+function injectOpenclawPanelCss(webview) {
     if (!webview) return;
-
-    const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
+    // insertCSS 最稳：保证透出 Nexora 星空底；style 标签用于可覆盖更新
     try {
         if (typeof webview.insertCSS === 'function') {
             webview.insertCSS(OPENCLAW_TRANSPARENT_PANEL_CSS).catch(() => {});
         }
     } catch (e) {}
+    if (typeof webview.executeJavaScript !== 'function') return;
+    const css = JSON.stringify(OPENCLAW_TRANSPARENT_PANEL_CSS);
+    webview.executeJavaScript(`
+        (function() {
+            var css = ${css};
+            var style = document.getElementById('nexora-openclaw-panel-css');
+            if (!style) {
+                style = document.createElement('style');
+                style.id = 'nexora-openclaw-panel-css';
+                (document.head || document.documentElement).appendChild(style);
+            }
+            if (style.textContent !== css) style.textContent = css;
+        })();
+    `).catch(() => {});
+}
+
+function injectWebviewUpdateInterceptor(webview) {
+    if (!webview) return;
+
+    const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
+    injectOpenclawPanelCss(webview);
 
     // 每次 webview 加载完毕后注入拦截脚本
     const onDomReady = () => {
-        try {
-            if (typeof webview.insertCSS === 'function') {
-                webview.insertCSS(OPENCLAW_TRANSPARENT_PANEL_CSS).catch(() => {});
-            }
-        } catch (e) {}
+        injectOpenclawPanelCss(webview);
         syncOpenclawThemeToWebview();
         webview.executeJavaScript(`
             (function() {

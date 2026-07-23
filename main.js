@@ -2815,8 +2815,9 @@ function seedBundledPlugins(options = {}) {
 
         // 角色管理插件依赖根目录 role-config.js：无论 bundle stamp 是否变化都强制同步
         syncRoleManagerSharedModules();
-        // voice-bridge 钩子实现变更必须立即覆盖用户目录，避免旧 onAfterResponse 卡死朗读
+        // voice-bridge / error-filter 钩子变更必须立即覆盖用户目录
         syncBundledPluginFiles('voice-bridge');
+        syncBundledPluginFiles('error-filter');
         for (const name of BUNDLED_EXTENSION_PLUGINS) {
             syncBundledPluginFiles(name);
         }
