@@ -305,6 +305,49 @@ function bypassOpenClawPluginTrustCheck(runtimeRoot) {
 }
 
 /**
+ * 永久关掉 OpenClaw crash-loop breaker：短时间多次异常退出时仍自动拉起微信/QQ/飞书。
+ * 改写 dist/run-*.js 里 uncleanBoots>=3 的判定（ESM，不依赖环境变量）。
+ */
+function disableOpenClawCrashLoopBreaker(runtimeRoot) {
+  const dist = path.join(runtimeRoot || '', 'node_modules', 'openclaw', 'dist');
+  if (!exists(dist)) return { ok: false, reason: 'no-dist' };
+  const marker = 'NEXORA_DISABLE_CRASH_LOOP_BREAKER';
+  let patched = 0;
+  try {
+    for (const name of fs.readdirSync(dist)) {
+      if (!/^run-[A-Za-z0-9_-]+\.js$/i.test(name)) continue;
+      const file = path.join(dist, name);
+      let src = fs.readFileSync(file, 'utf8');
+      if (!src.includes('inspectGatewayCrashLoopBreaker') && !src.includes('uncleanBoots')) continue;
+      let next = src;
+      if (next.includes(marker)) {
+        patched += 1;
+        continue;
+      }
+      // 强制永不 trip：渠道 autostart 不再被 crash-loop breaker 压制
+      if (next.includes('const tripped = params.uncleanBoots >= 3;')) {
+        next = next.replace(
+          'const tripped = params.uncleanBoots >= 3;',
+          `const tripped = false; /* ${marker} */`
+        );
+      } else if (next.includes('params.uncleanBoots >= 3')) {
+        next = next.replace(
+          /params\.uncleanBoots\s*>=\s*3/g,
+          `false /* ${marker} */`
+        );
+      }
+      if (next !== src) {
+        fs.writeFileSync(file, next, 'utf8');
+        patched += 1;
+      }
+    }
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+  return { ok: patched > 0, patched };
+}
+
+/**
  * 启动 Gateway 前调用：软化 migration + 种 npm + 同步渠道插件 + 补齐 AGENTS.md 模板 + 绕过受信校验
  */
 function hardenGatewayBootAgainstPluginNpm(params) {
@@ -318,6 +361,8 @@ function hardenGatewayBootAgainstPluginNpm(params) {
     notes.push(`soft=${soft.ok ? soft.patched : soft.reason}`);
     const trust = bypassOpenClawPluginTrustCheck(runtimeRoot);
     notes.push(`trust-bypass=${trust.ok ? trust.patched : trust.reason}`);
+    const breaker = disableOpenClawCrashLoopBreaker(runtimeRoot);
+    notes.push(`crash-loop=${breaker.ok ? breaker.patched : breaker.reason}`);
     const npm = ensureSandboxNpmPresent(runtimeRoot, projectRoot);
     notes.push(`npm=${npm.ok ? (npm.skipped ? 'ok' : 'healed') : npm.reason}`);
     const tpl = ensureOpenClawWorkspaceTemplates(runtimeRoot, templateSources || []);
@@ -418,6 +463,7 @@ module.exports = {
   ensureSandboxNpmPresent,
   forceDisableUninstalledChannelPlugins,
   ensureOpenClawWorkspaceTemplates,
+  disableOpenClawCrashLoopBreaker,
   hardenGatewayBootAgainstPluginNpm,
   CHANNEL_PLUGIN_IDS,
   STALE_PLUGIN_IDS

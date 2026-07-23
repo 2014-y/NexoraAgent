@@ -3951,6 +3951,7 @@ async function startGatewayProcess() {
             }
 
             // 自动清除崩塌保护器 (Restart-loop breaker)，保证微信/QQ/飞书通道永远正常唤起启动
+            // OpenClaw 真实状态在 gateway_boot_lifecycle（不是 state_leases / kv_store）
             try {
                 const stateDir = lockedAuth.stateDir;
                 const breakerFiles = [
@@ -3972,10 +3973,11 @@ async function startGatewayProcess() {
                     try {
                         const { DatabaseSync } = require('node:sqlite');
                         const db = new DatabaseSync(sqlitePath);
-                        db.exec("DELETE FROM state_leases WHERE scope LIKE '%breaker%' OR scope LIKE '%crash%';");
-                        db.exec("DELETE FROM kv_store WHERE key LIKE '%restart_loop%' OR key LIKE '%crash_loop%' OR key LIKE '%breaker%';");
+                        try { db.exec("DELETE FROM gateway_boot_lifecycle"); } catch (e) {}
+                        try { db.exec("DELETE FROM state_leases WHERE scope LIKE '%breaker%' OR scope LIKE '%crash%'"); } catch (e) {}
+                        try { db.exec("DELETE FROM kv_store WHERE key LIKE '%restart_loop%' OR key LIKE '%crash_loop%' OR key LIKE '%breaker%'"); } catch (e) {}
                         db.close();
-                        console.log('[TokenGuard] Reset crash-loop breaker state in SQLite database.');
+                        console.log('[TokenGuard] Reset crash-loop breaker state (gateway_boot_lifecycle cleared).');
                     } catch (e) {}
                 }
             } catch (e) {

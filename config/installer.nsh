@@ -70,7 +70,7 @@
     ; 与 gateway-runtime.js writeRuntimeStamp 对齐，避免首次启动再整包重解压
 
     FileOpen $1 "$LOCALAPPDATA\NexoraAgent\gateway-runtime\.runtime-stamp" w
-    FileWrite $1 "${VERSION}:pack-0d7be538f295"
+    FileWrite $1 "${VERSION}:pack-0085b6c97fe6"
     FileClose $1
     !insertmacro NexoraAgent_Log "[runtime] overlay install completed"
   ${Else}
