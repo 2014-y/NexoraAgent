@@ -594,6 +594,7 @@ let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
 let gatewayStartInFlight = null;
+let channelBreakerOverrideTimer = null;
 let gatewayHttpReadyTimer = null;
 let gatewayHttpReadyNotified = false;
 let isQuitting = false;
@@ -4019,7 +4020,9 @@ async function startGatewayProcess() {
                     // 🌟 智能解封：若日志捕获到 crash-loop breaker 抑制通道，自动向 Gateway 发起 override 指令拉起微信/QQ/飞书通道
                     if (text.includes('suppressed by crash-loop breaker') || text.includes('restart-loop breaker tripped')) {
                         console.log('[TokenGuard] Detected crash-loop breaker suppression; auto-triggering channels override...');
-                        setTimeout(() => {
+                        if (channelBreakerOverrideTimer) clearTimeout(channelBreakerOverrideTimer);
+                        channelBreakerOverrideTimer = setTimeout(() => {
+                            channelBreakerOverrideTimer = null;
                             try {
                                 const http = require('http');
                                 const token = lockedAuth.token;
