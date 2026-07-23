@@ -3,7 +3,7 @@
  *
  * Gemini 严格要求 function response 紧跟 function call。会话压缩、中断、清洗
  * 都可能把配对弄断，导致整段对话连续 400「不回话」。本插件：
- * 1) 启动时扫描并修复 agents/*/sessions/*.jsonl
+ * 1) 启动时扫描并修复 agents/<id>/sessions 下的 *.jsonl
  * 2) agent_end 失败且像 format/tool payload 时，立刻修复当前会话文件
  */
 
