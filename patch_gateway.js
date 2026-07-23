@@ -14,10 +14,15 @@ function isLlmProxyPath(pathOrUrl) {
     const s = String(pathOrUrl || '');
     if (s.includes('/api/chat/media/')) return false;
     // OpenClaw→Ollama 默认走原生 /api/chat；也兼容 OpenAI /v1/chat/completions
+    // Google GenAI / Gemini OpenAI-compat 一并纳入，便于 MALFORMED 改写
     return (
         s.includes('/completions') ||
         s.includes('/embeddings') ||
-        s.includes('/api/chat')
+        s.includes('/api/chat') ||
+        s.includes(':generateContent') ||
+        s.includes(':streamGenerateContent') ||
+        s.includes('/generateContent') ||
+        /generativelanguage\.googleapis\.com/i.test(s)
     );
 }
 
@@ -30,11 +35,180 @@ function isLocalModelRequest(model, hostOrUrl) {
     return isOllamaPort || localName;
 }
 
+/** 工具调用能力脆弱的小模型：强制 tool_choice 极易 MALFORMED_FUNCTION_CALL */
+function isFragileToolModel(model) {
+    const m = String(model || '').toLowerCase();
+    if (!m) return false;
+    return (
+        m.includes('flash-lite') ||
+        m.includes('flash_lite') ||
+        m.includes('flashlite') ||
+        /gemini-3\.1-flash-lite/.test(m) ||
+        /gemini-2\.0-flash-lite/.test(m) ||
+        /(^|\/)gemini-.*-lite(\b|$)/.test(m)
+    );
+}
+
+/** Gemini 等 finish_reason：应触发 format 备援，否则只报 LLM request failed 不切模型 */
+function looksLikeMalformedToolFinish(raw) {
+    const s = String(raw || '');
+    if (!s) return false;
+    return (
+        /MALFORMED_FUNCTION_CALL/i.test(s) ||
+        /UNEXPECTED_TOOL_CALL/i.test(s) ||
+        /finish_reason:\s*malformed/i.test(s) ||
+        /Provider finish_reason:\s*MALFORMED/i.test(s)
+    );
+}
+
+function patchMatchesFormatErrorPatternExport(exportsObj) {
+    if (!exportsObj || typeof exportsObj !== 'object' || exportsObj.__NEXORA_FORMAT_MALFORMED_PATCHED__) return false;
+    let patched = false;
+    for (const key of Object.keys(exportsObj)) {
+        const fn = exportsObj[key];
+        if (typeof fn !== 'function' || fn.__NEXORA_FORMAT_MALFORMED__) continue;
+        let isMatchFn = false;
+        try {
+            isMatchFn =
+                fn('invalid request format') === true &&
+                fn('') === false &&
+                fn('rate limit exceeded 429') === false &&
+                fn('string should match pattern') === true;
+        } catch (e) {
+            continue;
+        }
+        if (!isMatchFn) continue;
+        const orig = fn;
+        const wrapped = function (raw) {
+            if (looksLikeMalformedToolFinish(raw)) return true;
+            return orig.apply(this, arguments);
+        };
+        wrapped.__NEXORA_FORMAT_MALFORMED__ = true;
+        try {
+            Object.defineProperty(wrapped, 'name', { value: orig.name || key, configurable: true });
+        } catch (e) {}
+        exportsObj[key] = wrapped;
+        patched = true;
+    }
+    if (patched) {
+        try {
+            Object.defineProperty(exportsObj, '__NEXORA_FORMAT_MALFORMED_PATCHED__', { value: true, writable: true });
+        } catch (e) {
+            exportsObj.__NEXORA_FORMAT_MALFORMED_PATCHED__ = true;
+        }
+        try {
+            console.log('[TokenGuard] MALFORMED_FUNCTION_CALL → format failover enabled');
+        } catch (e) {}
+    }
+    return patched;
+}
+
+const NEXORA_MALFORMED_FORMAT_MARK = '/*nexora-malformed-format*/';
+const NEXORA_MALFORMED_FORMAT_SNIPPET =
+    NEXORA_MALFORMED_FORMAT_MARK +
+    '\n\t\t/malformed_function_call/i,\n\t\t/unexpected_tool_call/i,\n\t\t"provider finish_reason: malformed_function_call",';
+
+/** OpenClaw dist 为 ESM，Module._load 拦不到；直接给 format 错误表补上 MALFORMED 规则 */
+function ensureMalformedFormatPatternOnDisk() {
+    try {
+        const pathMod = require('path');
+        const fsMod = require('fs');
+        const roots = [];
+        const push = (p) => {
+            if (p && typeof p === 'string' && !roots.includes(p)) roots.push(p);
+        };
+        push(process.env.NEXORA_AGENT_RUNTIME_DIR);
+        push(process.env.OPENCLAW_STATE_DIR);
+        push(pathMod.join(__dirname));
+        try {
+            const la = process.env.LOCALAPPDATA || '';
+            if (la) push(pathMod.join(la, 'NexoraAgent', 'gateway-runtime'));
+        } catch (e) {}
+        try {
+            push(pathMod.join(require('os').homedir(), '.openclaw'));
+        } catch (e) {}
+
+        const candidates = [];
+        for (const root of roots) {
+            const distDirs = [
+                pathMod.join(root, 'node_modules', 'openclaw', 'dist'),
+                pathMod.join(root, 'gateway-runtime', 'node_modules', 'openclaw', 'dist'),
+            ];
+            for (const dist of distDirs) {
+                let names = [];
+                try {
+                    names = fsMod.readdirSync(dist);
+                } catch (e) {
+                    continue;
+                }
+                for (const name of names) {
+                    if (!/^sanitize-user-facing-text-[A-Za-z0-9_-]+\.js$/i.test(name)) continue;
+                    candidates.push(pathMod.join(dist, name));
+                }
+            }
+        }
+
+        let patched = 0;
+        for (const file of candidates) {
+            let text = '';
+            try {
+                text = fsMod.readFileSync(file, 'utf8');
+            } catch (e) {
+                continue;
+            }
+            if (!text.includes('format:')) continue;
+            if (text.includes(NEXORA_MALFORMED_FORMAT_MARK) || text.includes('/malformed_function_call/i')) continue;
+            const next = text.replace(/format:\s*\[/, (m) => m + NEXORA_MALFORMED_FORMAT_SNIPPET);
+            if (next === text) continue;
+            try {
+                fsMod.writeFileSync(file, next, 'utf8');
+                patched += 1;
+            } catch (e) {}
+        }
+        if (patched > 0) {
+            try {
+                console.log(`[TokenGuard] Patched ${patched} OpenClaw format pattern file(s) for MALFORMED failover`);
+            } catch (e) {}
+        }
+    } catch (e) {}
+}
+
+/** 把含 MALFORMED finish_reason 的 LLM 回包改写成 400 format，迫使备援模型接手 */
+function rewriteMalformedLlmResponseBody(bodyText) {
+    const raw = String(bodyText || '');
+    if (!looksLikeMalformedToolFinish(raw)) return null;
+    return JSON.stringify({
+        error: {
+            message: 'invalid request format: Provider finish_reason: MALFORMED_FUNCTION_CALL',
+            type: 'invalid_request_error',
+            code: 'invalid_request_format',
+            status: 'INVALID_ARGUMENT',
+        },
+    });
+}
+
+ensureMalformedFormatPatternOnDisk();
+
 function looksLikeRawToolCall(content) {
     if (typeof content !== 'string') return false;
-    const t = content.trim();
-    if (!t.includes('"name"') || !t.includes('"arguments"')) return false;
-    return /^\s*\{[\s\S]*"name"\s*:[\s\S]*"arguments"\s*:/.test(t);
+    const t = content.trim()
+        .replace(/^```(?:json|javascript|js)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+    if (!t) return false;
+    // OpenAI / OpenClaw: {"name":"...","arguments":...}
+    if (/"name"\s*:/.test(t) && /"arguments"\s*:/.test(t)) {
+        return /^\s*\{[\s\S]*"name"\s*:[\s\S]*"arguments"\s*:/.test(t);
+    }
+    // LangChain / 幻觉格式: {"action":"exec","action_input":{...}}
+    if (/"action"\s*:/.test(t) && /"action_input"\s*:/.test(t)) {
+        return /^\s*\{[\s\S]*"action"\s*:[\s\S]*"action_input"\s*:/.test(t);
+    }
+    // 裸 screen-capture JSON
+    if (/"action"\s*:\s*"exec"/.test(t) && /"command"\s*:\s*"screen-capture"/.test(t)) {
+        return true;
+    }
+    return false;
 }
 
 function stripDirectiveTags(text) {
@@ -45,29 +219,65 @@ function stripDirectiveTags(text) {
         .trim();
 }
 
+function rewriteParsedToolJson(parsed) {
+    if (!parsed || typeof parsed !== 'object') return null;
+    // OpenAI style
+    if (typeof parsed.name === 'string' && parsed.arguments != null) {
+        if (parsed.name === 'tts' && parsed.arguments && typeof parsed.arguments.text === 'string') {
+            return parsed.arguments.text;
+        }
+        return ''; // 不把内部工具 JSON 露给用户
+    }
+    // LangChain style
+    if (typeof parsed.action === 'string') {
+        const input = parsed.action_input;
+        if (parsed.action === 'tts' && input && typeof input.text === 'string') {
+            return input.text;
+        }
+        // exec/screen-capture 等：静默吞掉，避免刷屏
+        return '';
+    }
+    return null;
+}
+
 function sanitizeRawToolCallContent(content) {
-    if (typeof content === 'string') {
-        content = stripDirectiveTags(content);
-    }
-    if (!looksLikeRawToolCall(content)) return content;
-    const trimmed = content.trim();
-    try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed.name === 'string' && parsed.arguments != null) {
-            if (parsed.name === 'tts' && parsed.arguments && typeof parsed.arguments.text === 'string') {
-                return parsed.arguments.text;
+    if (typeof content !== 'string') return content;
+    content = stripDirectiveTags(content);
+
+    // 先清掉代码块里的工具 JSON
+    let out = content.replace(/```(?:json|javascript|js)?\s*([\s\S]*?)```/gi, (block, inner) => {
+        const innerTrim = String(inner || '').trim();
+        if (looksLikeRawToolCall(innerTrim)) {
+            try {
+                const rewritten = rewriteParsedToolJson(JSON.parse(innerTrim));
+                return rewritten == null ? '' : rewritten;
+            } catch (e) {
+                return '';
             }
-            // 其它工具调用 JSON 转换成自然语言日志说明，防范返回空字符串触发 empty content 警告
-            return `[已触发技能 ${parsed.name}]`;
         }
-    } catch (e) {
-        if (/"name"\s*:\s*"tts"/.test(trimmed)) {
-            const textMatch = trimmed.match(/"text"\s*:\s*"([^"]*)"/);
-            return (textMatch && textMatch[1]) ? textMatch[1] : '';
+        return block;
+    });
+
+    // 整段就是工具 JSON
+    const trimmed = out.trim();
+    if (looksLikeRawToolCall(trimmed)) {
+        try {
+            const rewritten = rewriteParsedToolJson(JSON.parse(
+                trimmed.replace(/^```(?:json|javascript|js)?\s*/i, '').replace(/\s*```$/i, '').trim()
+            ));
+            if (rewritten != null) return rewritten;
+        } catch (e) {
+            return '';
         }
-        return '[已处理内部工具指令]';
+        return '';
     }
-    return content;
+
+    // 正文里夹杂的单行/多行工具 JSON 对象
+    out = out.replace(/\{\s*"action"\s*:\s*"[^"]+"\s*,\s*"action_input"\s*:\s*\{[\s\S]*?\}\s*\}/g, '');
+    out = out.replace(/\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '');
+    out = out.replace(/\{\s*"action"\s*:\s*"exec"\s*,\s*"action_input"\s*:\s*\{[\s\S]*?\}\s*\}/g, '');
+
+    return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 const LOCAL_MODEL_NO_TOOL_GUARD =
@@ -78,7 +288,11 @@ const SYSTEM_CAPABILITY_PROMPT =
 
 /** 清洗历史脏数据 + 对本地模型剥离 tools。返回是否改动过 body。 */
 const SYSTEM_CAPABILITY_PROMPT_SAFE =
-    '[SystemCapability] When the user asks for a screenshot, call the exec tool with command exactly "screen-capture". Do not write your own screenshot script. The screenshot command only returns a local file path; do not call any message/sendMedia tool for that screenshot. In the final visible reply, put exactly one plain first line "MEDIA:<absolute path returned by this turn>" and then at most one short status sentence. Never emit the same screenshot through both a message tool and MEDIA. Never reuse openclaw-screenshot-latest.png unless it is the only path returned. Never output [[image]], [[video]], [[image_media]], or [[video_media]].\nWhen the user asks to open a browser, visit a webpage, or search, call exec with command "start <URL>" and then briefly say the browser was opened.';
+    '[SystemCapability] When the user asks for a screenshot, call the exec tool with command exactly "screen-capture" via the real function/tool calling API. Never print tool JSON in chat (forbidden examples: {"action":"exec","action_input":{"command":"screen-capture"}}, {"name":"exec","arguments":{...}}, or any action/action_input blob). Do not write your own screenshot script. The screenshot command only returns a local file path; do not call any message/sendMedia tool for that screenshot. In the final visible reply, put exactly one plain first line "MEDIA:<absolute path returned by this turn>" and then at most one short status sentence. Never emit the same screenshot through both a message tool and MEDIA. Never reuse openclaw-screenshot-latest.png unless it is the only path returned. Never output [[image]], [[video]], [[image_media]], or [[video_media]].\nWhen the user asks to open a browser, visit a webpage, or search, call exec with command "start <URL>" and then briefly say the browser was opened.';
+
+/** 弱模型专用：禁止逼工具、禁止刷 JSON；截图能力留给更强模型 */
+const SYSTEM_CAPABILITY_PROMPT_FRAGILE =
+    '[SystemCapability-Fragile] You are on a lightweight model. Never print raw tool JSON in chat (no {"action":"exec","action_input":...}, no {"name":"...","arguments":...}). Prefer plain natural language. If the user asks for screenshot/browser automation and you cannot reliably use the real tool API, briefly say so and suggest switching to a stronger model — do not invent fake tool calls or placeholders like [[image]].';
 
 function isToolResultRole(msg) {
     try { return loadToolTurnRepair().isToolResultRole(msg); } catch (e) {
@@ -204,7 +418,8 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
             hasModified = true;
         }
     } else {
-        // 云端模型截图劫持：如果用户说“截图”等，强行注入 tool_choice，迫使 Flash 等模型必须调 exec
+        // 云端模型截图/浏览器：仅对较强模型强制 tool_choice=exec。
+        // flash-lite 等弱模型强制后常吐 MALFORMED_FUNCTION_CALL 或把 JSON 当正文刷屏。
         if (Array.isArray(parsedBody.messages)) {
             let lastUserMsg = null;
             for (let i = parsedBody.messages.length - 1; i >= 0; i--) {
@@ -218,8 +433,18 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
                 const looksLikeScreenshot = lowerText.includes('截图') || lowerText.includes('截个图') || lowerText.includes('截张图');
                 const looksLikeBrowser = lowerText.includes('浏览器') || lowerText.includes('百度') || lowerText.includes('搜索') || lowerText.includes('访问') || lowerText.includes('网页') || lowerText.includes('打开网站');
                 if (looksLikeScreenshot || looksLikeBrowser) {
-                    parsedBody.tool_choice = { type: 'function', function: { name: 'exec' } };
-                    hasModified = true;
+                    if (isFragileToolModel(parsedBody.model)) {
+                        if (parsedBody.tool_choice) {
+                            delete parsedBody.tool_choice;
+                            hasModified = true;
+                        }
+                        try {
+                            console.log(`[TokenGuard] Skip forced tool_choice for fragile model: ${parsedBody.model}`);
+                        } catch (e) {}
+                    } else {
+                        parsedBody.tool_choice = { type: 'function', function: { name: 'exec' } };
+                        hasModified = true;
+                    }
                 }
             }
         }
@@ -236,11 +461,25 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
                 hasModified = true;
             }
         } else {
+            const fragile = isFragileToolModel(parsedBody.model);
+            const marker = fragile
+                ? '[SystemCapability-Fragile]'
+                : 'Never emit the same screenshot through both';
             const alreadyHasCap = parsedBody.messages.some(
-                (m) => m && m.role === 'system' && typeof m.content === 'string' && m.content.includes('Never emit the same screenshot through both')
+                (m) => m && m.role === 'system' && typeof m.content === 'string' && m.content.includes(marker)
             );
             if (!alreadyHasCap) {
-                parsedBody.messages.unshift({ role: 'system', content: SYSTEM_CAPABILITY_PROMPT_SAFE });
+                // 去掉另一套提示，避免弱/强提示叠在一起互相打架
+                parsedBody.messages = parsedBody.messages.filter((m) => {
+                    if (!m || m.role !== 'system' || typeof m.content !== 'string') return true;
+                    if (fragile && m.content.includes('Never emit the same screenshot through both')) return false;
+                    if (!fragile && m.content.includes('[SystemCapability-Fragile]')) return false;
+                    return true;
+                });
+                parsedBody.messages.unshift({
+                    role: 'system',
+                    content: fragile ? SYSTEM_CAPABILITY_PROMPT_FRAGILE : SYSTEM_CAPABILITY_PROMPT_SAFE,
+                });
                 hasModified = true;
             }
         }
@@ -1426,13 +1665,41 @@ function wrapFetch(originalFetch) {
         try {
             if (isCompletions) {
                 const response = await originalFetch.apply(this, arguments);
-                const cloneRes = response.clone();
                 const elapsed = Date.now() - startMs;
-                
-                cloneRes.text().then(bodyText => {
+                const ct = String((response.headers && response.headers.get && response.headers.get('content-type')) || '').toLowerCase();
+                const isStream = ct.includes('text/event-stream') || ct.includes('stream') || ct.includes('ndjson');
+
+                if (isStream) {
+                    const cloneRes = response.clone();
+                    cloneRes.text().then((bodyText) => {
+                        parseAndSaveCompletionsLog(bodyText, url, elapsed);
+                    }).catch(() => {});
+                    return response;
+                }
+
+                const cloneRes = response.clone();
+                let bodyText = '';
+                try {
+                    bodyText = await cloneRes.text();
+                } catch (e) {
+                    bodyText = '';
+                }
+                try {
                     parseAndSaveCompletionsLog(bodyText, url, elapsed);
-                }).catch(() => {});
-                
+                } catch (e) {}
+
+                const rewritten = rewriteMalformedLlmResponseBody(bodyText);
+                if (rewritten) {
+                    try {
+                        console.log('[TokenGuard] Rewrote MALFORMED_FUNCTION_CALL response → format failover (400)');
+                    } catch (e) {}
+                    return new Response(rewritten, {
+                        status: 400,
+                        statusText: 'Bad Request',
+                        headers: { 'content-type': 'application/json; charset=utf-8' },
+                    });
+                }
+
                 return response;
             }
             return await originalFetch.apply(this, arguments);
@@ -1482,6 +1749,18 @@ Module._load = function(request, parent, isMain) {
                 wrapped.__NEXORA_SOFT_MIGRATION__ = true;
                 exports[key] = wrapped;
             }
+        }
+    } catch (e) {}
+
+    // MALFORMED_FUNCTION_CALL → 归入 format，走已配置的备援模型
+    try {
+        if (
+            exports &&
+            typeof exports === 'object' &&
+            typeof request === 'string' &&
+            /sanitize-user-facing-text/i.test(request)
+        ) {
+            patchMatchesFormatErrorPatternExport(exports);
         }
     } catch (e) {}
     

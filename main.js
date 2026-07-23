@@ -3400,8 +3400,26 @@ function createWindow(existingSplash) {
         } catch (e) {}
     };
     mainWindow.on('restore', paintDarkBg);
-    mainWindow.on('show', paintDarkBg);
-    mainWindow.on('focus', paintDarkBg);
+    mainWindow.on('show', () => {
+        paintDarkBg();
+        // 托盘唤起 / 自启后窗口显示时，强制把按钮状态与真实进程对齐
+        try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                const st = gatewayProcess
+                    ? 'running'
+                    : (gatewayStartInFlight ? 'starting' : 'stopped');
+                mainWindow.webContents.send('gateway-status', st);
+            }
+        } catch (e) {}
+    });
+    mainWindow.on('focus', () => {
+        paintDarkBg();
+        try {
+            if (mainWindow && !mainWindow.isDestroyed() && gatewayProcess) {
+                mainWindow.webContents.send('gateway-status', 'running');
+            }
+        } catch (e) {}
+    });
 
     // 拦截本地Nexora Agent面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -3458,6 +3476,17 @@ function createWindow(existingSplash) {
             try {
                 if (!isAutoLaunchGatewayEnabled()) return;
                 startGatewayProcess();
+                // 自启后补几次状态推送，避免渲染进程还没挂上监听时漏掉 running
+                const push = () => {
+                    try {
+                        if (!mainWindow || mainWindow.isDestroyed()) return;
+                        if (gatewayProcess) mainWindow.webContents.send('gateway-status', 'running');
+                        else if (gatewayStartInFlight) mainWindow.webContents.send('gateway-status', 'starting');
+                    } catch (e) {}
+                };
+                setTimeout(push, 1200);
+                setTimeout(push, 3000);
+                setTimeout(push, 6000);
             } catch (e) {
                 console.warn('[Gateway] boot auto-start failed:', e && e.message);
             }
@@ -4191,7 +4220,10 @@ ipcMain.on('gateway-action', (event, action) => {
         stopGatewayProcess();
     } else if (action === 'query-status') {
         if (mainWindow) {
-            mainWindow.webContents.send('gateway-status', gatewayProcess ? 'running' : 'stopped');
+            let st = 'stopped';
+            if (gatewayProcess) st = 'running';
+            else if (gatewayStartInFlight) st = 'starting';
+            mainWindow.webContents.send('gateway-status', st);
         }
     }
 });

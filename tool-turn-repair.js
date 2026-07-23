@@ -543,9 +543,11 @@ function looksLikeToolPairFormatError(errText) {
     if (/provider rejected the request schema or tool payload/i.test(s)) return true;
     if (/Please ensure that function response/i.test(s)) return true;
     if (/INVALID_ARGUMENT/i.test(s) && /function/i.test(s)) return true;
+    if (/MALFORMED_FUNCTION_CALL/i.test(s) || /UNEXPECTED_TOOL_CALL/i.test(s)) return true;
+    if (/Provider finish_reason:\s*MALFORMED/i.test(s)) return true;
     if (/\(format\)/i.test(s) && /tool|function|schema|payload/i.test(s)) return true;
     if (/reason[=:\s]+format\b/i.test(s)) return true;
-    if (/FailoverError/i.test(s) && /tool payload|schema|function response|\bformat\b/i.test(s)) return true;
+    if (/FailoverError/i.test(s) && /tool payload|schema|function response|\bformat\b|MALFORMED/i.test(s)) return true;
     return false;
 }
 

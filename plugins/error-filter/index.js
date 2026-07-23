@@ -77,10 +77,37 @@ function isModelFallbackNoticeOnly(text) {
   return rest.length === 0;
 }
 
+/** 是否整段（或去代码块后）只剩泄漏的工具调用 JSON */
+function isLeakedToolJsonOnly(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (/^\s*\{[\s\S]*"action"\s*:\s*"exec"[\s\S]*"action_input"[\s\S]*\}\s*$/.test(raw)) return true;
+  if (/^\s*\{[\s\S]*"action"\s*:[\s\S]*"action_input"[\s\S]*\}\s*$/.test(raw)) return true;
+  if (/^\s*\{[\s\S]*"name"\s*:[\s\S]*"arguments"[\s\S]*\}\s*$/.test(raw)) return true;
+  // ```json { action... } ```
+  const fence = raw.match(/^```(?:json|javascript|js)?\s*([\s\S]*?)```$/i);
+  if (fence) {
+    const inner = fence[1].trim();
+    if (/"action_input"/.test(inner) || (/"name"/.test(inner) && /"arguments"/.test(inner))) return true;
+  }
+  // 去掉所有工具 JSON / 代码块后几乎没剩正文
+  const stripped = raw
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\{\s*"action"\s*:[\s\S]*?"action_input"\s*:[\s\S]*?\}/g, '')
+    .replace(/\{\s*"name"\s*:[\s\S]*?"arguments"\s*:[\s\S]*?\}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/"action_input"\s*:|"command"\s*:\s*"screen-capture"/.test(raw) && stripped.length < 8) {
+    return true;
+  }
+  return false;
+}
+
 function shouldBlockOutbound(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
   if (isModelFallbackNoticeOnly(raw)) return true;
+  if (isLeakedToolJsonOnly(raw)) return true;
   for (const s of BLOCK_SUBSTRINGS) {
     if (raw.includes(s)) return true;
   }

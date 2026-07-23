@@ -2228,6 +2228,16 @@ async function init() {
                 window.api.gatewayAction('start');
             }
         }, 1500);
+        // 自启场景下反复对齐按钮文案：running →「终止」，避免卡在「启动/启动中」
+        [2500, 5000, 8000].forEach((ms) => {
+            setTimeout(() => {
+                try {
+                    if (window.api && window.api.gatewayAction) {
+                        window.api.gatewayAction('query-status');
+                    }
+                } catch (e) {}
+            }, ms);
+        });
     })();
 
     // 渲染图表
@@ -3109,11 +3119,22 @@ function setupIpcListeners() {
                 logTerminal.innerHTML = '';
                 gatewayLogReadyTail = '';
             }
-            // 冷启动：维持 starting，同时开始端口探测，避免卡在 97%
+            // 冷启动：维持 starting 做端口探测；自启时进度可能已非 0，避免按钮一直停在「启动中」
             if (currentProgress > 0 && !gatewayFullyReady) {
                 gatewayStatus = 'starting';
                 updateGatewayStatusUI('starting');
                 startGatewayReadyProbe('status-running');
+                setTimeout(() => {
+                    if (gatewayFullyReady) return;
+                    const port = resolveGatewayProbePort();
+                    fetch(`http://127.0.0.1:${port}/`, { method: 'GET', cache: 'no-store' })
+                        .then(() => {
+                            if (!gatewayFullyReady) {
+                                markGatewayReadyFromLog('核心服务已就绪（自启状态对齐）');
+                            }
+                        })
+                        .catch(() => {});
+                }, 4000);
             } else {
                 gatewayStatus = 'running';
                 gatewayFullyReady = true;
