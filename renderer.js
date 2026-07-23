@@ -10538,9 +10538,14 @@ function updateAccelerationBusyUi() {
     const pageToggle = document.getElementById('acc-page-enabled-toggle');
     const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
+    const channelRunning = !!(accelerationState && accelerationState.running);
 
-    [systemProxyToggle, tunToggle, dashSystemProxyToggle, dashTunToggle, pageToggle, controlsToggle, dashEnabledToggle].forEach(el => {
+    [pageToggle, controlsToggle, dashEnabledToggle].forEach(el => {
         if (el) el.disabled = shouldDisable;
+    });
+    // 系统代理 / TUN：未启用时始终不可点；启用后仅在忙碌时禁用
+    [systemProxyToggle, tunToggle, dashSystemProxyToggle, dashTunToggle].forEach(el => {
+        if (el) el.disabled = !channelRunning || shouldDisable;
     });
 
     const progressEl = document.getElementById('acc-delay-progress');
@@ -11269,6 +11274,36 @@ function renderAccelerationChannel(data) {
     if (systemProxyToggle) systemProxyToggle.checked = !!data.systemProxy;
     if (tunToggle) tunToggle.checked = !!data.virtualNic;
 
+    // 未启用时：系统代理 / TUN 不可操作，并提示先开总开关
+    const subToggles = document.getElementById('acc-ctrl-sub-toggles');
+    if (subToggles) subToggles.classList.toggle('is-disabled', !running);
+    [systemProxyToggle, tunToggle].forEach((el) => {
+        if (!el) return;
+        el.disabled = !running || accelerationBusy;
+        const wrap = el.closest('.switch-slider-btn');
+        if (wrap) wrap.classList.toggle('is-locked', !running);
+    });
+    const systemProxyDesc = document.querySelector('label[for="acc-system-proxy-toggle"] .acc-urow-desc');
+    const tunDesc = document.querySelector('label[for="acc-tun-toggle"] .acc-urow-desc');
+    if (systemProxyDesc) {
+        if (!running) {
+            systemProxyDesc.setAttribute('data-i18n', 'acc.control.need_enable');
+            systemProxyDesc.textContent = t('acc.control.need_enable');
+        } else {
+            systemProxyDesc.setAttribute('data-i18n', 'acc.control.system_proxy_desc');
+            systemProxyDesc.textContent = t('acc.control.system_proxy_desc');
+        }
+    }
+    if (tunDesc) {
+        if (!running) {
+            tunDesc.setAttribute('data-i18n', 'acc.control.need_enable');
+            tunDesc.textContent = t('acc.control.need_enable');
+        } else {
+            tunDesc.setAttribute('data-i18n', 'acc.control.tun_desc');
+            tunDesc.textContent = t('acc.control.tun_desc');
+        }
+    }
+
     // 仪表盘开关同步
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
     const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
@@ -11276,6 +11311,45 @@ function renderAccelerationChannel(data) {
     if (dashEnabledToggle) dashEnabledToggle.checked = running;
     if (dashSystemProxyToggle) dashSystemProxyToggle.checked = !!data.systemProxy;
     if (dashTunToggle) dashTunToggle.checked = !!data.virtualNic;
+
+    const dashSubToggles = document.getElementById('acc-dash-sub-toggles');
+    if (dashSubToggles) dashSubToggles.classList.toggle('is-disabled', !running);
+    [dashSystemProxyToggle, dashTunToggle].forEach((el) => {
+        if (!el) return;
+        el.disabled = !running || accelerationBusy;
+        const wrap = el.closest('.switch-slider-btn');
+        if (wrap) wrap.classList.toggle('is-locked', !running);
+    });
+    const dashSystemProxyDesc = document.querySelector('label[for="acc-dash-system-proxy-toggle"] .toggle-desc');
+    const dashTunDesc = document.querySelector('label[for="acc-dash-tun-toggle"] .toggle-desc');
+    if (dashSystemProxyDesc) {
+        if (!running) {
+            dashSystemProxyDesc.setAttribute('data-i18n', 'acc.control.need_enable');
+            dashSystemProxyDesc.textContent = t('acc.control.need_enable');
+        } else {
+            dashSystemProxyDesc.setAttribute('data-i18n', 'acc.toggle.system_proxy_desc');
+            dashSystemProxyDesc.textContent = t('acc.toggle.system_proxy_desc');
+        }
+    }
+    if (dashTunDesc) {
+        if (!running) {
+            dashTunDesc.setAttribute('data-i18n', 'acc.control.need_enable');
+            dashTunDesc.textContent = t('acc.control.need_enable');
+        } else {
+            dashTunDesc.setAttribute('data-i18n', 'acc.toggle.tun_desc');
+            dashTunDesc.textContent = t('acc.toggle.tun_desc');
+        }
+    }
+    const dashEnabledDesc = document.getElementById('acc-dash-enabled-desc');
+    if (dashEnabledDesc) {
+        if (running && data && data.mixedPort) {
+            dashEnabledDesc.setAttribute('data-i18n', 'acc.control.enabled_desc_port');
+            dashEnabledDesc.textContent = t('acc.control.enabled_desc_port').replace('{port}', String(data.mixedPort));
+        } else {
+            dashEnabledDesc.setAttribute('data-i18n', 'acc.control.enabled_desc');
+            dashEnabledDesc.textContent = t('acc.control.enabled_desc');
+        }
+    }
 
     // 仪表盘出站模式同步
     const mode = data.mode || 'rule';
@@ -11329,9 +11403,11 @@ function renderAccelerationChannel(data) {
     const desc = document.getElementById('acc-enabled-desc');
     if (desc) {
         if (running && data && data.mixedPort) {
-            desc.textContent = `开启后网关与客户端请求走本地加速代理 (当前端口: ${data.mixedPort})`;
+            desc.setAttribute('data-i18n', 'acc.control.enabled_desc_port');
+            desc.textContent = t('acc.control.enabled_desc_port').replace('{port}', String(data.mixedPort));
         } else {
-            desc.textContent = '开启后网关与客户端请求走本地加速代理';
+            desc.setAttribute('data-i18n', 'acc.control.enabled_desc');
+            desc.textContent = t('acc.control.enabled_desc');
         }
     }
 
@@ -12172,8 +12248,12 @@ function initAccelerationChannel() {
                 return;
             }
             try {
-                await navigator.clipboard.writeText(text);
-                showToast('已复制本地代理：' + text);
+                const ok = await copyToClipboard(text);
+                if (ok) {
+                    showToast('已复制本地代理：' + text);
+                } else {
+                    showToast('复制失败：剪贴板写入受限');
+                }
             } catch (e) {
                 showToast('复制失败：' + (e.message || String(e)));
             }
@@ -12519,6 +12599,13 @@ function initAccelerationChannel() {
     }
 
     async function setAccelerationProxyMode(kind, on) {
+        // 系统代理 / TUN 依赖内核已启动
+        if ((kind === 'system' || kind === 'tun' || kind === 'virtualNic')
+            && !(accelerationState && accelerationState.running)) {
+            showToast(t('acc.control.need_enable'));
+            await refreshAccelerationChannel();
+            return null;
+        }
         let payload, okText;
         if (kind === 'system') {
             payload = { systemProxy: on };

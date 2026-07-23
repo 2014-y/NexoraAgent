@@ -1459,15 +1459,6 @@
               <p style="margin: 4px 0 0 0;" data-i18n="acc.desc">内置 mihomo（ClashMeta）核心，按步骤添加配置、选择节点并启用加速。</p>
             </div>
             <div class="acc-header-actions">
-              <span id="acc-status-pill" class="acc-status-pill" data-i18n="acc.status.disabled">未启用</span>
-              <div class="acc-mini-enable" title="启用加速通道" data-i18n-title="acc.enable.title">
-                <span data-i18n="acc.enable">启用</span>
-                <label class="switch-slider-btn">
-                  <input type="checkbox" id="acc-page-enabled-toggle">
-                  <span class="slider-knob"></span>
-                </label>
-              </div>
-              <button type="button" class="btn-secondary" id="acc-refresh-btn" data-i18n="acc.refresh">刷新</button>
             </div>
           </div>
 
@@ -1548,25 +1539,37 @@
 
                     <!-- Switches -->
                     <div class="acc-dash-unified-toggles">
-                      <div class="acc-dash-toggle-row">
-                        <label class="toggle-info" for="acc-dash-system-proxy-toggle" style="cursor: pointer;">
-                          <div class="toggle-name" data-i18n="acc.toggle.system_proxy">系统代理</div>
-                          <div class="toggle-desc" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.toggle.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
+                      <div class="acc-dash-toggle-row acc-dash-toggle-primary">
+                        <label class="toggle-info" for="acc-dash-enabled-toggle" style="cursor: pointer;">
+                          <div class="toggle-name" data-i18n="acc.control.enabled">启用加速通道</div>
+                          <div class="toggle-desc" id="acc-dash-enabled-desc" data-i18n="acc.control.enabled_desc">请求走本地加速代理</div>
                         </label>
                         <label class="switch-slider-btn">
-                          <input type="checkbox" id="acc-dash-system-proxy-toggle">
+                          <input type="checkbox" id="acc-dash-enabled-toggle">
                           <span class="slider-knob"></span>
                         </label>
                       </div>
-                      <div class="acc-dash-toggle-row">
-                        <label class="toggle-info" for="acc-dash-tun-toggle" style="cursor: pointer;">
-                          <div class="toggle-name" data-i18n="acc.toggle.tun">虚拟网卡 TUN</div>
-                          <div class="toggle-desc" title="需管理员权限，并安装 wintun.dll；未提权时无法真正接管流量" data-i18n="acc.toggle.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
-                        </label>
-                        <label class="switch-slider-btn">
-                          <input type="checkbox" id="acc-dash-tun-toggle">
-                          <span class="slider-knob"></span>
-                        </label>
+                      <div class="acc-dash-sub-toggles" id="acc-dash-sub-toggles">
+                        <div class="acc-dash-toggle-row">
+                          <label class="toggle-info" for="acc-dash-system-proxy-toggle" style="cursor: pointer;">
+                            <div class="toggle-name" data-i18n="acc.toggle.system_proxy">系统代理</div>
+                            <div class="toggle-desc" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.toggle.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
+                          </label>
+                          <label class="switch-slider-btn">
+                            <input type="checkbox" id="acc-dash-system-proxy-toggle">
+                            <span class="slider-knob"></span>
+                          </label>
+                        </div>
+                        <div class="acc-dash-toggle-row">
+                          <label class="toggle-info" for="acc-dash-tun-toggle" style="cursor: pointer;">
+                            <div class="toggle-name" data-i18n="acc.toggle.tun">虚拟网卡 TUN</div>
+                            <div class="toggle-desc" title="需管理员权限，并安装 wintun.dll；未提权时无法真正接管流量" data-i18n="acc.toggle.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
+                          </label>
+                          <label class="switch-slider-btn">
+                            <input type="checkbox" id="acc-dash-tun-toggle">
+                            <span class="slider-knob"></span>
+                          </label>
+                        </div>
                       </div>
                     </div>
 
@@ -1832,87 +1835,145 @@
           <!-- 控制页：开关与模式 -->
           <div class="acc-panel" id="acc-panel-controls" hidden>
             <div class="acc-controls-layout">
-              <div class="acc-controls-grid">
-                <div class="acc-card acc-controls-card">
-                  <div class="acc-card-title" data-i18n="acc.control.title">通道控制</div>
-                  <div class="acc-controls-card-body">
 
-                    <div class="acc-control-row">
-                      <label for="acc-system-proxy-toggle" style="flex: 1; min-width: 0; padding-right: 12px; cursor: pointer; display: block;">
-                        <div data-i18n="acc.control.system_proxy">系统代理</div>
-                        <div class="acc-muted" title="把 Windows 系统代理指到本地 Clash 端口" data-i18n="acc.control.system_proxy_desc" data-i18n-title="acc.toggle.system_proxy_desc">写入 Windows 系统代理</div>
+              <!-- 主控三卡 -->
+              <div class="acc-controls-hero">
+                <!-- 通道控制 -->
+                <section class="acc-ctrl-card">
+                  <header class="acc-ctrl-card-head">
+                    <span class="acc-ctrl-card-icon" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    </span>
+                    <div class="acc-ctrl-card-head-text">
+                      <div class="acc-ctrl-card-title-row">
+                        <div class="acc-ctrl-card-title" data-i18n="acc.control.title">通道控制</div>
+                        <span id="acc-status-pill" class="acc-status-pill acc-status-pill-inline" data-i18n="acc.status.disabled">未启用</span>
+                      </div>
+                    </div>
+                  </header>
+                  <div class="acc-ctrl-card-body acc-ctrl-toggles">
+                    <div class="acc-urow acc-urow-primary">
+                      <label for="acc-controls-enabled-toggle" class="acc-urow-label">
+                        <span class="acc-urow-name" data-i18n="acc.control.enabled">启用加速通道</span>
+                        <span id="acc-enabled-desc" class="acc-urow-desc" data-i18n="acc.control.enabled_desc">请求走本地加速代理</span>
                       </label>
-                      <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
-                        <input type="checkbox" id="acc-system-proxy-toggle">
+                      <label class="switch-slider-btn">
+                        <input type="checkbox" id="acc-controls-enabled-toggle">
                         <span class="slider-knob"></span>
                       </label>
                     </div>
-                    <div class="acc-control-row">
-                      <label for="acc-tun-toggle" style="flex: 1; min-width: 0; padding-right: 12px; cursor: pointer; display: block;">
-                        <div data-i18n="acc.control.tun">虚拟网卡 TUN</div>
-                        <div class="acc-muted" title="需管理员权限，并安装 wintun.dll" data-i18n="acc.control.tun_desc" data-i18n-title="acc.toggle.tun_desc">需管理员，否则开了也不生效</div>
-                      </label>
-                      <label class="switch-slider-btn" style="margin-top: 2px; flex-shrink: 0;">
-                        <input type="checkbox" id="acc-tun-toggle">
-                        <span class="slider-knob"></span>
-                      </label>
+                    <div class="acc-ctrl-sub-toggles" id="acc-ctrl-sub-toggles">
+                      <div class="acc-urow">
+                        <label for="acc-system-proxy-toggle" class="acc-urow-label">
+                          <span class="acc-urow-name" data-i18n="acc.control.system_proxy">系统代理</span>
+                          <span class="acc-urow-desc" data-i18n="acc.control.system_proxy_desc">写入 Windows system 代理</span>
+                        </label>
+                        <label class="switch-slider-btn">
+                          <input type="checkbox" id="acc-system-proxy-toggle">
+                          <span class="slider-knob"></span>
+                        </label>
+                      </div>
+                      <div class="acc-urow">
+                        <label for="acc-tun-toggle" class="acc-urow-label">
+                          <span class="acc-urow-name" data-i18n="acc.control.tun">虚拟网卡 TUN</span>
+                          <span class="acc-urow-desc" data-i18n="acc.control.tun_desc">需管理员，否则开了也不生效</span>
+                        </label>
+                        <label class="switch-slider-btn">
+                          <input type="checkbox" id="acc-tun-toggle">
+                          <span class="slider-knob"></span>
+                        </label>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </section>
 
-                <div class="acc-card acc-controls-card">
-                  <div class="acc-card-title" data-i18n="acc.control.mode_title">出站模式</div>
-                  <div class="acc-controls-card-body">
-                    <label class="acc-radio-row"><input type="radio" name="acc-mode" value="rule" checked><span data-i18n="acc.control.mode_rule">规则 · 按订阅规则分流</span></label>
-                    <label class="acc-radio-row"><input type="radio" name="acc-mode" value="global"><span data-i18n="acc.control.mode_global">全局 · 全部走代理</span></label>
-                    <label class="acc-radio-row"><input type="radio" name="acc-mode" value="direct"><span data-i18n="acc.control.mode_direct">直连 · 不走代理</span></label>
-                    <div id="acc-controls-mode-hint" class="acc-controls-mode-hint" data-i18n="acc.controls.mode_hint.rule">日常上网推荐「规则」：国内直连、境外走节点。</div>
+                <!-- 出站模式 -->
+                <section class="acc-ctrl-card">
+                  <header class="acc-ctrl-card-head">
+                    <span class="acc-ctrl-card-icon" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    </span>
+                    <div class="acc-ctrl-card-head-text">
+                      <div class="acc-ctrl-card-title-row">
+                        <div class="acc-ctrl-card-title" data-i18n="acc.control.mode_title">出站模式</div>
+                      </div>
+                    </div>
+                  </header>
+                  <div class="acc-ctrl-card-body acc-seg-group" role="radiogroup" aria-label="出站模式">
+                    <label class="acc-seg-btn">
+                      <input type="radio" name="acc-mode" value="rule" checked>
+                      <span class="acc-seg-label" data-i18n="acc.control.mode_rule_short">规则分流</span>
+                      <span class="acc-seg-hint" data-i18n="acc.control.mode_rule_hint">国内直连 · 境外代理</span>
+                    </label>
+                    <label class="acc-seg-btn">
+                      <input type="radio" name="acc-mode" value="global">
+                      <span class="acc-seg-label" data-i18n="acc.control.mode_global_short">全局代理</span>
+                      <span class="acc-seg-hint" data-i18n="acc.control.mode_global_hint">全部流量走节点</span>
+                    </label>
+                    <label class="acc-seg-btn">
+                      <input type="radio" name="acc-mode" value="direct">
+                      <span class="acc-seg-label" data-i18n="acc.control.mode_direct_short">直连</span>
+                      <span class="acc-seg-hint" data-i18n="acc.control.mode_direct_hint">临时不走代理</span>
+                    </label>
                   </div>
-                </div>
+                </section>
 
-                <div class="acc-card acc-controls-card">
-                  <div class="acc-card-title" data-i18n="acc.control.info_title">运行信息</div>
-                  <div class="acc-controls-card-body">
-                    <div class="acc-info-line"><span data-i18n="acc.control.info_mixed">本地代理</span><strong id="acc-mixed-port">--</strong></div>
-                    <div class="acc-info-line"><span data-i18n="acc.control.info_controller">控制端口</span><strong id="acc-controller">--</strong></div>
-                    <div class="acc-info-line"><span data-i18n="acc.control.info_current_node">当前节点</span><strong id="acc-current-proxy">--</strong></div>
-                    <div class="acc-info-line" style="border-bottom: none;">
-                      <span data-i18n="acc.control.info_net_detect">网络检测</span>
-                      <span style="display: flex; align-items: center; gap: 6px;">
-                        <strong id="acc-ip-detect-result" style="font-size: 12px;">检测中...</strong>
-                        <button type="button" id="acc-ip-detect-btn" class="btn-secondary" style="height: 22px; padding: 0 8px; font-size: 10px; border-radius: 4px; white-space: nowrap;" data-i18n="acc.control.info_detect_btn">检测</button>
-                      </span>
+                <!-- 运行信息 -->
+                <section class="acc-ctrl-card">
+                  <header class="acc-ctrl-card-head">
+                    <span class="acc-ctrl-card-icon" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    </span>
+                    <div class="acc-ctrl-card-head-text">
+                      <div class="acc-ctrl-card-title-row">
+                        <div class="acc-ctrl-card-title" data-i18n="acc.control.info_title">运行信息</div>
+                      </div>
+                    </div>
+                  </header>
+                  <div class="acc-ctrl-card-body acc-ctrl-stats">
+                    <div class="acc-ustat">
+                      <strong id="acc-mixed-port" class="acc-ustat-mono">--</strong>
+                    </div>
+                    <div class="acc-ustat">
+                      <strong id="acc-controller" class="acc-ustat-mono">--</strong>
+                    </div>
+                    <div class="acc-ustat">
+                      <strong id="acc-current-proxy">--</strong>
+                    </div>
+                    <div class="acc-ustat acc-ustat-detect">
+                      <strong id="acc-ip-detect-result">检测中...</strong>
                     </div>
                   </div>
-                </div>
+                </section>
               </div>
 
-              <div class="acc-card acc-controls-guide">
-                <div class="acc-card-head" style="margin-bottom: 10px;">
-                  <div>
-                    <div class="acc-card-title" style="margin-bottom: 2px;" data-i18n="acc.control.guide_title">使用提示与快捷操作</div>
-                    <div class="acc-muted" data-i18n="acc.control.guide_desc">控制页负责开关与模式；实时网速看「仪表盘」，选节点看「代理」。</div>
-                  </div>
+              <!-- 模式提示条 -->
+              <div id="acc-controls-mode-hint" class="acc-ctrl-hint" data-i18n="acc.controls.mode_hint.rule">日常上网推荐「规则」：国内直连、境外走节点。</div>
+
+              <!-- 快捷操作 + 精简提示 -->
+              <div class="acc-ctrl-footer">
+                <div class="acc-ctrl-actions">
+                  <button type="button" id="acc-copy-proxy-btn" class="acc-action-btn" data-i18n="acc.control.action_copy">复制本地代理</button>
+                  <button type="button" id="acc-controls-detect-btn" class="acc-action-btn" data-i18n="acc.control.action_detect">检测出口 IP</button>
+                  <button type="button" id="acc-controls-goto-proxies" class="acc-action-btn" data-i18n="acc.control.action_goto_proxies">去代理页测速</button>
+                  <button type="button" id="acc-controls-refresh-btn" class="acc-action-btn" data-i18n="acc.control.action_refresh">刷新状态</button>
                 </div>
-                <div class="acc-controls-tips">
-                  <div class="acc-tip-item">
+                <div class="acc-ctrl-tips">
+                  <div class="acc-tip-chip" title="" data-i18n-title="acc.control.tip_tun_desc">
+                    <span class="acc-tip-chip-dot"></span>
                     <strong data-i18n="acc.control.tip_tun_title">系统代理 vs TUN</strong>
-                    <span data-i18n="acc.control.tip_tun_desc">一般开「系统代理」就够用；个别软件不走系统代理时再开 TUN。两者可同时开，但少数场景可能变慢。</span>
+                    <span data-i18n="acc.control.tip_tun_short">日常开系统代理即可</span>
                   </div>
-                  <div class="acc-tip-item">
+                  <div class="acc-tip-chip" title="" data-i18n-title="acc.control.tip_rule_desc">
+                    <span class="acc-tip-chip-dot"></span>
                     <strong data-i18n="acc.control.tip_rule_title">规则模式</strong>
-                    <span data-i18n="acc.control.tip_rule_desc">推荐日常使用。订阅规则会分流：国内直连、需要加速的走当前节点。</span>
+                    <span data-i18n="acc.control.tip_rule_short">推荐日常使用</span>
                   </div>
-                  <div class="acc-tip-item">
+                  <div class="acc-tip-chip" title="" data-i18n-title="acc.control.tip_ip_desc">
+                    <span class="acc-tip-chip-dot"></span>
                     <strong data-i18n="acc.control.tip_ip_title">出口 IP</strong>
-                    <span data-i18n="acc.control.tip_ip_desc">未启用时显示本机公网出口；启用后显示当前节点出口。也可点「检测」手动刷新。</span>
+                    <span data-i18n="acc.control.tip_ip_short">启用后显示节点出口</span>
                   </div>
-                </div>
-                <div class="acc-controls-actions">
-                  <button type="button" id="acc-copy-proxy-btn" class="btn-secondary" data-i18n="acc.control.action_copy">复制本地代理</button>
-                  <button type="button" id="acc-controls-detect-btn" class="btn-secondary" data-i18n="acc.control.action_detect">检测出口 IP</button>
-                  <button type="button" id="acc-controls-goto-proxies" class="btn-secondary" data-i18n="acc.control.action_goto_proxies">去代理页测速</button>
-                  <button type="button" id="acc-controls-refresh-btn" class="btn-secondary" data-i18n="acc.control.action_refresh">刷新状态</button>
                 </div>
               </div>
             </div>
