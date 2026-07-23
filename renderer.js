@@ -10172,6 +10172,205 @@ function finishGatewayUpdateProgress(success, message) {
 let __openclawPanelLastUrl = '';
 let __openclawPanelLoading = false;
 
+const OPENCLAW_TRANSPARENT_PANEL_CSS = [
+    ':root, html, body, [data-theme], [class*="theme"] { --background: transparent !important; --foreground: #f8fafc !important; --card: transparent !important; --card-foreground: #f8fafc !important; --muted: transparent !important; --muted-foreground: #cbd5e1 !important; --border: rgba(255, 255, 255, 0.15) !important; --input: rgba(255, 255, 255, 0.1) !important; --sidebar-background: rgba(18, 24, 38, 0.85) !important; --sidebar-foreground: #f8fafc !important; --sidebar-primary: #38bdf8 !important; --sidebar-primary-foreground: #f8fafc !important; --sidebar-accent-foreground: #f8fafc !important; --sidebar-muted: #cbd5e1 !important; --sidebar-border: rgba(255, 255, 255, 0.1) !important; --tw-text-opacity: 1 !important; --color-bg-layout: transparent !important; --color-bg-container: transparent !important; --color-fill: transparent !important; --color-fill-secondary: transparent !important; --color-fill-tertiary: transparent !important; --color-fill-quaternary: transparent !important; --color-bg-text-hover: transparent !important; --color-bg-text-active: transparent !important; --color-text: #f8fafc !important; --color-text-secondary: #cbd5e1 !important; --color-text-tertiary: #94a3b8 !important; }',
+    '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
+    'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="backdrop"], [class*="overlay"], .ant-card-head, .ant-card-head-wrapper, .ant-list-header, .ant-table-thead > tr > th, [class*="header"], [class*="head"], [class*="toolbar"], [class*="title-bar"] { background: transparent !important; background-color: transparent !important; box-shadow: none !important; }',
+    'aside, nav, [class*="bg-sidebar"] { background: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; backdrop-filter: blur(16px) !important; -webkit-backdrop-filter: blur(16px) !important; border-right: 1px solid rgba(255,255,255,0.08) !important; position: relative !important; z-index: 100 !important; }',
+    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
+    'body { color-scheme: dark !important; }',
+    'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: #f8fafc !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
+    '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: #cbd5e1 !important; opacity: 1 !important; }',
+    '[class*="opacity-"], [style*="opacity"] { opacity: 1 !important; }',
+    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: #cbd5e1 !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
+    '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; color: #ffffff !important; opacity: 1 !important; box-shadow: none !important; }',
+    '[class*="bg-white"], [style*="background: white"], [style*="background-color: white"], [style*="background: #fff"], [style*="background-color: #fff"], [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"] { background: transparent !important; background-color: transparent !important; }',
+    '.ant-segmented-thumb, [class*="indicator"], [class*="slider"] { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; box-shadow: none !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 6px !important; }',
+    'button, [role="button"], [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
+    '.ant-segmented { background: transparent !important; background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }',
+    'button:not([data-state="active"]):not([data-state="checked"]):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
+    'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: #38bdf8 !important; }',
+    'textarea::placeholder, input::placeholder, [class*="placeholder"] { color: #cbd5e1 !important; opacity: 0.85 !important; }',
+    'svg { color: #38bdf8 !important; opacity: 1 !important; }',
+    'pre, code { background-color: rgba(0, 0, 0, 0.3) !important; color: #e0f2fe !important; }',
+    '::-webkit-scrollbar { width: 14px !important; height: 14px !important; }',
+    '::-webkit-scrollbar-track { background: transparent !important; }',
+    '::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.4) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+    '::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+    '::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; -webkit-appearance: none !important; }',
+    '::-webkit-scrollbar-corner { background: transparent !important; }',
+    '.simplebar-scrollbar::before, .ms-thumb, .os-scrollbar-handle { background-color: rgba(148, 163, 184, 0.4) !important; border-radius: 9999px !important; }',
+    '* { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
+    'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"], body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: #121826 !important; background-color: #121826 !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
+].join('\n');
+
+function syncOpenclawThemeToWebview() {
+    const webview = document.getElementById('openclaw-iframe');
+    if (!webview) return;
+    try {
+        const bodyStyle = getComputedStyle(document.body);
+        const textPrimary = (bodyStyle.getPropertyValue('--text-primary') || '#f0f6ff').trim();
+        const textSecondary = (bodyStyle.getPropertyValue('--text-secondary') || '#cbd5e1').trim();
+        const accentColor = (bodyStyle.getPropertyValue('--accent-color') || '#38bdf8').trim();
+        const borderColor = (bodyStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)').trim();
+        const bgPanel = (bodyStyle.getPropertyValue('--bg-panel') || 'rgba(18, 24, 38, 0.85)').trim();
+
+        const js = `
+            (function() {
+                var style = document.getElementById('nexora-openclaw-dynamic-theme');
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = 'nexora-openclaw-dynamic-theme';
+                    document.head.appendChild(style);
+                }
+                var css = [
+                    ':root, html, body, [data-theme] {',
+                    '  --bg-panel: ${bgPanel} !important;',
+                    '  --background: transparent !important;',
+                    '  --foreground: ${textPrimary} !important;',
+                    '  --card: transparent !important;',
+                    '  --card-foreground: ${textPrimary} !important;',
+                    '  --popover: transparent !important;',
+                    '  --popover-foreground: ${textPrimary} !important;',
+                    '  --muted: transparent !important;',
+                    '  --muted-foreground: ${textSecondary} !important;',
+                    '  --border: ${borderColor} !important;',
+                    '  --input: rgba(255, 255, 255, 0.1) !important;',
+                    '  --accent: ${accentColor} !important;',
+                    '  --accent-foreground: ${textPrimary} !important;',
+                    '  --sidebar-background: ${bgPanel} !important;',
+                    '  --sidebar-foreground: ${textPrimary} !important;',
+                    '  --sidebar-primary: ${accentColor} !important;',
+                    '  --sidebar-primary-foreground: ${textPrimary} !important;',
+                    '  --sidebar-accent-foreground: ${textPrimary} !important;',
+                    '  --sidebar-muted: ${textSecondary} !important;',
+                    '  --sidebar-border: ${borderColor} !important;',
+                    '  --tw-text-opacity: 1 !important;',
+                    '}',
+                    '*, *::before, *::after {',
+                    '  backdrop-filter: none !important;',
+                    '  -webkit-backdrop-filter: none !important;',
+                    '}',
+                    'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, body > div, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="bg-panel"], [class*="bg-surface"], [class*="bg-base"], [class*="backdrop"], [class*="overlay"] {',
+                    '  background: transparent !important;',
+                    '  background-color: transparent !important;',
+                    '  box-shadow: none !important;',
+                    '}',
+                    'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar {',
+                    '  background: var(--bg-panel, ${bgPanel}) !important;',
+                    '  background-color: var(--bg-panel, ${bgPanel}) !important;',
+                    '  backdrop-filter: blur(20px) !important;',
+                    '  -webkit-backdrop-filter: blur(20px) !important;',
+                    '  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;',
+                    '  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2) !important;',
+                    '}',
+                    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"] {',
+                    '  background: var(--bg-panel, ${bgPanel}) !important;',
+                    '  background-color: var(--bg-panel, ${bgPanel}) !important;',
+                    '  border: 1px solid rgba(255, 255, 255, 0.15) !important;',
+                    '  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6) !important;',
+                    '}',
+                    'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, [class*="text"], [class*="label"], [class*="title"], [class*="desc"] {',
+                    '  color: ${textPrimary} !important;',
+                    '  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);',
+                    '}',
+                    '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time {',
+                    '  color: ${textSecondary} !important;',
+                    '  opacity: 1 !important;',
+                    '}',
+                    '[class*="opacity-"], [style*="opacity"] {',
+                    '  opacity: 1 !important;',
+                    '}',
+                    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) {',
+                    '  color: ${textSecondary} !important;',
+                    '  opacity: 0.95 !important;',
+                    '  background: transparent !important;',
+                    '  background-color: transparent !important;',
+                    '}',
+                    '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected {',
+                    '  background: rgba(255, 255, 255, 0.1) !important;',
+                    '  background-color: rgba(255, 255, 255, 0.1) !important;',
+                    '  color: ${textPrimary} !important;',
+                    '  opacity: 1 !important;',
+                    '  box-shadow: none !important;',
+                    '}',
+                    '.ant-segmented-thumb, [class*="thumb"], [class*="indicator"], [class*="slider"] {',
+                    '  background: rgba(255, 255, 255, 0.1) !important;',
+                    '  background-color: rgba(255, 255, 255, 0.1) !important;',
+                    '  box-shadow: none !important;',
+                    '  border: 1px solid rgba(255, 255, 255, 0.2) !important;',
+                    '}',
+                    '.ant-segmented {',
+                    '  background: rgba(0, 0, 0, 0.2) !important;',
+                    '  background-color: rgba(0, 0, 0, 0.2) !important;',
+                    '  border: 1px solid rgba(255, 255, 255, 0.1) !important;',
+                    '}',
+                    'button, [role="button"], [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item {',
+                    '  border: 1px solid ${borderColor} !important;',
+                    '  box-shadow: none !important;',
+                    '}',
+                    'textarea, input, [contenteditable="true"] {',
+                    '  background-color: rgba(0, 0, 0, 0.2) !important;',
+                    '  color: ${textPrimary} !important;',
+                    '  border-color: ${borderColor} !important;',
+                    '  caret-color: ${accentColor} !important;',
+                    '}',
+                    'textarea::placeholder, input::placeholder, [class*="placeholder"] {',
+                    '  color: ${textSecondary} !important;',
+                    '  opacity: 0.85 !important;',
+                    '}',
+                    'svg {',
+                    '  color: ${accentColor} !important;',
+                    '  opacity: 1 !important;',
+                    '}'
+                ].join('\\n');
+                if (style.textContent !== css) style.textContent = css;
+
+                // 动态探测侧边栏并赋予不透明背景类
+                if (!window.__nexora_sidebar_observer) {
+                    window.__nexora_sidebar_observer = setInterval(function() {
+                        var elements = document.querySelectorAll('div, aside, section');
+                        for (var i = 0; i < elements.length; i++) {
+                            var el = elements[i];
+                            var rect = el.getBoundingClientRect();
+                            if (rect.left === 0 && rect.top <= 0 && rect.height >= window.innerHeight * 0.9 && rect.width >= 180 && rect.width <= 350) {
+                                if (el.id === 'root' || el.id === '__next' || el.tagName === 'BODY' || el.tagName === 'HTML') continue;
+                                if (!el.classList.contains('nexora-solid-sidebar')) {
+                                    el.classList.add('nexora-solid-sidebar');
+                                }
+                            }
+                        }
+                    }, 1000);
+                }
+
+                // 强制锁定全局暗黑模式，彻底粉碎所有的 Light Mode 白底闪烁
+                if (!window.__nexora_theme_locker) {
+                    var lockTheme = function() {
+                        var html = document.documentElement;
+                        var body = document.body;
+                        if (html.classList.contains('light')) { html.classList.remove('light'); html.classList.add('dark'); }
+                        if (html.getAttribute('data-theme') !== 'dark') { html.setAttribute('data-theme', 'dark'); }
+                        if (html.style.colorScheme === 'light') { html.style.colorScheme = 'dark'; }
+                        if (body.classList.contains('light')) { body.classList.remove('light'); body.classList.add('dark'); }
+                        if (body.getAttribute('data-theme') === 'light' || body.getAttribute('data-theme') === 'auto') { body.setAttribute('data-theme', 'dark'); }
+                        try {
+                            localStorage.setItem('lobe-chat-theme', 'dark');
+                            localStorage.setItem('theme-mode', 'dark');
+                            localStorage.setItem('theme', 'dark');
+                        } catch(e) {}
+                    };
+                    window.__nexora_theme_locker = new MutationObserver(lockTheme);
+                    var opts = { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] };
+                    window.__nexora_theme_locker.observe(document.documentElement, opts);
+                    window.__nexora_theme_locker.observe(document.body, opts);
+                    lockTheme(); // run once immediately
+                }
+            })();
+        `;
+        webview.executeJavaScript(js).catch(() => {});
+    } catch (e) {}
+}
+
 async function loadOpenclawControlUi(forceReload = false) {
     const webview = document.getElementById('openclaw-iframe');
     if (!webview || __openclawPanelLoading) return;
@@ -10180,6 +10379,8 @@ async function loadOpenclawControlUi(forceReload = false) {
         const url = await window.api.getDashboardUrl();
         const currentSrc = (webview.getAttribute('src') || '').trim();
         if (!forceReload && currentSrc && (currentSrc === url || __openclawPanelLastUrl === url)) {
+            injectWebviewUpdateInterceptor(webview);
+            syncOpenclawThemeToWebview();
             return;
         }
         showToast(forceReload ? '正在重新免密登录控制台…' : '正在连接Nexora Agent控制台面板…');
@@ -10191,11 +10392,13 @@ async function loadOpenclawControlUi(forceReload = false) {
         webview.src = url;
         
         injectWebviewUpdateInterceptor(webview);
+        syncOpenclawThemeToWebview();
     } catch (err) {
         const fallback = 'http://127.0.0.1:18789/acp/#token=' + encodeURIComponent('openclaw-dev-token-998877');
         __openclawPanelLastUrl = fallback;
         webview.src = fallback;
         injectWebviewUpdateInterceptor(webview);
+        syncOpenclawThemeToWebview();
     } finally {
         __openclawPanelLoading = false;
     }
@@ -10205,9 +10408,20 @@ function injectWebviewUpdateInterceptor(webview) {
     if (!webview) return;
 
     const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
+    try {
+        if (typeof webview.insertCSS === 'function') {
+            webview.insertCSS(OPENCLAW_TRANSPARENT_PANEL_CSS).catch(() => {});
+        }
+    } catch (e) {}
 
     // 每次 webview 加载完毕后注入拦截脚本
     const onDomReady = () => {
+        try {
+            if (typeof webview.insertCSS === 'function') {
+                webview.insertCSS(OPENCLAW_TRANSPARENT_PANEL_CSS).catch(() => {});
+            }
+        } catch (e) {}
+        syncOpenclawThemeToWebview();
         webview.executeJavaScript(`
             (function() {
                 if (window.__nexora_agent_update_injected) return;

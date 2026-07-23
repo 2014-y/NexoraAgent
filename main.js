@@ -4398,7 +4398,10 @@ function ensureOpenClawConfigInitialized() {
         if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
         if (!config.ui.assistant.avatar) {
             config.ui.assistant.avatar = '🤖';
-            config.ui.assistant.name = config.ui.assistant.name || 'Nexora Agent';
+            needsSave = true;
+        }
+        if (config.ui.assistant.name !== 'Nexora Agent') {
+            config.ui.assistant.name = 'Nexora Agent';
             needsSave = true;
         }
         // 统一规范化 gateway.auth / controlUi / port（禁止 SecretRef/空值/随机令牌导致面板永登不上）
