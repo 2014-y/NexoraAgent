@@ -25,6 +25,9 @@ function underRoot(target, root) {
 function isPluginPathStaleOnThisMachine(pluginPath, ctx = {}) {
     const p = String(pluginPath || '');
     if (!p) return true;
+    const normalizedRaw = p.toLowerCase().replace(/\//g, '\\');
+    if (normalizedRaw.includes('\\resources\\app.asar\\node_modules\\')) return true;
+    if (normalizedRaw.includes('\\clawai\\nexora agent\\resources\\app.asar\\')) return true;
 
     const {
         userProfile = process.env.USERPROFILE || process.env.HOME || '',
@@ -37,6 +40,8 @@ function isPluginPathStaleOnThisMachine(pluginPath, ctx = {}) {
 
     try {
         if (!fs.existsSync(p)) return true;
+        const stat = fs.statSync(p);
+        if (stat.isDirectory() && !fs.existsSync(path.join(p, 'package.json'))) return true;
     } catch (e) {
         return true;
     }
@@ -91,6 +96,20 @@ function sanitizePluginPathsForThisMachine(config, ctx = {}) {
     for (const p of config.plugins.load.paths) {
         if (typeof p !== 'string') {
             changed = true;
+            continue;
+        }
+        try {
+            const stat = fs.existsSync(p) ? fs.statSync(p) : null;
+            if (!stat || (stat.isDirectory() && !fs.existsSync(path.join(p, 'package.json')))) {
+                droppedPaths.push(p);
+                changed = true;
+                notes.push('drop-missing-load-path');
+                continue;
+            }
+        } catch (e) {
+            droppedPaths.push(p);
+            changed = true;
+            notes.push('drop-unreadable-load-path');
             continue;
         }
         if (looksLikeOfficialOpenClawChannelPath(p)) {
