@@ -273,6 +273,21 @@ function looksLikePseudoScreenshot(text) {
   return false;
 }
 
+function extractMediaDirectiveUrls(text) {
+  const raw = String(text || '');
+  const urls = [];
+  const re = /(?:^|\n)\s*MEDIA\s*:\s*([^\n]+)/gi;
+  let match;
+  while ((match = re.exec(raw))) {
+    let value = String(match[1] || '').trim().replace(/^`|`$/g, '');
+    const fileMatch = value.match(/^[A-Za-z]:[\\/].*?\.(?:png|jpe?g|webp|gif|bmp|mp4|mov|webm|mp3|wav|m4a)\b/i);
+    if (fileMatch) value = fileMatch[0];
+    value = value.replace(/[),.;]+$/g, '');
+    if (value) urls.push(unixPath(value));
+  }
+  return Array.from(new Set(urls));
+}
+
 async function maybeRewritePseudoMedia(text) {
   const raw = String(text || '');
   if (!raw.trim() || /^MEDIA\s*:/i.test(raw.trim())) return null;
@@ -291,10 +306,46 @@ async function maybeRewritePseudoMedia(text) {
   return null;
 }
 
+async function maybeBuildPseudoMediaPayload(payload) {
+  const base = payload && typeof payload === 'object' ? payload : {};
+  const raw = typeof base.text === 'string' ? base.text : extractText({ content: base.content });
+  if (!raw.trim()) return null;
+
+  const directiveUrls = extractMediaDirectiveUrls(raw);
+  if (directiveUrls.length > 0) {
+    return { ...base, text: '', mediaUrl: directiveUrls[0], mediaUrls: directiveUrls };
+  }
+
+  const prompt = extractDrawPicturePrompt(raw);
+  if (prompt) {
+    const files = await runDrawPicture(prompt);
+    const mediaUrls = files.map(unixPath);
+    return { ...base, text: '', mediaUrl: mediaUrls[0], mediaUrls };
+  }
+
+  if (looksLikePseudoScreenshot(raw)) {
+    const file = unixPath(await runScreenCapture());
+    return { ...base, text: '', mediaUrl: file, mediaUrls: [file] };
+  }
+
+  return null;
+}
+
 function register(api) {
   try {
     api.logger?.info?.(`[${PLUGIN_ID}] loaded: suppress warnings and repair pseudo media commands`);
   } catch (_) {}
+
+  api.on('reply_payload_sending', async (event) => {
+    try {
+      const payload = await maybeBuildPseudoMediaPayload(event?.payload);
+      if (!payload) return;
+      try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote pseudo media payload to mediaUrls`); } catch (_) {}
+      return { payload };
+    } catch (e) {
+      console.warn(`[${PLUGIN_ID}] reply_payload_sending hook error:`, e && e.message);
+    }
+  });
 
   api.on('message_sending', async (event) => {
     try {

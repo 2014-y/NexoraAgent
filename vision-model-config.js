@@ -1,7 +1,8 @@
 'use strict';
 /**
- * OpenClaw media-understanding 依赖 models.providers.*.models[].input 声明识图能力。
- * 缺省时 OpenClaw 视为 text-only → 「Model does not support images」→ 主模型收不到图片上下文而乱答。
+ * OpenClaw media understanding depends on models.providers.*.models[].input.
+ * If a vision-capable custom model is not marked with image input, OpenClaw can
+ * treat it as text-only and the main model never receives image context.
  */
 
 const VISION_MODEL_ID_PATTERNS = [
@@ -25,12 +26,13 @@ const GENERATION_ONLY_PATTERNS = [
   /^agnes-image-/i,
   /^agnes-video-/i,
   /^dall-e/i,
-  /^stable-diffusion/i
+  /^stable-diffusion/i,
+  /^hy-image/i
 ];
 
 const DEFAULT_VISION_MODEL = 'agnes-ai/agnes-2.0-flash';
 const DEFAULT_MEDIA_PROMPT =
-  '请用中文详细描述这张图片的内容，包括场景、物体、文字、颜色等。如果有多个物体，逐个描述。不超过300字。';
+  '\u8bf7\u7528\u4e2d\u6587\u8be6\u7ec6\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u7684\u5185\u5bb9\uff0c\u5305\u62ec\u573a\u666f\u3001\u7269\u4f53\u3001\u6587\u5b57\u3001\u989c\u8272\u7b49\u3002\u5982\u679c\u6709\u591a\u4e2a\u7269\u4f53\uff0c\u9010\u4e2a\u63cf\u8ff0\u3002\u4e0d\u8d85\u8fc7300\u5b57\u3002';
 
 function isObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
@@ -58,14 +60,44 @@ function isLikelyVisionModelId(modelId) {
   return VISION_MODEL_ID_PATTERNS.some((re) => re.test(id));
 }
 
-function ensureModelInput(model) {
+function hasImageEntry(value) {
+  return Array.isArray(value) && value.map(String).some((entry) => entry.toLowerCase() === 'image');
+}
+
+function hasVisionCapabilityMetadata(model) {
+  if (!isObject(model)) return false;
+  if (hasImageEntry(model.input) || hasImageEntry(model.inputs) || hasImageEntry(model.modalities)) return true;
+  if (model.supportsImages === true || model.supportsImage === true || model.vision === true) return true;
+
+  const caps = model.capabilities;
+  if (Array.isArray(caps)) {
+    return caps.map(String).some((entry) => /^(image|images|vision|multimodal)$/i.test(entry));
+  }
+  if (isObject(caps)) {
+    return caps.image === true || caps.images === true || caps.vision === true || caps.multimodal === true;
+  }
+  return false;
+}
+
+function isVisionModelObject(model) {
   if (!isObject(model)) return false;
   const id = model.id || model.name || '';
-  if (!isLikelyVisionModelId(id)) return false;
-  const current = Array.isArray(model.input) ? model.input.map(String) : null;
-  if (current && current.includes('image')) return false;
-  model.input = ['text', 'image'];
+  if (isGenerationOnlyModelId(id)) return false;
+  return hasVisionCapabilityMetadata(model) || isLikelyVisionModelId(id);
+}
+
+function ensureModelInput(model) {
+  if (!isObject(model) || !isVisionModelObject(model)) return false;
+  const current = Array.isArray(model.input) ? model.input.map(String) : [];
+  if (current.includes('image')) return false;
+  model.input = current.length > 0 ? Array.from(new Set([...current, 'image'])) : ['text', 'image'];
   return true;
+}
+
+function findProviderModel(cfg, providerId, modelId) {
+  const provider = cfg && cfg.models && cfg.models.providers && cfg.models.providers[providerId];
+  if (!isObject(provider) || !Array.isArray(provider.models)) return null;
+  return provider.models.find((model) => isObject(model) && String(model.id || model.name || '').trim() === modelId) || null;
 }
 
 function findFirstVisionModelRef(cfg) {
@@ -78,24 +110,13 @@ function findFirstVisionModelRef(cfg) {
       if (!isObject(model)) continue;
       const id = model.id || model.name;
       if (!id) continue;
-      const hasImage = Array.isArray(model.input) && model.input.includes('image');
-      if (hasImage || isLikelyVisionModelId(id)) {
-        return `${providerId}/${id}`;
-      }
+      if (isVisionModelObject(model)) return `${providerId}/${id}`;
     }
   }
   return null;
 }
 
-function resolveVisionModelRef(cfg) {
-  const imageModelRef =
-    cfg &&
-    cfg.agents &&
-    cfg.agents.defaults &&
-    cfg.agents.defaults.imageModel &&
-    cfg.agents.defaults.imageModel.primary;
-  if (imageModelRef) return String(imageModelRef).trim();
-
+function resolvePrimaryModelRef(cfg) {
   const primaryRef =
     cfg &&
     cfg.agents &&
@@ -104,10 +125,23 @@ function resolveVisionModelRef(cfg) {
     (typeof cfg.agents.defaults.model === 'string'
       ? cfg.agents.defaults.model
       : cfg.agents.defaults.model.primary);
-  const parsedPrimary = parseModelRef(primaryRef);
-  if (parsedPrimary && isLikelyVisionModelId(parsedPrimary.model)) {
-    return parsedPrimary.primary;
-  }
+  const parsed = parseModelRef(primaryRef);
+  if (!parsed) return null;
+  const model = findProviderModel(cfg, parsed.provider, parsed.model);
+  return isVisionModelObject(model) || isLikelyVisionModelId(parsed.model) ? parsed.primary : null;
+}
+
+function resolveVisionModelRef(cfg) {
+  const primaryVisionRef = resolvePrimaryModelRef(cfg);
+  if (primaryVisionRef) return primaryVisionRef;
+
+  const imageModelRef =
+    cfg &&
+    cfg.agents &&
+    cfg.agents.defaults &&
+    cfg.agents.defaults.imageModel &&
+    cfg.agents.defaults.imageModel.primary;
+  if (imageModelRef) return String(imageModelRef).trim();
 
   return findFirstVisionModelRef(cfg) || DEFAULT_VISION_MODEL;
 }
@@ -135,42 +169,34 @@ function ensureMediaImageTools(cfg, visionRef) {
   if (!parsed) return changed;
 
   const models = Array.isArray(imageCfg.models) ? imageCfg.models : [];
-  const hasMatch = models.some(
+  const matching = models.find(
     (entry) =>
       isObject(entry) &&
       String(entry.provider || '').trim() === parsed.provider &&
       String(entry.model || '').trim() === parsed.model
   );
-
-  if (!hasMatch) {
-    imageCfg.models = [
-      {
-        prompt: DEFAULT_MEDIA_PROMPT,
-        provider: parsed.provider,
-        model: parsed.model
-      },
-      ...models.filter(
-        (entry) =>
-          !(
-            isObject(entry) &&
-            String(entry.provider || '').trim() === parsed.provider &&
-            String(entry.model || '').trim() === parsed.model
-          )
+  const selected = {
+    prompt: matching && matching.prompt ? matching.prompt : DEFAULT_MEDIA_PROMPT,
+    provider: parsed.provider,
+    model: parsed.model
+  };
+  const rest = models.filter(
+    (entry) =>
+      !(
+        isObject(entry) &&
+        String(entry.provider || '').trim() === parsed.provider &&
+        String(entry.model || '').trim() === parsed.model
       )
-    ];
-    changed = true;
-  } else if (models[0] && isObject(models[0]) && !models[0].prompt) {
-    models[0].prompt = DEFAULT_MEDIA_PROMPT;
+  );
+  const nextModels = [selected, ...rest];
+  if (JSON.stringify(nextModels) !== JSON.stringify(models)) {
+    imageCfg.models = nextModels;
     changed = true;
   }
 
   return changed;
 }
 
-/**
- * 补齐识图模型 input 元数据、agents.defaults.imageModel 与 tools.media.image。
- * @returns {{ config: object, changed: boolean, visionModel?: string }}
- */
 function ensureVisionModelConfig(cfg, opts = {}) {
   if (!isObject(cfg)) return { config: cfg, changed: false };
 
@@ -202,7 +228,7 @@ function ensureVisionModelConfig(cfg, opts = {}) {
   const visionRef = resolveVisionModelRef(cfg);
   const currentImageModel =
     cfg.agents.defaults.imageModel.primary && String(cfg.agents.defaults.imageModel.primary).trim();
-  if (!currentImageModel) {
+  if (!currentImageModel || currentImageModel === DEFAULT_VISION_MODEL && visionRef !== DEFAULT_VISION_MODEL) {
     cfg.agents.defaults.imageModel.primary = visionRef;
     changed = true;
   }
@@ -220,6 +246,7 @@ function ensureVisionModelConfig(cfg, opts = {}) {
 module.exports = {
   DEFAULT_VISION_MODEL,
   isLikelyVisionModelId,
+  hasVisionCapabilityMetadata,
   isGenerationOnlyModelId,
   ensureVisionModelConfig
 };

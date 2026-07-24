@@ -1,12 +1,13 @@
 'use strict';
 /**
- * 默认模型 → 沙箱 OpenClaw 会话同步。
- * OpenClaw 对话会把 model/modelProvider（及 modelOverride）粘在 sessions.json，
- * 只改 openclaw.json 的 agents.defaults.model 不会让已有网关会话换模型。
+ * Sync default model settings into OpenClaw state directories.
+ * OpenClaw sessions can keep sticky model/provider overrides, so changing only
+ * openclaw.json is not enough for already-created gateway sessions.
  */
 
 const fs = require('fs');
 const path = require('path');
+const { ensureVisionModelConfig } = require('./vision-model-config');
 
 function parseProviderModel(primary) {
     const s = String(primary || '').trim();
@@ -20,9 +21,16 @@ function parseProviderModel(primary) {
     };
 }
 
+function cloneJson(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function jsonChanged(a, b) {
+    return JSON.stringify(a) !== JSON.stringify(b);
+}
+
 function shouldUpdateSessionKey(key) {
     const k = String(key || '');
-    // 主会话 + Control UI / OpenClaw 面板会话
     if (k === 'agent:main:main') return true;
     if (k.startsWith('agent:main:dashboard:')) return true;
     if (/^agent:main:main(?:-|$)/.test(k)) return true;
@@ -43,10 +51,17 @@ function stripStickyModelOverrides(entry) {
     delete entry.authProfileOverrideCompactionCount;
 }
 
-/**
- * 把默认主模型写进沙箱 OpenClaw 会话（清除 override，避免面板仍用旧模型）。
- * @returns {{ changed: boolean, updated: number, path?: string }}
- */
+function readJsonLenient(filePath) {
+    const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        const idx = raw.lastIndexOf('}');
+        if (idx < 0) throw e;
+        return JSON.parse(raw.slice(0, idx + 1));
+    }
+}
+
 function applyDefaultModelToSessions(stateDir, primaryModel) {
     const parsed = parseProviderModel(primaryModel);
     if (!parsed || !parsed.model || !stateDir) {
@@ -58,16 +73,7 @@ function applyDefaultModelToSessions(stateDir, primaryModel) {
         return { changed: false, updated: 0, path: sessionsPath };
     }
 
-    let raw = fs.readFileSync(sessionsPath, 'utf8').replace(/^\uFEFF/, '');
-    let data;
-    try {
-        data = JSON.parse(raw);
-    } catch (e) {
-        const idx = raw.lastIndexOf('}');
-        if (idx < 0) throw e;
-        data = JSON.parse(raw.slice(0, idx + 1));
-    }
-
+    const data = readJsonLenient(sessionsPath);
     const hasWrapper = data && typeof data === 'object' && data.sessions && typeof data.sessions === 'object';
     const entries = hasWrapper ? data.sessions : data;
     if (!entries || typeof entries !== 'object') {
@@ -110,18 +116,46 @@ function applyDefaultModelToSessions(stateDir, primaryModel) {
     return { changed: updated > 0, updated, path: sessionsPath };
 }
 
-/**
- * 把主配置的默认模型/供应商同步到其它可能被旧沙箱读到的 openclaw.json。
- * 只改 model 相关字段，保留对方 gateway.auth 等。
- */
+function syncAgentDefaults(cfg, sourceConfig) {
+    let changed = false;
+    if (!cfg.agents) { cfg.agents = {}; changed = true; }
+    if (!cfg.agents.defaults) { cfg.agents.defaults = {}; changed = true; }
+
+    const srcDefaults = sourceConfig.agents && sourceConfig.agents.defaults;
+    if (!srcDefaults) return changed;
+
+    if (srcDefaults.model) {
+        if (!cfg.agents.defaults.model) cfg.agents.defaults.model = {};
+        const before = cloneJson(cfg.agents.defaults.model);
+        cfg.agents.defaults.model = {
+            ...cfg.agents.defaults.model,
+            primary: srcDefaults.model.primary,
+            fallbacks: Array.isArray(srcDefaults.model.fallbacks)
+                ? cloneJson(srcDefaults.model.fallbacks)
+                : cfg.agents.defaults.model.fallbacks
+        };
+        if (jsonChanged(before, cfg.agents.defaults.model)) changed = true;
+    }
+
+    for (const key of ['imageModel', 'imageGenerationModel', 'videoGenerationModel']) {
+        if (!srcDefaults[key]) continue;
+        const before = cloneJson(cfg.agents.defaults[key]);
+        cfg.agents.defaults[key] = cloneJson(srcDefaults[key]);
+        if (jsonChanged(before, cfg.agents.defaults[key])) changed = true;
+    }
+
+    return changed;
+}
+
 function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
     const synced = [];
     if (!sourceConfig || typeof sourceConfig !== 'object') return synced;
 
-    const primary = sourceConfig.agents
-        && sourceConfig.agents.defaults
-        && sourceConfig.agents.defaults.model
-        && sourceConfig.agents.defaults.model.primary;
+    const preparedSource = ensureVisionModelConfig(cloneJson(sourceConfig)).config;
+    const primary = preparedSource.agents
+        && preparedSource.agents.defaults
+        && preparedSource.agents.defaults.model
+        && preparedSource.agents.defaults.model.primary;
 
     const uniq = [];
     for (const dir of stateDirs || []) {
@@ -137,44 +171,29 @@ function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
         try {
             if (!fs.existsSync(cf)) continue;
 
-            // 主目录已由调用方写完整文件；这里只修旁路目录 + 总会话
             if (dir !== primaryResolved) {
-                let raw = fs.readFileSync(cf, 'utf8').replace(/^\uFEFF/, '');
-                let cfg;
-                try {
-                    cfg = JSON.parse(raw);
-                } catch (e) {
-                    const idx = raw.lastIndexOf('}');
-                    if (idx < 0) continue;
-                    cfg = JSON.parse(raw.slice(0, idx + 1));
-                }
-
+                const cfg = readJsonLenient(cf);
                 let changed = false;
-                if (!cfg.agents) { cfg.agents = {}; changed = true; }
-                if (!cfg.agents.defaults) { cfg.agents.defaults = {}; changed = true; }
-                if (!cfg.agents.defaults.model) { cfg.agents.defaults.model = {}; changed = true; }
 
-                const srcModel = sourceConfig.agents && sourceConfig.agents.defaults && sourceConfig.agents.defaults.model;
-                if (srcModel) {
-                    const before = JSON.stringify(cfg.agents.defaults.model);
-                    cfg.agents.defaults.model = {
-                        ...cfg.agents.defaults.model,
-                        primary: srcModel.primary,
-                        fallbacks: Array.isArray(srcModel.fallbacks) ? srcModel.fallbacks : cfg.agents.defaults.model.fallbacks
-                    };
-                    if (JSON.stringify(cfg.agents.defaults.model) !== before) changed = true;
-                }
+                if (syncAgentDefaults(cfg, preparedSource)) changed = true;
 
-                if (sourceConfig.models && sourceConfig.models.providers) {
+                if (preparedSource.models && preparedSource.models.providers) {
                     if (!cfg.models) cfg.models = {};
-                    const before = JSON.stringify(cfg.models.providers || {});
-                    cfg.models.providers = JSON.parse(JSON.stringify(sourceConfig.models.providers));
-                    if (JSON.stringify(cfg.models.providers) !== before) changed = true;
+                    const before = cloneJson(cfg.models.providers || {});
+                    cfg.models.providers = cloneJson(preparedSource.models.providers);
+                    if (jsonChanged(before, cfg.models.providers)) changed = true;
                 }
 
-                if (sourceConfig.env && typeof sourceConfig.env === 'object') {
+                if (preparedSource.tools && preparedSource.tools.media) {
+                    if (!cfg.tools) cfg.tools = {};
+                    const before = cloneJson(cfg.tools.media);
+                    cfg.tools.media = cloneJson(preparedSource.tools.media);
+                    if (jsonChanged(before, cfg.tools.media)) changed = true;
+                }
+
+                if (preparedSource.env && typeof preparedSource.env === 'object') {
                     if (!cfg.env) cfg.env = {};
-                    for (const [k, v] of Object.entries(sourceConfig.env)) {
+                    for (const [k, v] of Object.entries(preparedSource.env)) {
                         if (/_API_KEY$/i.test(k) && v != null && cfg.env[k] !== v) {
                             cfg.env[k] = v;
                             changed = true;
@@ -182,8 +201,11 @@ function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
                     }
                 }
 
+                const vision = ensureVisionModelConfig(cfg);
+                changed = vision.changed || changed;
+
                 if (changed) {
-                    fs.writeFileSync(cf, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+                    fs.writeFileSync(cf, JSON.stringify(vision.config, null, 2) + '\n', 'utf8');
                     synced.push(dir);
                 }
             }
@@ -192,7 +214,7 @@ function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
                 applyDefaultModelToSessions(dir, primary);
             }
         } catch (e) {
-            // 忽略单个目录失败
+            // Ignore a single broken state directory and keep syncing the rest.
         }
     }
 
