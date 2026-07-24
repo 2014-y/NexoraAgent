@@ -3449,7 +3449,19 @@ function setupIpcListeners() {
     const autostartToggleElement = document.getElementById('setting-autostart-toggle');
     if (autostartToggleElement) {
         autostartToggleElement.addEventListener('change', async (e) => {
-            await window.api.setAutoStart(e.target.checked);
+            const on = !!e.target.checked;
+            try {
+                const ok = await window.api.setAutoStart(on);
+                const applied = ok === true || ok === on ? on : !!ok;
+                e.target.checked = applied;
+                showToast(applied
+                    ? t('已开启开机自动启动', 'Auto-start enabled', '已開啟開機自動啟動')
+                    : t('已关闭开机自动启动', 'Auto-start disabled', '已關閉開機自動啟動'));
+            } catch (err) {
+                console.error('Failed to set autostart:', err);
+                e.target.checked = !on;
+                showToast(t('开机自启设置失败', 'Failed to update auto-start', '開機自啟設定失敗'));
+            }
         });
     }
 }
@@ -4054,7 +4066,7 @@ function renderProvidersList() {
             ? `<div class="provider-title-wrap" style="display:flex; flex-direction:column; gap:4px; min-width:0; flex:1; padding-right:8px;">
                     <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                         <span style="flex-shrink:0;">🔌</span>
-                        <input type="text" class="provider-label-input" data-provider="${key}" value="${esc(displayLabel)}" placeholder="${esc(t('显示名称', 'Display Name', '顯示名稱'))}" title="${esc(t('点击修改显示名称', 'Click to edit display name', '點擊修改顯示名稱'))}" style="flex:1; min-width:0; height:28px; font-size:14px; font-weight:700; color:var(--text-primary); background:rgba(255,255,255,0.04); border:1px solid transparent; border-radius:6px; padding:0 8px; outline:none;">
+                        <span class="provider-title-text" data-provider="${key}" style="flex:1; min-width:0; font-size:14px; font-weight:700; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayLabel)}</span>
                     </div>
                     ${displayRemark ? `<div class="provider-remark-preview" data-provider="${key}" style="font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayRemark)}</div>` : `<div class="provider-remark-preview" data-provider="${key}" style="display:none; font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>`}
                </div>`
@@ -4076,8 +4088,8 @@ function renderProvidersList() {
                </div>
                <div class="form-row" style="margin-bottom: 8px;">
                     <div class="form-field">
-                        <label>${t('厂商标识（不可修改）', 'Provider ID (read-only)', '廠商標識（不可修改）')}</label>
-                        <input type="text" value="${esc(key)}" readonly disabled style="opacity:0.7; cursor:not-allowed;">
+                        <label>${t('厂商标识', 'Provider ID', '廠商標識')}</label>
+                        <input type="text" class="provider-id-input" data-provider="${key}" value="${esc(key)}" placeholder="${esc(t('例如: deepseek, openai', 'e.g. deepseek, openai', '例如: deepseek, openai'))}" spellcheck="false" autocomplete="off">
                     </div>
                </div>`
             : '';
@@ -4464,10 +4476,68 @@ function bindProviderEvents() {
         const shown = getProviderLabel(providerKey, localProviders[providerKey]);
         document.querySelectorAll(`.provider-label-input[data-provider="${providerKey}"]`).forEach((el) => {
             if (el === sourceEl) return;
-            if (el.closest('.provider-card-header')) el.value = shown;
-            else el.value = trimmed;
+            el.value = trimmed;
+        });
+        document.querySelectorAll(`.provider-title-text[data-provider="${providerKey}"]`).forEach((el) => {
+            el.textContent = shown;
         });
         markConfigDirty();
+    };
+
+    const rewriteProviderRef = (raw, oldKey, newKey) => {
+        const s = String(raw || '').trim();
+        if (!s) return s;
+        if (s === oldKey) return newKey;
+        if (s.startsWith(oldKey + '/')) return newKey + s.slice(oldKey.length);
+        return s;
+    };
+
+    const renameCustomProviderKey = (oldKey, nextRaw) => {
+        if (!isCustomProviderKey(oldKey) || !localProviders[oldKey]) return false;
+        const newKey = String(nextRaw || '').trim().toLowerCase();
+        if (!newKey) {
+            showToast(t('请输入厂商标识', 'Please enter provider ID', '請輸入廠商標識'));
+            return false;
+        }
+        if (!/^[a-z0-9_-]+$/.test(newKey)) {
+            showToast(t('厂商标识仅能由小写字母、数字及中划线/下划线组成', 'Provider ID: lowercase letters, numbers, hyphen, underscore only', '廠商標識僅能由小寫字母、數字及中劃線/下劃線組成'));
+            return false;
+        }
+        if (newKey === oldKey) return true;
+        if (!isCustomProviderKey(newKey)) {
+            showToast(t('不能使用内置厂商标识 agnes-ai / ollama', 'Cannot use built-in IDs agnes-ai / ollama', '不能使用內置廠商標識 agnes-ai / ollama'));
+            return false;
+        }
+        if (localProviders[newKey]) {
+            showToast(t('该厂商标识已存在', 'This provider ID already exists', '該廠商標識已存在'));
+            return false;
+        }
+
+        localProviders[newKey] = localProviders[oldKey];
+        delete localProviders[oldKey];
+        if (expandedProviders.has(oldKey)) {
+            expandedProviders.delete(oldKey);
+            expandedProviders.add(newKey);
+        }
+
+        ['model-primary', 'model-fallback', 'model-teacher', 'model-student', 'image-model', 'video-model'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const next = rewriteProviderRef(el.value, oldKey, newKey);
+            if (next !== el.value) el.value = next;
+        });
+        ['model-primary-provider', 'model-fallback-provider'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (el.value === oldKey) el.value = newKey;
+        });
+
+        renderProvidersList();
+        updateModelsDatalist();
+        try { updateAssignedProviderSelects(); } catch (_) {}
+        markConfigDirty();
+        showToast(t(`已将厂商标识改为 ${newKey}`, `Provider ID renamed to ${newKey}`, `已將廠商標識改為 ${newKey}`));
+        return true;
     };
 
     document.querySelectorAll('.provider-label-input').forEach(input => {
@@ -4482,17 +4552,23 @@ function bindProviderEvents() {
             const provider = e.target.getAttribute('data-provider');
             syncProviderLabelInputs(provider, e.target.value, e.target);
         });
-        input.addEventListener('focus', (e) => {
-            e.target.style.borderColor = 'rgba(var(--accent-rgb), 0.45)';
-            e.target.style.background = 'rgba(255,255,255,0.06)';
+    });
+
+    document.querySelectorAll('.provider-id-input').forEach(input => {
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.target.blur();
+            }
         });
         input.addEventListener('blur', (e) => {
-            if (e.target.closest('.provider-card-header')) {
-                e.target.style.borderColor = 'transparent';
-                e.target.style.background = 'rgba(255,255,255,0.04)';
-                // 失焦后标题显示最终名称（空则回退为标识）
-                const provider = e.target.getAttribute('data-provider');
-                e.target.value = getProviderLabel(provider, localProviders[provider]);
+            const oldKey = e.target.getAttribute('data-provider');
+            const ok = renameCustomProviderKey(oldKey, e.target.value);
+            if (!ok && localProviders[oldKey]) {
+                e.target.value = oldKey;
             }
         });
     });
@@ -7331,6 +7407,7 @@ function setupThemeSwitching() {
         if (customPanel) customPanel.hidden = activeTheme !== 'theme-custom';
         if (typeof drawSidebarChart === 'function') drawSidebarChart();
         if (typeof syncBuiltinTerminalTheme === 'function') syncBuiltinTerminalTheme();
+        if (typeof pushDataCenterTheme === 'function') pushDataCenterTheme();
     };
 
     const applyPresetTheme = (themeName) => {
@@ -7381,6 +7458,7 @@ function setupThemeSwitching() {
                 const ov = document.getElementById('custom-theme-overlay');
                 if (ov) setCustomThemeOverlay(ov.value);
                 if (typeof syncBuiltinTerminalTheme === 'function') syncBuiltinTerminalTheme();
+                if (typeof pushDataCenterTheme === 'function') pushDataCenterTheme();
             } else {
                 localStorage.setItem('custom_theme_accent', accentInput.value);
             }
@@ -7397,6 +7475,7 @@ function setupThemeSwitching() {
                 const overlay = getComputedStyle(document.body).getPropertyValue('--custom-bg-overlay').trim() || '0.35';
                 appEl.style.backgroundImage = `linear-gradient(rgba(8,10,18,${overlay}), rgba(8,10,18,${overlay})), ${img}`;
             }
+            if (typeof pushDataCenterTheme === 'function') pushDataCenterTheme();
         });
     }
 
@@ -11104,6 +11183,45 @@ function syncOpenclawThemeToWebview() {
     } catch (e) {}
 }
 
+function collectDataCenterThemeVars() {
+    const cs = getComputedStyle(document.body);
+    const pick = (name) => (cs.getPropertyValue(name) || '').trim();
+    const accent = pick('--accent-color') || '#38bdf8';
+    const accentRgb = pick('--accent-rgb') || '56, 189, 248';
+    return {
+        '--bg-base': pick('--bg-base') || 'radial-gradient(circle at 50% 50%, #151226 0%, #0d0b18 100%)',
+        '--bg-panel': pick('--bg-panel') || 'rgba(22, 19, 38, 0.65)',
+        '--bg-card': pick('--bg-card') || 'rgba(30, 27, 51, 0.45)',
+        '--border-color': pick('--border-color') || 'rgba(255, 255, 255, 0.12)',
+        '--accent-color': accent,
+        '--accent-rgb': accentRgb,
+        '--text-primary': pick('--text-primary') || '#f0f6ff',
+        '--text-secondary': pick('--text-secondary') || '#94a3b8',
+        '--glow': accent,
+        '--glow2': accent,
+        '--glow3': accent,
+    };
+}
+
+function pushDataCenterTheme(frame) {
+    const target = frame || document.getElementById('data-center-iframe');
+    if (!target || !target.contentWindow) return;
+    try {
+        target.contentWindow.postMessage({
+            type: 'nexora-theme',
+            vars: collectDataCenterThemeVars(),
+        }, '*');
+    } catch (_) {}
+}
+
+try {
+    window.addEventListener('message', (evt) => {
+        const data = evt && evt.data;
+        if (!data || data.type !== 'nexora-data-center-ready') return;
+        pushDataCenterTheme();
+    });
+} catch (_) {}
+
 async function loadDataCenterUi(forceReload = false) {
     const frame = document.getElementById('data-center-iframe');
     if (!frame) return;
@@ -11118,6 +11236,7 @@ async function loadDataCenterUi(forceReload = false) {
         const url = String(info.url).replace(/\/?$/, '/');
         const currentSrc = (frame.getAttribute('src') || '').trim();
         if (!forceReload && currentSrc && currentSrc === url) {
+            pushDataCenterTheme(frame);
             return;
         }
         const waitLoad = new Promise((resolve) => {
@@ -11137,6 +11256,9 @@ async function loadDataCenterUi(forceReload = false) {
         }
         frame.src = url;
         await waitLoad;
+        pushDataCenterTheme(frame);
+        // 再推一次，避免首屏样式未就绪
+        setTimeout(() => pushDataCenterTheme(frame), 120);
     } catch (err) {
         console.error('[DataCenter]', err);
         try {

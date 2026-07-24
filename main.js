@@ -4557,7 +4557,7 @@ function ensureOpenClawConfigInitialized() {
                 fs.copyFileSync(examplePath, CONFIG_PATH);
                 try {
                     if (app.isReady()) {
-                        app.setLoginItemSettings({ openAtLogin: true, path: app.getPath('exe') });
+                        setAutoStartEnabled(true);
                     }
                 } catch(err) { console.warn('[System] Failed to set initial autostart:', err); }
             } else {
@@ -6876,9 +6876,107 @@ ipcMain.handle('feishu-qr-login', async (_event, opts = {}) => {
 });
 
 // 开机自启的设置与获取
+// 开机自启：Windows 上 get/set 必须使用相同的 path + args，否则会读成 false
+function autoStartSettingsPath() {
+    try {
+        return path.join(app.getPath('userData'), 'autostart.json');
+    } catch (e) {
+        return path.join(CONFIG_DIR || process.cwd(), 'autostart.json');
+    }
+}
+
+function buildLoginItemOptions(enabled) {
+    const on = Boolean(enabled);
+    const silent = isSilentStartEnabled();
+    const opts = {
+        openAtLogin: on,
+        openAsHidden: on ? silent : false,
+        path: process.execPath,
+        args: (on && silent) ? ['--silent'] : [],
+    };
+    try {
+        // 固定注册表项名，避免开发版 electron.exe 与安装版同名冲突时读错
+        opts.name = String(app.getName() || 'Nexora Agent');
+    } catch (_) {}
+    return opts;
+}
+
+function readPersistedAutoStart() {
+    try {
+        const p = autoStartSettingsPath();
+        if (!fs.existsSync(p)) return null;
+        const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
+        const data = JSON.parse(raw);
+        if (data && typeof data.enabled === 'boolean') return data.enabled;
+    } catch (e) {}
+    return null;
+}
+
+function writePersistedAutoStart(enabled) {
+    const on = Boolean(enabled);
+    const p = autoStartSettingsPath();
+    try {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(p, JSON.stringify({ enabled: on, updatedAt: Date.now() }, null, 2), 'utf8');
+    } catch (e) {
+        console.warn('[AutoStart] persist failed:', e && e.message);
+    }
+    return on;
+}
+
+function queryOsAutoStart() {
+    try {
+        const probeSilent = buildLoginItemOptions(true);
+        // 与写入时相同的 path；分别探测带/不带 --silent 的注册项
+        const a = app.getLoginItemSettings({
+            path: probeSilent.path,
+            args: probeSilent.args,
+        });
+        if (a && a.openAtLogin) return true;
+        const b = app.getLoginItemSettings({
+            path: process.execPath,
+            args: [],
+        });
+        return !!(b && b.openAtLogin);
+    } catch (e) {
+        try {
+            return !!app.getLoginItemSettings().openAtLogin;
+        } catch (_) {
+            return false;
+        }
+    }
+}
+
+function isAutoStartEnabled() {
+    const persisted = readPersistedAutoStart();
+    if (persisted !== null) return persisted;
+    return queryOsAutoStart();
+}
+
+function setAutoStartEnabled(enabled) {
+    const on = writePersistedAutoStart(enabled);
+    try {
+        app.setLoginItemSettings(buildLoginItemOptions(on));
+    } catch (e) {
+        console.warn('[AutoStart] setLoginItemSettings failed:', e && e.message);
+    }
+    return on;
+}
+
+/** 启动时把本地偏好重新写回系统登录项，避免 OS 读不一致 */
+function syncAutoStartLoginItemFromPersisted() {
+    const persisted = readPersistedAutoStart();
+    if (persisted === null) return;
+    try {
+        app.setLoginItemSettings(buildLoginItemOptions(persisted));
+    } catch (e) {
+        console.warn('[AutoStart] sync failed:', e && e.message);
+    }
+}
+
 ipcMain.handle('autostart-get', async () => {
-    const settings = app.getLoginItemSettings();
-    return settings.openAtLogin;
+    return isAutoStartEnabled();
 });
 
 function silentStartSettingsPath() {
@@ -6913,14 +7011,8 @@ function setSilentStartEnabled(enabled) {
     }
     // 与开机自启配合：静默时带 --silent，便于系统登录项识别
     try {
-        const login = app.getLoginItemSettings();
-        if (login.openAtLogin) {
-            app.setLoginItemSettings({
-                openAtLogin: true,
-                openAsHidden: on,
-                path: app.getPath('exe'),
-                args: on ? ['--silent'] : []
-            });
+        if (isAutoStartEnabled()) {
+            app.setLoginItemSettings(buildLoginItemOptions(true));
         }
     } catch (e) {}
     return on;
@@ -7086,14 +7178,7 @@ ipcMain.handle('copy-text', async (event, text) => {
 });
 
 ipcMain.handle('autostart-set', async (event, enabled) => {
-    const silent = isSilentStartEnabled();
-    app.setLoginItemSettings({
-        openAtLogin: enabled,
-        openAsHidden: enabled ? silent : false,
-        path: app.getPath('exe'),
-        args: (enabled && silent) ? ['--silent'] : []
-    });
-    return true;
+    return setAutoStartEnabled(!!enabled);
 });
 
 // ─── 加速通道（mihomo）───────────────────────────────────────────
@@ -8386,6 +8471,13 @@ app.whenReady().then(async () => {
         }
     } catch (e) {
         console.warn('[Acceleration] init failed:', e.message);
+    }
+
+    // 按本地偏好重新同步开机自启注册项（修复 Windows 读写 path/args 不一致导致开关回弹）
+    try {
+        syncAutoStartLoginItemFromPersisted();
+    } catch (e) {
+        console.warn('[AutoStart] sync on ready failed:', e && e.message);
     }
 
     // 语音运行时：默认关闭，仅初始化配置目录；开启渠道朗读时才监听本机 HTTP

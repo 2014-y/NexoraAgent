@@ -2069,8 +2069,8 @@
         </section>
 
         <!-- 数据中心：嵌入 openclaw-dashboard（本地 Express + SQLite） -->
-        <section class="tab-pane" id="data-center-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: #0a0e17;">
-          <iframe id="data-center-iframe" title="数据中心" style="width: 100%; height: 100%; border: none; background: #0a0e17;" src="about:blank"></iframe>
+        <section class="tab-pane" id="data-center-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: transparent;">
+          <iframe id="data-center-iframe" title="数据中心" style="width: 100%; height: 100%; border: none; background: transparent;" src="about:blank"></iframe>
         </section>
 
       </main>
@@ -2129,7 +2129,7 @@
         </div>
         <div class="modal-body">
           <div class="form-field">
-            <label for="new-provider-id" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; display: block;" data-i18n="config.add_provider.id_label">厂商唯一标识 (仅限小写字母与数字，保存后不可改)</label>
+            <label for="new-provider-id" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; display: block;" data-i18n="config.add_provider.id_label">厂商唯一标识 (仅限小写字母、数字、中划线/下划线)</label>
             <input type="text" id="new-provider-id" placeholder="例如: deepseek, openai" style="width: 100%; box-sizing: border-box;">
           </div>
           <div class="form-field" style="margin-top: 15px;">
