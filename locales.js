@@ -4,6 +4,7 @@ window.LOCALES = {
     // 导航
     'nav.console': 'Agent',
     'nav.chat': '模型会话',
+    'nav.session_archive': '会话归档',
     'nav.config': '模型配置',
     'nav.plugins': '内置插件',
     'nav.roles': '模型角色',
@@ -845,6 +846,7 @@ window.LOCALES = {
     // Navigation
     'nav.console': 'Agent',
     'nav.chat': 'Chat Room',
+    'nav.session_archive': 'Session Archive',
     'nav.config': 'Model Config',
     'nav.plugins': 'Plugins',
     'nav.roles': 'Model Roles',
@@ -1685,6 +1687,7 @@ window.LOCALES = {
     // 導航
     'nav.console': 'Agent',
     'nav.chat': '模型對話',
+    'nav.session_archive': '會話歸檔',
     'nav.config': '模型配置',
     'nav.plugins': '內置插件',
     'nav.roles': '模型角色',

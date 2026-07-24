@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('api', {
     getDashboardUrl: () => ipcRenderer.invoke('get-dashboard-url'),
     getDataCenterUrl: () => ipcRenderer.invoke('data-center-get-url'),
     clearOpenclawPanelSession: () => ipcRenderer.invoke('clear-openclaw-panel-session'),
+    getUnifiedSessionHistory: () => ipcRenderer.invoke('session-history-list'),
     onDashboardUrlUpdated: (callback) => ipcRenderer.on('dashboard-url-updated', (event, url) => callback(url)),
     
     // 软件更新相关接口

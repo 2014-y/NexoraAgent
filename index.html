@@ -106,6 +106,10 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               <span data-i18n="nav.chat">模型会话</span>
             </div>
+            <div class="nav-item" data-tab="session-archive-view" id="btn-nav-session-archive">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>
+              <span data-i18n="nav.session_archive">会话归档</span>
+            </div>
             <div class="nav-item" data-tab="config-view" id="tour-nav-config">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="8.5" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="15.5" cy="13" r="1.5" fill="currentColor" stroke="none"/><path d="M9 17h6"/></svg>
               <span data-i18n="nav.config">模型配置</span>
@@ -611,6 +615,9 @@
               <button id="btn-refresh-chat-models" title="重新获取可用模型" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               </button>
+              <button id="btn-archive-chat-session" title="归档当前会话" onclick="archiveCurrentChatSession({ clearAfter: true, navigate: true })" style="background: rgba(0, 210, 255, 0.08); border: 1px solid rgba(0, 210, 255, 0.25); color: #7fe6ff; border-radius: 8px; height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s ease; white-space: nowrap;" onmouseover="this.style.background='rgba(0,210,255,0.16)';this.style.borderColor='rgba(0,210,255,0.45)'" onmouseout="this.style.background='rgba(0,210,255,0.08)';this.style.borderColor='rgba(0,210,255,0.25)'">
+                📦 归档
+              </button>
               <button id="btn-clear-chat-history" title="清除会话缓存" onclick="clearChatHistory()" data-i18n="chat.btn.clear" style="background: rgba(255, 82, 82, 0.08); border: 1px solid rgba(255, 82, 82, 0.25); color: #ff7070; border-radius: 8px; height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s ease; white-space: nowrap;" onmouseover="this.style.background='rgba(255,82,82,0.18)';this.style.borderColor='rgba(255,82,82,0.5)'" onmouseout="this.style.background='rgba(255,82,82,0.08)';this.style.borderColor='rgba(255,82,82,0.25)'">
                 🗑️ 清屏
               </button>
@@ -706,6 +713,35 @@
         </section>
 
         <!-- Tab 2: 参数配置 -->
+        <!-- Tab: 会话归档管理 -->
+        <section class="tab-pane" id="session-archive-view">
+          <div class="session-archive-shell">
+            <div class="session-archive-header">
+              <div>
+                <h2>会话归档</h2>
+                <p>管理已归档的模型会话：搜索、查看、恢复、编辑、删除，也可以手动创建一条归档备忘。</p>
+              </div>
+              <div class="session-archive-actions">
+                <button type="button" class="session-archive-btn ghost" id="btn-archive-active-chat">归档当前会话</button>
+                <button type="button" class="session-archive-btn primary" id="btn-create-archive-session">新建归档</button>
+              </div>
+            </div>
+            <div class="session-archive-toolbar">
+              <input id="session-archive-search" type="text" placeholder="搜索标题、摘要、标签或消息内容..." autocomplete="off">
+              <select id="session-archive-sort" title="排序方式">
+                <option value="updatedDesc">最近更新</option>
+                <option value="createdDesc">最近创建</option>
+                <option value="titleAsc">标题 A-Z</option>
+              </select>
+              <span id="session-archive-count" class="session-archive-count">0 条归档</span>
+            </div>
+            <div class="session-archive-body">
+              <div id="session-archive-list" class="session-archive-list"></div>
+              <div id="session-archive-detail" class="session-archive-detail"></div>
+            </div>
+          </div>
+        </section>
+
         <section class="tab-pane" id="config-view">
           <div class="view-header config-view-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px;">
             <div class="config-view-header-text" style="flex: 1; min-width: 0; padding-right: 8px;">

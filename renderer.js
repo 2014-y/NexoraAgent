@@ -1876,6 +1876,7 @@ async function init() {
             
             consoleSelectedChannel = pill.getAttribute('data-channel');
             localStorage.setItem('console_pref_channel', consoleSelectedChannel);
+            if (typeof renderScopedActivityLogs === 'function') renderScopedActivityLogs();
             const loadingEl = document.getElementById('console-channel-loading');
             if (loadingEl) loadingEl.style.display = 'flex';
             updateConsoleChannelStatusUI();
@@ -2043,12 +2044,13 @@ async function init() {
         });
     }
 
-    // 监听主进程发起的启动清空日志信号
+    // 监听主进程发起的启动清空日志信号：保留活动流历史，仅整理内存队列。
     if (window.api && window.api.onGatewayClearLogs) {
         window.api.onGatewayClearLogs(() => {
-            resetConsoleRuntimeLogs();
+            resetConsoleRuntimeLogs({ preservePersisted: true });
         });
     }
+    restorePersistedActivityLogs({ replace: true });
 
     // Nexora Agent开关按钮监听
     gatewayToggleBtn.addEventListener('click', () => {
@@ -2061,14 +2063,9 @@ async function init() {
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
 
-            // 每次启动自动先清空实时系统活动监测流与终端日志
-            const streamList = document.getElementById('dash-activity-stream-list');
-            if (streamList) {
-                streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
-            }
-            const logTerminal = document.getElementById('builtin-terminal-logs');
-            if (logTerminal) logTerminal.innerHTML = '';
-            gatewayLogReadyTail = '';
+            // 启动时不再清空活动流；保留 Win+R / 重启前的最近状态，顶部仅加启动提示。
+            restorePersistedActivityLogs({ replace: true });
+            ensureStartingActivityTip();
 
             window.api.gatewayAction('start');
             
@@ -2104,6 +2101,7 @@ async function init() {
             if (streamList) {
                 streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
             }
+            clearPersistedActivityLogs();
             const activeModel = document.getElementById('dash-active-model');
             if (activeModel) activeModel.textContent = t('console.dash.not_configured') || '未启动';
             
@@ -2287,6 +2285,8 @@ let __activityLogQueue = [];
 let __isProcessingLogQueue = false;
 let __seenPluginLogsThisStartup = new Set();
 const ACTIVITY_LOG_QUEUE_HARD_CAP = 40;
+const ACTIVITY_LOG_STORAGE_KEY = 'nexora_console_activity_logs_v1';
+const ACTIVITY_LOG_PERSIST_MAX = 300;
 
 function getActivityEmptyTipsHtml() {
     return `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
@@ -2294,6 +2294,80 @@ function getActivityEmptyTipsHtml() {
 
 function getStartingActivityTipsHtml() {
     return `<div class="starting-activity-item" data-i18n="console.dash.starting_tips">${t('console.dash.starting_tips') || '首次启动或深度初始化环境可能需要较长时间，请耐心等待...'}</div>`;
+}
+
+function getCurrentActivityScope() {
+    try {
+        return String(consoleSelectedChannel || localStorage.getItem('console_pref_channel') || 'qqbot');
+    } catch (_) {
+        return 'qqbot';
+    }
+}
+
+function getActivityLogStorageKey(scope = getCurrentActivityScope()) {
+    return `${ACTIVITY_LOG_STORAGE_KEY}:${scope || 'qqbot'}`;
+}
+
+function getPersistedActivityLogs(scope = getCurrentActivityScope()) {
+    try {
+        const raw = localStorage.getItem(getActivityLogStorageKey(scope));
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) ? list.filter(Boolean).slice(-ACTIVITY_LOG_PERSIST_MAX) : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function savePersistedActivityLogs(list, scope = getCurrentActivityScope()) {
+    try {
+        localStorage.setItem(getActivityLogStorageKey(scope), JSON.stringify((Array.isArray(list) ? list : []).slice(-ACTIVITY_LOG_PERSIST_MAX)));
+    } catch (_) {}
+}
+
+function persistActivityLogLine(lineHtml) {
+    if (!lineHtml) return;
+    const list = getPersistedActivityLogs();
+    list.push(lineHtml);
+    savePersistedActivityLogs(list);
+}
+
+function persistActivityLogLines(lines) {
+    if (!Array.isArray(lines) || !lines.length) return;
+    const list = getPersistedActivityLogs();
+    lines.forEach((line) => { if (line) list.push(line); });
+    savePersistedActivityLogs(list);
+}
+
+function clearPersistedActivityLogs(scope = getCurrentActivityScope()) {
+    try { localStorage.removeItem(getActivityLogStorageKey(scope)); } catch (_) {}
+}
+
+function restorePersistedActivityLogs(options = {}) {
+    const streamList = document.getElementById('dash-activity-stream-list');
+    if (!streamList) return;
+    const logs = getPersistedActivityLogs(options.scope || getCurrentActivityScope());
+    if (options.replace) streamList.innerHTML = '';
+    if (!logs.length) {
+        if (options.replace) streamList.innerHTML = getActivityEmptyTipsHtml();
+        return;
+    }
+    streamList.querySelectorAll('.activity-item-empty, .starting-activity-item').forEach((el) => el.remove());
+    const frag = document.createDocumentFragment();
+    logs.slice(-150).forEach((lineHtml) => {
+        const item = document.createElement('div');
+        item.className = 'activity-log-line';
+        item.innerHTML = lineHtml;
+        frag.appendChild(item);
+    });
+    streamList.appendChild(frag);
+    while (streamList.children.length > 150) streamList.removeChild(streamList.firstChild);
+    streamList.scrollTop = streamList.scrollHeight;
+}
+
+function renderScopedActivityLogs() {
+    __activityLogQueue = [];
+    __isProcessingLogQueue = false;
+    restorePersistedActivityLogs({ replace: true });
 }
 
 /** 启动中：始终在活动流顶部展示等待提示（不依赖列表是否为空） */
@@ -2325,6 +2399,7 @@ function dismissStartingActivityTip(options = {}) {
 
 function resetConsoleRuntimeLogs(options = {}) {
     const clearSystemLogsArea = options.clearSystemLogsArea === true;
+    const clearPersisted = options.clearPersisted === true;
     __activityLogQueue = [];
     __isProcessingLogQueue = false;
     resetPluginLogDedupe();
@@ -2334,6 +2409,8 @@ function resetConsoleRuntimeLogs(options = {}) {
         streamList.innerHTML = getActivityEmptyTipsHtml();
         streamList.scrollTop = 0;
     }
+    if (clearPersisted) clearPersistedActivityLogs();
+    else restorePersistedActivityLogs({ replace: true });
 
     if (logTerminal) logTerminal.innerHTML = '';
     const builtinLogs = document.getElementById('builtin-terminal-logs');
@@ -2342,7 +2419,7 @@ function resetConsoleRuntimeLogs(options = {}) {
         const systemLogsArea = document.getElementById('system-raw-logs-area');
         if (systemLogsArea) systemLogsArea.value = '';
     }
-    if (Array.isArray(window.__deferredConsoleLogs)) window.__deferredConsoleLogs.length = 0;
+    if (Array.isArray(window.__deferredConsoleLogs) && clearPersisted) window.__deferredConsoleLogs.length = 0;
     gatewayLogReadyTail = '';
     __gatewayLoadedPluginCount = null;
     try { updateRightPluginsCountUI(); } catch (e) {}
@@ -2396,6 +2473,7 @@ function appendActivityLogLinesInstant(lineHtmlList) {
         frag.appendChild(item);
     }
     streamList.appendChild(frag);
+    persistActivityLogLines(lineHtmlList);
 
     while (streamList.children.length > 150) {
         streamList.removeChild(streamList.firstChild);
@@ -2439,6 +2517,7 @@ function processActivityLogQueue() {
         item.className = 'activity-log-line typing';
         item.innerHTML = lineHtml;
         streamList.appendChild(item);
+        persistActivityLogLine(lineHtml);
 
         // 最多保留最近 150 条
         while (streamList.children.length > 150) {
@@ -3257,9 +3336,8 @@ function setupIpcListeners() {
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
             // 仅从「已停止」冷启动时清空活动流；starting→running（含崩溃自动拉起）保留诊断信息
-            if (oldStatus === 'stopped' && logTerminal) {
-                logTerminal.innerHTML = '';
-                gatewayLogReadyTail = '';
+            if (oldStatus === 'stopped') {
+                restorePersistedActivityLogs({ replace: true });
             }
             // 冷启动：维持 starting 做端口探测；自启时进度可能已非 0，避免按钮一直停在「启动中」
             if (currentProgress > 0 && !gatewayFullyReady) {
@@ -6828,10 +6906,28 @@ function updateMemoryMock() {
 
 // 7. Tab 页切换控制
 const SIDEBAR_NAV_ORDER_KEY = 'setting_sidebar_nav_order';
+const SIDEBAR_NAV_DEFAULT_ORDER = [
+    'console-view',
+    'acceleration-view',
+    'data-center-view',
+    'chat-view',
+    'session-archive-view',
+    'config-view',
+    'communication-view',
+    'roles-view',
+    'openclaw-panel-view',
+    'dashboard-view',
+    'plugins-view',
+    'voice-view',
+    'terminal-view',
+    'syslogs-view',
+    'settings-view'
+];
 const SIDEBAR_NAV_I18N_BY_TAB = {
     'console-view': 'nav.console',
     'data-center-view': 'nav.data_center',
     'chat-view': 'nav.chat',
+    'session-archive-view': 'nav.session_archive',
     'config-view': 'nav.config',
     'communication-view': 'nav.communication',
     'roles-view': 'nav.roles',
@@ -6861,8 +6957,8 @@ function captureSidebarNavDefaultOrder() {
             .map((el) => el.getAttribute('data-tab'))
             .filter(Boolean)
         : [];
-    const builtin = Object.keys(SIDEBAR_NAV_I18N_BY_TAB);
-    __sidebarNavDefaultOrder = fromDom.length ? fromDom : builtin;
+    const builtin = SIDEBAR_NAV_DEFAULT_ORDER.slice();
+    __sidebarNavDefaultOrder = builtin.length ? builtin : fromDom;
     return __sidebarNavDefaultOrder.slice();
 }
 
@@ -7142,6 +7238,10 @@ function setupTabSwitching() {
             if (typeof refreshVoicePanel === 'function') {
                 await refreshVoicePanel();
             }
+            return;
+        }
+        if (tabId === 'session-archive-view') {
+            try { initSessionArchiveView(); } catch (err) { console.error(err); }
             return;
         }
         if (tabId === 'chat-view') {
@@ -8825,6 +8925,7 @@ function showToast(message) {
 // ==================== 模型对话舱核心逻辑 ====================
 let chatAttachmentBase64 = ''; // 存储识图图片的 base64 编码
 let chatSessionHistory = []; // 存储当前会话的历史记录
+let activeChatArchiveMessages = []; // 当前桌面对话完整消息，用于一键归档
 // 自动初始化对话面板事件
 function initChatView() {
     const btnSend = document.getElementById('btn-chat-send');
@@ -9779,8 +9880,13 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
 }
 
 // 清除会话缓存 (清空聊天记录并重置初始欢迎语)
-function clearChatHistory() {
+function clearChatHistory(options = {}) {
+    const shouldSkipArchive = !!(options && options.skipArchive);
+    if (!shouldSkipArchive && activeChatArchiveMessages.length > 0) {
+        archiveCurrentChatSession({ silent: true, clearAfter: false });
+    }
     chatSessionHistory = []; // 清空历史记录数组
+    activeChatArchiveMessages = [];
     const container = document.getElementById('chat-messages-container');
     if (!container) return;
 
@@ -9851,6 +9957,308 @@ function clearChatHistory() {
     showToast('🗑️ 会话缓存已清除');
 }
 
+
+// ==================== 会话归档管理 ====================
+const SESSION_ARCHIVE_STORAGE_KEY = 'nexora_archived_chat_sessions_v1';
+let sessionArchiveState = { selectedId: '', query: '', sort: 'updatedDesc', initialized: false, externalLoaded: false, externalLoading: false, externalSessions: [] };
+
+function safeParseSessionArchives() {
+    try {
+        const raw = localStorage.getItem(SESSION_ARCHIVE_STORAGE_KEY);
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) ? list.filter(Boolean) : [];
+    } catch (e) {
+        console.warn('[SessionArchive] parse failed:', e);
+        return [];
+    }
+}
+
+function saveSessionArchives(list) {
+    localStorage.setItem(SESSION_ARCHIVE_STORAGE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+}
+
+function getAllSessionArchives() {
+    const local = safeParseSessionArchives().map((item) => ({ ...item, source: item.source || 'local', readOnly: false }));
+    const external = Array.isArray(sessionArchiveState.externalSessions) ? sessionArchiveState.externalSessions : [];
+    const seen = new Set();
+    return [...local, ...external].filter((item) => {
+        if (!item || !item.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+    });
+}
+
+async function loadExternalSessionHistory(force = false) {
+    if (!force && (sessionArchiveState.externalLoaded || sessionArchiveState.externalLoading)) return;
+    if (!window.api || typeof window.api.getUnifiedSessionHistory !== 'function') {
+        sessionArchiveState.externalLoaded = true;
+        return;
+    }
+    sessionArchiveState.externalLoading = true;
+    try {
+        const res = await window.api.getUnifiedSessionHistory();
+        if (res && res.success && Array.isArray(res.sessions)) {
+            sessionArchiveState.externalSessions = res.sessions;
+        } else if (res && res.error) {
+            console.warn('[SessionArchive] external load failed:', res.error);
+        }
+    } catch (e) {
+        console.warn('[SessionArchive] external load failed:', e);
+    } finally {
+        sessionArchiveState.externalLoading = false;
+        sessionArchiveState.externalLoaded = true;
+    }
+}
+
+function stripSessionHtml(value) {
+    const text = String(value || '');
+    if (!/[<>&]/.test(text)) return text;
+    const div = document.createElement('div');
+    div.innerHTML = text;
+    return div.textContent || div.innerText || text;
+}
+
+function archiveMessageToText(message) {
+    if (!message) return '';
+    const content = message.content;
+    if (Array.isArray(content)) {
+        return content.map((item) => item && (item.text || (item.image_url ? '[图片]' : ''))).filter(Boolean).join('\n');
+    }
+    return stripSessionHtml(content || '');
+}
+
+function recordActiveChatArchiveMessage(message) {
+    if (!message || !message.role) return;
+    const text = archiveMessageToText(message).trim();
+    if (!text && !message.attachment) return;
+    activeChatArchiveMessages.push({
+        id: `msg_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        role: message.role,
+        content: text || '[图片附件]',
+        attachment: message.attachment || '',
+        createdAt: message.createdAt || new Date().toISOString()
+    });
+    if (activeChatArchiveMessages.length > 80) {
+        activeChatArchiveMessages = activeChatArchiveMessages.slice(-80);
+    }
+}
+
+function buildArchiveTitle(messages) {
+    const firstUser = (messages || []).find((m) => m.role === 'user' && archiveMessageToText(m).trim());
+    const base = firstUser ? archiveMessageToText(firstUser).trim() : '未命名会话';
+    return base.length > 24 ? `${base.slice(0, 24)}…` : base;
+}
+
+function buildArchiveSummary(messages) {
+    const parts = (messages || []).slice(0, 4).map((m) => archiveMessageToText(m).trim()).filter(Boolean);
+    const summary = parts.join(' / ') || '手动创建的空归档';
+    return summary.length > 120 ? `${summary.slice(0, 120)}…` : summary;
+}
+
+function archiveCurrentChatSession(options = {}) {
+    const messages = activeChatArchiveMessages.slice();
+    if (!messages.length) {
+        if (!options.silent) showToast('当前没有可归档的会话内容');
+        return null;
+    }
+    const now = new Date().toISOString();
+    const modelSelect = typeof ensureChatModelSelect === 'function' ? ensureChatModelSelect() : null;
+    const model = modelSelect && modelSelect.value ? modelSelect.value : 'unknown';
+    const item = {
+        id: `archive_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        title: buildArchiveTitle(messages),
+        summary: buildArchiveSummary(messages),
+        tags: ['模型会话'],
+        model,
+        createdAt: now,
+        updatedAt: now,
+        messages
+    };
+    const list = safeParseSessionArchives();
+    list.unshift(item);
+    saveSessionArchives(list);
+    sessionArchiveState.selectedId = item.id;
+    if (options.clearAfter) clearChatHistory({ skipArchive: true });
+    if (options.navigate) {
+        const nav = document.querySelector('.nav-item[data-tab="session-archive-view"]');
+        if (nav) nav.click();
+        else initSessionArchiveView();
+    } else {
+        renderSessionArchiveView();
+    }
+    if (!options.silent) showToast('📦 当前会话已归档');
+    return item;
+}
+window.archiveCurrentChatSession = archiveCurrentChatSession;
+
+function getFilteredSessionArchives() {
+    const query = String(sessionArchiveState.query || '').trim().toLowerCase();
+    let list = getAllSessionArchives();
+    if (query) {
+        list = list.filter((item) => {
+            const haystack = [item.title, item.summary, item.model, ...(item.tags || []), ...((item.messages || []).map((m) => m.content))].join('\n').toLowerCase();
+            return haystack.includes(query);
+        });
+    }
+    const sort = sessionArchiveState.sort || 'updatedDesc';
+    list.sort((a, b) => {
+        if (sort === 'titleAsc') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN');
+        const field = sort === 'createdDesc' ? 'createdAt' : 'updatedAt';
+        return new Date(b[field] || 0) - new Date(a[field] || 0);
+    });
+    return list;
+}
+
+function formatArchiveTime(value) {
+    if (!value) return '--';
+    try { return new Date(value).toLocaleString('zh-CN', { hour12: false }); } catch (_) { return value; }
+}
+
+function escapeSessionArchiveHtml(value) {
+    return String(value || '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function renderSessionArchiveView() {
+    const listEl = document.getElementById('session-archive-list');
+    const detailEl = document.getElementById('session-archive-detail');
+    const countEl = document.getElementById('session-archive-count');
+    if (!listEl || !detailEl) return;
+    const list = getFilteredSessionArchives();
+    if (countEl) countEl.textContent = `${list.length} 条会话${sessionArchiveState.externalLoading ? ' · 正在读取历史…' : ''}`;
+    if (list.length && !list.some((item) => item.id === sessionArchiveState.selectedId)) {
+        sessionArchiveState.selectedId = list[0].id;
+    }
+    listEl.innerHTML = list.length ? list.map((item) => `
+        <div class="session-archive-card ${item.id === sessionArchiveState.selectedId ? 'active' : ''}" data-archive-id="${escapeSessionArchiveHtml(item.id)}">
+            <div class="session-archive-card-title">${escapeSessionArchiveHtml(item.title || '未命名会话')}</div>
+            <div class="session-archive-card-meta"><span>${item.source === 'local' ? '本地归档' : (item.source === 'channel' ? '通讯渠道' : '系统历史')}</span><span>${escapeSessionArchiveHtml(item.model || 'unknown')}</span><span>更新 ${formatArchiveTime(item.updatedAt)}</span><span>${(item.messages || []).length} 条</span></div>
+            <div class="session-archive-card-summary">${escapeSessionArchiveHtml(item.summary || '')}</div>
+            <div class="session-archive-tags">${(item.tags || []).map((tag) => `<span class="session-archive-tag">${escapeSessionArchiveHtml(tag)}</span>`).join('')}</div>
+        </div>
+    `).join('') : '<div class="session-archive-detail-empty">还没有归档会话。去“模型会话”聊几句后点归档，或者手动新建一条。</div>';
+    listEl.querySelectorAll('.session-archive-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            sessionArchiveState.selectedId = card.dataset.archiveId || '';
+            renderSessionArchiveView();
+        });
+    });
+    const selected = getAllSessionArchives().find((item) => item.id === sessionArchiveState.selectedId);
+    if (!selected) {
+        detailEl.innerHTML = '<div class="session-archive-detail-empty">选择左侧归档查看详情。小抽屉空空如也。</div>';
+        return;
+    }
+    detailEl.innerHTML = `
+        <div class="session-archive-detail-head">
+            <div>
+                <h3 class="session-archive-detail-title">${escapeSessionArchiveHtml(selected.title || '未命名会话')}</h3>
+                <div class="session-archive-detail-meta">${selected.source === 'local' ? '本地归档' : (selected.source === 'channel' ? '通讯渠道历史' : 'OpenClaw历史')} · 创建 ${formatArchiveTime(selected.createdAt)} · 更新 ${formatArchiveTime(selected.updatedAt)} · ${escapeSessionArchiveHtml(selected.model || 'unknown')}${selected.channel ? ' · ' + escapeSessionArchiveHtml(selected.channel) : ''}${selected.target ? ' · ' + escapeSessionArchiveHtml(selected.target) : ''}</div>
+                <div class="session-archive-tags">${(selected.tags || []).map((tag) => `<span class="session-archive-tag">${escapeSessionArchiveHtml(tag)}</span>`).join('')}</div>
+            </div>
+            <div class="session-archive-detail-actions">
+                <button class="session-archive-btn ghost" data-archive-action="restore">恢复到会话</button>
+                <button class="session-archive-btn" data-archive-action="edit">${selected.readOnly ? '转存编辑' : '编辑'}</button>
+                <button class="session-archive-btn danger" data-archive-action="delete" ${selected.readOnly ? 'disabled title="系统历史为只读，不能从这里删除" style="opacity:.45;cursor:not-allowed;"' : ''}>删除</button>
+            </div>
+        </div>
+        <div class="session-archive-messages">
+            ${(selected.messages || []).length ? selected.messages.map((msg) => `
+                <div class="session-archive-msg ${msg.role === 'user' ? 'user' : 'assistant'}">
+                    <div class="session-archive-msg-role">${msg.role === 'user' ? 'USER' : 'AI'} · ${formatArchiveTime(msg.createdAt)}</div>
+                    <div class="session-archive-msg-content">${escapeSessionArchiveHtml(msg.content || '')}</div>
+                </div>
+            `).join('') : `<div class="session-archive-detail-empty">这条归档暂无消息内容。</div>`}
+        </div>
+    `;
+    detailEl.querySelector('[data-archive-action="restore"]')?.addEventListener('click', () => restoreArchivedSession(selected.id));
+    detailEl.querySelector('[data-archive-action="edit"]')?.addEventListener('click', () => renderSessionArchiveEditor(selected.readOnly ? { ...selected, id: '', readOnly: false, source: 'local' } : selected));
+    detailEl.querySelector('[data-archive-action="delete"]')?.addEventListener('click', () => { if (!selected.readOnly) deleteArchivedSession(selected.id); });
+}
+
+function renderSessionArchiveEditor(item) {
+    const detailEl = document.getElementById('session-archive-detail');
+    if (!detailEl) return;
+    const isNew = !item || !item.id;
+    const draft = item || { title: '', summary: '', tags: ['手动归档'], messages: [], model: 'manual' };
+    detailEl.innerHTML = `
+        <div class="session-archive-detail-head"><h3 class="session-archive-detail-title">${isNew ? '新建归档' : '编辑归档'}</h3></div>
+        <div class="session-archive-editor">
+            <label>标题<input id="archive-edit-title" value="${escapeSessionArchiveHtml(draft.title || '')}" placeholder="例如：微信机器人排查记录"></label>
+            <label>标签（逗号分隔）<input id="archive-edit-tags" value="${escapeSessionArchiveHtml((draft.tags || []).join(', '))}" placeholder="模型会话, 排查, 备忘"></label>
+            <label>摘要<textarea id="archive-edit-summary" placeholder="这条归档主要记录了什么？">${escapeSessionArchiveHtml(draft.summary || '')}</textarea></label>
+            <label>消息/备注<textarea id="archive-edit-content" placeholder="可以写入人工整理后的会话摘要、解决方案或备忘。">${escapeSessionArchiveHtml((draft.messages || []).map((m) => m.content).join('\n\n'))}</textarea></label>
+            <div class="session-archive-detail-actions">
+                <button class="session-archive-btn primary" id="archive-edit-save">保存</button>
+                <button class="session-archive-btn" id="archive-edit-cancel">取消</button>
+            </div>
+        </div>
+    `;
+    document.getElementById('archive-edit-save')?.addEventListener('click', () => {
+        const now = new Date().toISOString();
+        const title = document.getElementById('archive-edit-title')?.value.trim() || '未命名归档';
+        const summary = document.getElementById('archive-edit-summary')?.value.trim() || '';
+        const tags = (document.getElementById('archive-edit-tags')?.value || '').split(/[,，]/).map((v) => v.trim()).filter(Boolean);
+        const content = document.getElementById('archive-edit-content')?.value.trim() || summary;
+        const list = safeParseSessionArchives();
+        if (isNew) {
+            const created = { id: `archive_${Date.now()}_${Math.random().toString(16).slice(2)}`, title, summary, tags, model: 'manual', createdAt: now, updatedAt: now, messages: content ? [{ id: `msg_${Date.now()}`, role: 'assistant', content, createdAt: now }] : [] };
+            list.unshift(created);
+            sessionArchiveState.selectedId = created.id;
+        } else {
+            const idx = list.findIndex((entry) => entry.id === item.id);
+            if (idx >= 0) list[idx] = { ...list[idx], title, summary, tags, updatedAt: now, messages: content ? [{ id: `msg_${Date.now()}`, role: 'assistant', content, createdAt: now }] : list[idx].messages || [] };
+        }
+        saveSessionArchives(list);
+        showToast('归档已保存');
+        renderSessionArchiveView();
+    });
+    document.getElementById('archive-edit-cancel')?.addEventListener('click', renderSessionArchiveView);
+}
+
+function deleteArchivedSession(id) {
+    if (!id) return;
+    if (!confirm('确定删除这条归档吗？此操作不可撤销。')) return;
+    const list = safeParseSessionArchives().filter((item) => item.id !== id);
+    saveSessionArchives(list);
+    sessionArchiveState.selectedId = list[0] ? list[0].id : '';
+    showToast('归档已删除');
+    renderSessionArchiveView();
+}
+
+function restoreArchivedSession(id) {
+    const item = safeParseSessionArchives().find((entry) => entry.id === id);
+    if (!item) return;
+    if (!Array.isArray(item.messages) || item.messages.length === 0) {
+        showToast('这条通讯渠道历史只有路由信息，暂无可恢复的消息内容');
+        return;
+    }
+    clearChatHistory({ skipArchive: true });
+    activeChatArchiveMessages = [];
+    chatSessionHistory = [];
+    (item.messages || []).forEach((msg) => {
+        appendChatMessage(msg.role === 'user' ? 'user' : 'ai', msg.content || '');
+        recordActiveChatArchiveMessage(msg);
+        chatSessionHistory.push({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content || '' });
+    });
+    const chatNav = document.querySelector('.nav-item[data-tab="chat-view"]');
+    if (chatNav) chatNav.click();
+    showToast('已恢复到模型会话');
+}
+
+function initSessionArchiveView() {
+    if (!sessionArchiveState.initialized) {
+        sessionArchiveState.initialized = true;
+        const search = document.getElementById('session-archive-search');
+        const sort = document.getElementById('session-archive-sort');
+        document.getElementById('btn-create-archive-session')?.addEventListener('click', () => renderSessionArchiveEditor(null));
+        document.getElementById('btn-archive-active-chat')?.addEventListener('click', () => archiveCurrentChatSession({ clearAfter: true }));
+        search?.addEventListener('input', () => { sessionArchiveState.query = search.value; renderSessionArchiveView(); });
+        sort?.addEventListener('change', () => { sessionArchiveState.sort = sort.value; renderSessionArchiveView(); });
+    }
+    renderSessionArchiveView();
+    loadExternalSessionHistory().then(renderSessionArchiveView);
+}
+window.initSessionArchiveView = initSessionArchiveView;
+
 // 处理发送消息（直连各厂家服务，不依赖Nexora Agent）
 async function handleSendMessage() {
     const inputArea = document.getElementById('chat-text-input');
@@ -9859,12 +10267,14 @@ async function handleSendMessage() {
 
     inputArea.value = '';
     const file = chatAttachmentBase64;
+    const userArchiveMessage = { role: 'user', content: text || (file ? '[图片附件]' : ''), attachment: file || '', createdAt: new Date().toISOString() };
     
     document.getElementById('chat-file-upload-input').value = '';
     document.getElementById('chat-attachment-preview-bar').style.display = 'none';
     chatAttachmentBase64 = '';
 
     appendChatMessage('user', text, file);
+    recordActiveChatArchiveMessage(userArchiveMessage);
 
     // 对话内角色指令不请求模型，由客户端直接执行并立即反馈。
     if (!file && typeof handleChatRoleCommand === 'function') {
@@ -10097,6 +10507,7 @@ async function handleSendMessage() {
                 role: 'assistant',
                 content: reply
             });
+            recordActiveChatArchiveMessage({ role: 'assistant', content: reply, createdAt: new Date().toISOString() });
             // 限制历史记录长度，保留最近的20条（10轮）
             if (chatSessionHistory.length > 20) {
                 chatSessionHistory = chatSessionHistory.slice(chatSessionHistory.length - 20);
@@ -11619,6 +12030,11 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
     try {
         const url = await window.api.getDashboardUrl();
         const currentSrc = (webview.getAttribute('src') || '').trim();
+        injectWebviewUpdateInterceptor(webview);
+        try {
+            webview.style.background = 'transparent';
+            webview.style.opacity = currentSrc ? '1' : '0';
+        } catch (_) {}
         if (!forceReload && currentSrc && (currentSrc === url || __openclawPanelLastUrl === url)) {
             injectWebviewUpdateInterceptor(webview);
             syncOpenclawThemeToWebview();
@@ -11803,23 +12219,45 @@ function injectWebviewUpdateInterceptor(webview) {
     const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
     injectOpenclawPanelCss(webview);
 
-    // 每次 webview 加载完毕后注入拦截脚本
-    const onDomReady = () => {
-        injectOpenclawPanelCss(webview);
-        syncOpenclawThemeToWebview();
-        webview.executeJavaScript(buildOpenclawMediaEnhanceScript(MAGIC_PREFIX)).catch(() => {});
+    const revealAfterTheme = () => {
+        try {
+            webview.style.background = 'transparent';
+            webview.style.transition = 'opacity 120ms ease';
+            webview.style.opacity = '1';
+        } catch (_) {}
     };
 
-    // 防止重复绑定 dom-ready
-    webview.removeEventListener('dom-ready', onDomReady);
-    webview.addEventListener('dom-ready', onDomReady);
-    // 若 webview 已加载，立即注入一次
+    const injectThemeNow = () => {
+        injectOpenclawPanelCss(webview);
+        syncOpenclawThemeToWebview();
+        try { webview.executeJavaScript(buildOpenclawMediaEnhanceScript(MAGIC_PREFIX)).catch(() => {}); } catch (_) {}
+        setTimeout(() => {
+            injectOpenclawPanelCss(webview);
+            syncOpenclawThemeToWebview();
+            revealAfterTheme();
+        }, 80);
+    };
+
+    if (!webview.__nexoraOpenclawThemeBound) {
+        webview.__nexoraOpenclawThemeBound = true;
+        webview.addEventListener('did-start-loading', () => {
+            try {
+                webview.style.background = 'transparent';
+                webview.style.opacity = '0';
+            } catch (_) {}
+        });
+        webview.addEventListener('dom-ready', injectThemeNow);
+        webview.addEventListener('did-finish-load', injectThemeNow);
+        webview.addEventListener('did-stop-loading', injectThemeNow);
+    }
+
+    // 若 webview 已加载，立即注入一次；首次导航前也已预先绑定，避免首屏灰底闪一下。
     try {
         if (typeof webview.getURL === 'function') {
             const u = webview.getURL();
-            if (u && u !== 'about:blank' && !u.startsWith('data:')) onDomReady();
+            if (u && u !== 'about:blank' && !u.startsWith('data:')) injectThemeNow();
         }
-    } catch (e) {}
+    } catch (_) {}
 
     // 监听来自 webview 的 console-message 事件（跨上下文通信桥梁）
     if (!_webviewUpdateInjected) {

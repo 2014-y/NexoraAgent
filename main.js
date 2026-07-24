@@ -7679,6 +7679,156 @@ ipcMain.handle('data-center-get-url', async () => {
     }
 });
 
+
+function normalizeHistoryText(value) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+        return value.map((item) => {
+            if (!item) return '';
+            if (typeof item === 'string') return item;
+            if (item.type === 'text') return item.text || '';
+            if (item.text) return item.text;
+            if (item.image_url || item.type === 'image_url') return '[图片]';
+            return '';
+        }).filter(Boolean).join('\n');
+    }
+    if (typeof value === 'object') return value.text || value.content || '';
+    return String(value);
+}
+
+function readOpenClawSessionsIndex(sessionsDir) {
+    const indexPath = path.join(sessionsDir, 'sessions.json');
+    try {
+        const raw = fs.readFileSync(indexPath, 'utf8');
+        return JSON.parse(raw);
+    } catch (_) {
+        return {};
+    }
+}
+
+function buildSessionIndexById(indexObj) {
+    const byId = new Map();
+    Object.entries(indexObj || {}).forEach(([key, value]) => {
+        if (value && value.sessionId) byId.set(value.sessionId, { key, ...value });
+        const ids = Array.isArray(value && value.usageFamilySessionIds) ? value.usageFamilySessionIds : [];
+        ids.forEach((id) => {
+            if (!byId.has(id)) byId.set(id, { key, ...value, sessionId: id });
+        });
+    });
+    return byId;
+}
+
+function parseOpenClawJsonlSession(filePath, indexById) {
+    const baseName = path.basename(filePath).replace(/\.jsonl$/i, '');
+    let stat;
+    try { stat = fs.statSync(filePath); } catch (_) { stat = null; }
+    const meta = indexById.get(baseName) || {};
+    const messages = [];
+    let provider = '';
+    let model = '';
+    let startedAt = stat ? stat.birthtime.toISOString() : new Date().toISOString();
+    let updatedAt = stat ? stat.mtime.toISOString() : startedAt;
+    try {
+        const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
+        for (const line of lines) {
+            let entry;
+            try { entry = JSON.parse(line); } catch (_) { continue; }
+            if (entry.timestamp) {
+                if (!startedAt || entry.type === 'session') startedAt = entry.timestamp;
+                updatedAt = entry.timestamp;
+            }
+            if (entry.type === 'model_change') {
+                provider = entry.provider || provider;
+                model = entry.modelId || model;
+            }
+            if (entry.type === 'message' && entry.message) {
+                const role = entry.message.role === 'assistant' ? 'assistant' : 'user';
+                const text = normalizeHistoryText(entry.message.content).trim();
+                if (text) messages.push({ id: entry.id || `msg_${messages.length}`, role, content: text, createdAt: entry.timestamp || updatedAt });
+            }
+        }
+    } catch (_) {}
+    if (!messages.length) return null;
+    const route = meta.route || {};
+    const channel = meta.lastChannel || meta.deliveryContext?.channel || route.channel || '';
+    const target = meta.origin?.label || meta.lastTo || meta.deliveryContext?.to || route.target?.to || '';
+    const firstUser = messages.find((m) => m.role === 'user') || messages[0];
+    const titleSource = normalizeHistoryText(firstUser && firstUser.content).trim() || baseName;
+    const title = titleSource.length > 28 ? `${titleSource.slice(0, 28)}…` : titleSource;
+    const summary = messages.slice(0, 4).map((m) => m.content).filter(Boolean).join(' / ').slice(0, 180);
+    const tags = ['OpenClaw历史'];
+    if (channel) tags.push(channel.replace(/^openclaw-/, ''));
+    if (target) tags.push('通讯渠道');
+    return {
+        id: `openclaw:${baseName}`,
+        source: 'openclaw',
+        readOnly: true,
+        title,
+        summary,
+        tags,
+        model: [provider, model].filter(Boolean).join('/') || meta.model || 'OpenClaw',
+        channel,
+        target,
+        createdAt: meta.sessionStartedAt ? new Date(meta.sessionStartedAt).toISOString() : startedAt,
+        updatedAt: meta.updatedAt ? new Date(meta.updatedAt).toISOString() : updatedAt,
+        messages,
+        filePath
+    };
+}
+
+function listUnifiedSessionHistory() {
+    const sessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
+    const result = [];
+    try {
+        const indexObj = readOpenClawSessionsIndex(sessionsDir);
+        const indexById = buildSessionIndexById(indexObj);
+        const files = fs.existsSync(sessionsDir)
+            ? fs.readdirSync(sessionsDir).filter((name) => /\.jsonl$/i.test(name) && !/\.trajectory\.jsonl$/i.test(name))
+            : [];
+        for (const name of files) {
+            const item = parseOpenClawJsonlSession(path.join(sessionsDir, name), indexById);
+            if (item) result.push(item);
+        }
+        Object.entries(indexObj || {}).forEach(([key, value]) => {
+            if (!value || !value.sessionId) return;
+            if (result.some((item) => item.id === `openclaw:${value.sessionId}`)) return;
+            const channel = value.lastChannel || value.deliveryContext?.channel || value.route?.channel || '';
+            const target = value.origin?.label || value.lastTo || value.deliveryContext?.to || value.route?.target?.to || '';
+            if (!channel && !target) return;
+            const createdAt = value.sessionStartedAt ? new Date(value.sessionStartedAt).toISOString() : new Date(value.updatedAt || Date.now()).toISOString();
+            const updatedAt = value.updatedAt ? new Date(value.updatedAt).toISOString() : createdAt;
+            result.push({
+                id: `channel:${key}`,
+                source: 'channel',
+                readOnly: true,
+                title: `${channel.replace(/^openclaw-/, '') || '通讯渠道'} · ${target || value.sessionId}`,
+                summary: `通讯渠道路由会话：${channel || '-'} / ${target || '-'}`,
+                tags: ['通讯渠道', channel.replace(/^openclaw-/, '') || 'channel'],
+                model: value.model || 'OpenClaw Channel',
+                channel,
+                target,
+                createdAt,
+                updatedAt,
+                messages: [],
+                route: value.route || null
+            });
+        });
+    } catch (e) {
+        console.warn('[SessionHistory] list failed:', e && e.message);
+    }
+    result.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    return result.slice(0, 500);
+}
+
+ipcMain.handle('session-history-list', async () => {
+    try {
+        return { success: true, sessions: listUnifiedSessionHistory() };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e), sessions: [] };
+    }
+});
+
 // 清除内置 Control UI webview 的持久化会话（过期 token / 限流后重建）
 ipcMain.handle('clear-openclaw-panel-session', async () => {
     try {
