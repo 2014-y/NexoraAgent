@@ -69,12 +69,15 @@ function isBuiltinAllowedProvider(providerKey) {
     return BUILTIN_ALLOWED_PROVIDERS.includes(String(providerKey || '').trim());
 }
 
+/** 解析 provider/model；同时提供 id 与 model 别名，避免后文重复定义覆盖后字段不一致 */
 function parseModelRef(ref) {
     const raw = String(ref || '').trim();
-    if (!raw) return { provider: '', model: '' };
-    if (!raw.includes('/')) return { provider: '', model: raw };
+    if (!raw) return { provider: '', id: '', model: '' };
     const idx = raw.indexOf('/');
-    return { provider: raw.slice(0, idx), model: raw.slice(idx + 1) };
+    if (idx <= 0) return { provider: '', id: raw, model: raw };
+    const provider = raw.slice(0, idx).trim();
+    const id = raw.slice(idx + 1).trim();
+    return { provider, id, model: id };
 }
 
 function isBuiltinAllowedModelRef(ref) {
@@ -9204,13 +9207,7 @@ function ensureChatModelSelect() {
     return select;
 }
 
-function parseModelRef(ref) {
-    const raw = String(ref || '').trim();
-    if (!raw) return { provider: '', id: '' };
-    const idx = raw.indexOf('/');
-    if (idx <= 0) return { provider: '', id: raw };
-    return { provider: raw.slice(0, idx).trim(), id: raw.slice(idx + 1).trim() };
-}
+// parseModelRef 定义见文件顶部（勿在此重复声明，会覆盖并导致 model/id 字段不一致）
 
 function formatModelRef(provider, id) {
     const p = String(provider || '').trim();
