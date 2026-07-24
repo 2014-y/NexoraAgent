@@ -1267,6 +1267,8 @@ function setGatewayFullyReadyUI() {
     try { updateProgressUI(100, '本地 AI Nexora Agent服务就绪！'); } catch (e) {}
     try { sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已成功启动运行！'); } catch (e) {}
     __openclawPanelLastUrl = '';
+    // 就绪后再从活动流回放一次通道绿点，防止 Win+R 重启后新日志未重复推送导致图二灰掉
+    try { syncChannelStatusTilesFromLogs({ forceOnline: true }); } catch (e) {}
 }
 
 // 2. DOM 元素获取
@@ -2063,8 +2065,8 @@ async function init() {
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
 
-            // 启动时不再清空活动流；保留 Win+R / 重启前的最近状态，顶部仅加启动提示。
-            restorePersistedActivityLogs({ replace: true });
+            // 启动时不再清空活动流；保留 Win+R / 重启前的最近状态，并据此恢复通道绿点。
+            restorePersistedActivityLogs({ replace: true, forceOnline: true });
             ensureStartingActivityTip();
 
             window.api.gatewayAction('start');
@@ -2105,15 +2107,7 @@ async function init() {
             const activeModel = document.getElementById('dash-active-model');
             if (activeModel) activeModel.textContent = t('console.dash.not_configured') || '未启动';
             
-            ['weixin', 'qqbot', 'feishu'].forEach(ch => {
-                const tile = document.getElementById(`tile-${ch}`);
-                if (tile) {
-                    tile.className = 'channel-status-tile offline';
-                    if (ch === 'weixin') tile.title = t('console.channel.wechat.disconnected') || '微信消息通道: 未连接';
-                    if (ch === 'qqbot') tile.title = t('console.channel.qq.disconnected') || 'QQ机器人通道: 未配置';
-                    if (ch === 'feishu') tile.title = t('console.channel.feishu.disconnected') || '飞书/Lark通道: 未连接';
-                }
-            });
+            setAllChannelStatusTilesOffline();
         });
     }
 
@@ -2342,6 +2336,142 @@ function clearPersistedActivityLogs(scope = getCurrentActivityScope()) {
     try { localStorage.removeItem(getActivityLogStorageKey(scope)); } catch (_) {}
 }
 
+const CHANNEL_TILE_META = {
+    weixin: {
+        connectedKey: 'console.channel.wechat.connected',
+        disconnectedKey: 'console.channel.wechat.disconnected',
+        connectedFallback: '微信消息通道: 已连接',
+        disconnectedFallback: '微信消息通道: 未连接'
+    },
+    qqbot: {
+        connectedKey: 'console.channel.qq.connected',
+        disconnectedKey: 'console.channel.qq.disconnected',
+        connectedFallback: 'QQ机器人通道: 已连接',
+        disconnectedFallback: 'QQ机器人通道: 未配置'
+    },
+    feishu: {
+        connectedKey: 'console.channel.feishu.connected',
+        disconnectedKey: 'console.channel.feishu.disconnected',
+        connectedFallback: '飞书/Lark通道: 已连接',
+        disconnectedFallback: '飞书/Lark通道: 未连接'
+    }
+};
+
+function setChannelStatusTile(channelId, online) {
+    const tile = document.getElementById(`tile-${channelId}`);
+    const meta = CHANNEL_TILE_META[channelId];
+    if (!tile || !meta) return;
+    tile.className = online ? 'channel-status-tile online' : 'channel-status-tile offline';
+    tile.title = online
+        ? (t(meta.connectedKey) || meta.connectedFallback)
+        : (t(meta.disconnectedKey) || meta.disconnectedFallback);
+}
+
+function setAllChannelStatusTilesOffline() {
+    ['weixin', 'qqbot', 'feishu'].forEach((ch) => setChannelStatusTile(ch, false));
+}
+
+function stripActivityLogText(lineHtml) {
+    return String(lineHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** 从单条活动流日志推导通道绿点；返回是否命中某通道状态变化 */
+function applyChannelStatusFromLogLine(lineHtml) {
+    const line = stripActivityLogText(lineHtml);
+    if (!line) return false;
+    let hit = false;
+
+    if (
+        line.includes('微信消息接收通道已成功连接')
+        || (line.includes('微信插件') && line.includes('🟢'))
+    ) {
+        setChannelStatusTile('weixin', true);
+        hit = true;
+    } else if (
+        line.includes('微信通道连接断开')
+        || (line.includes('微信插件') && line.includes('🔴'))
+    ) {
+        setChannelStatusTile('weixin', false);
+        hit = true;
+    }
+
+    if (
+        line.includes('QQ 机器人消息通道已成功上线')
+        || line.includes('QQ 机器人消息接收通道已成功连接')
+        || (line.includes('QQ机器人') && line.includes('🟢'))
+    ) {
+        setChannelStatusTile('qqbot', true);
+        hit = true;
+    }
+
+    if (
+        line.includes('飞书/Lark 消息通道已成功上线')
+        || line.includes('飞书/Lark 的消息通道已成功上线')
+        || (line.includes('飞书插件') && line.includes('🟢'))
+    ) {
+        setChannelStatusTile('feishu', true);
+        hit = true;
+    }
+
+    return hit;
+}
+
+/**
+ * Win+R / 重启后活动流会从本地恢复，但通道绿点原先只靠「新日志」点亮。
+ * 这里从已恢复日志（由新到旧）重算最新通道状态，避免图二灰点被清空后回不来。
+ */
+function syncChannelStatusTilesFromLogs(options = {}) {
+    const allowOnline = options.forceOnline === true
+        || gatewayStatus === 'running'
+        || gatewayStatus === 'starting';
+    if (!allowOnline) {
+        setAllChannelStatusTilesOffline();
+        return;
+    }
+
+    const logs = Array.isArray(options.logs)
+        ? options.logs
+        : getPersistedActivityLogs(options.scope || getCurrentActivityScope());
+    if (!logs.length) return;
+
+    const latest = { weixin: null, qqbot: null, feishu: null };
+    for (let i = logs.length - 1; i >= 0; i--) {
+        const line = stripActivityLogText(logs[i]);
+        if (!line) continue;
+
+        if (latest.weixin === null) {
+            if (line.includes('微信消息接收通道已成功连接') || (line.includes('微信插件') && line.includes('🟢'))) {
+                latest.weixin = true;
+            } else if (line.includes('微信通道连接断开') || (line.includes('微信插件') && line.includes('🔴'))) {
+                latest.weixin = false;
+            }
+        }
+        if (latest.qqbot === null) {
+            if (
+                line.includes('QQ 机器人消息通道已成功上线')
+                || line.includes('QQ 机器人消息接收通道已成功连接')
+                || (line.includes('QQ机器人') && line.includes('🟢'))
+            ) {
+                latest.qqbot = true;
+            }
+        }
+        if (latest.feishu === null) {
+            if (
+                line.includes('飞书/Lark 消息通道已成功上线')
+                || line.includes('飞书/Lark 的消息通道已成功上线')
+                || (line.includes('飞书插件') && line.includes('🟢'))
+            ) {
+                latest.feishu = true;
+            }
+        }
+        if (latest.weixin !== null && latest.qqbot !== null && latest.feishu !== null) break;
+    }
+
+    if (latest.weixin !== null) setChannelStatusTile('weixin', latest.weixin);
+    if (latest.qqbot !== null) setChannelStatusTile('qqbot', latest.qqbot);
+    if (latest.feishu !== null) setChannelStatusTile('feishu', latest.feishu);
+}
+
 function restorePersistedActivityLogs(options = {}) {
     const streamList = document.getElementById('dash-activity-stream-list');
     if (!streamList) return;
@@ -2349,6 +2479,9 @@ function restorePersistedActivityLogs(options = {}) {
     if (options.replace) streamList.innerHTML = '';
     if (!logs.length) {
         if (options.replace) streamList.innerHTML = getActivityEmptyTipsHtml();
+        if (options.syncChannelTiles !== false) {
+            syncChannelStatusTilesFromLogs({ logs: [], scope: options.scope, forceOnline: options.forceOnline });
+        }
         return;
     }
     streamList.querySelectorAll('.activity-item-empty, .starting-activity-item').forEach((el) => el.remove());
@@ -2362,6 +2495,9 @@ function restorePersistedActivityLogs(options = {}) {
     streamList.appendChild(frag);
     while (streamList.children.length > 150) streamList.removeChild(streamList.firstChild);
     streamList.scrollTop = streamList.scrollHeight;
+    if (options.syncChannelTiles !== false) {
+        syncChannelStatusTilesFromLogs({ logs, scope: options.scope, forceOnline: options.forceOnline });
+    }
 }
 
 function renderScopedActivityLogs() {
@@ -3214,38 +3350,8 @@ function setupIpcListeners() {
                 }
             }
             
-            // 微信通道
-            if (lineHtml.includes('微信消息接收通道已成功连接')) {
-                const tile = document.getElementById('tile-weixin');
-                if (tile) {
-                    tile.className = 'channel-status-tile online';
-                    tile.title = t('console.channel.wechat.connected') || '微信消息通道: 已连接';
-                }
-            } else if (lineHtml.includes('微信通道连接断开')) {
-                const tile = document.getElementById('tile-weixin');
-                if (tile) {
-                    tile.className = 'channel-status-tile offline';
-                    tile.title = t('console.channel.wechat.disconnected') || '微信消息通道: 未连接';
-                }
-            }
-            
-            // QQ通道
-            if (lineHtml.includes('QQ 机器人消息通道已成功上线')) {
-                const tile = document.getElementById('tile-qqbot');
-                if (tile) {
-                    tile.className = 'channel-status-tile online';
-                    tile.title = t('console.channel.qq.connected') || 'QQ机器人通道: 已连接';
-                }
-            }
-            
-            // 飞书通道
-            if (lineHtml.includes('飞书/Lark 消息通道已成功上线')) {
-                const tile = document.getElementById('tile-feishu');
-                if (tile) {
-                    tile.className = 'channel-status-tile online';
-                    tile.title = t('console.channel.feishu.connected') || '飞书/Lark通道: 已连接';
-                }
-            }
+            // 微信 / QQ / 飞书通道绿点（与活动流文案解耦，便于重启后从持久化日志回放）
+            applyChannelStatusFromLogLine(lineHtml);
 
             // 写入隐藏的原大终端
             const span = document.createElement('span');
@@ -3311,16 +3417,8 @@ function setupIpcListeners() {
             updateGatewayStatusUI('stopped');
             updateRightPluginsCountUI();
             
-            // 重置微信、QQ、飞书的通道状态卡片为离线
-            ['weixin', 'qqbot', 'feishu'].forEach(ch => {
-                const tile = document.getElementById(`tile-${ch}`);
-                if (tile) {
-                    tile.className = 'channel-status-tile offline';
-                    if (ch === 'weixin') tile.title = t('console.channel.wechat.disconnected') || '微信消息通道: 未连接';
-                    if (ch === 'qqbot') tile.title = t('console.channel.qq.disconnected') || 'QQ机器人通道: 未配置';
-                    if (ch === 'feishu') tile.title = t('console.channel.feishu.disconnected') || '飞书/Lark通道: 未连接';
-                }
-            });
+            // 服务停止：通道状态卡片回灰（活动流仍保留，便于 Win+R 重启后回放绿点）
+            setAllChannelStatusTilesOffline();
 
             // 重置拓扑图状态与步骤进度 UI 为已停止
             if (typeof updateStepperUI === 'function') {
@@ -3335,9 +3433,12 @@ function setupIpcListeners() {
         } 
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
-            // 仅从「已停止」冷启动时清空活动流；starting→running（含崩溃自动拉起）保留诊断信息
+            // 仅从「已停止」冷启动时回放活动流；starting→running（含崩溃自动拉起）保留诊断信息
             if (oldStatus === 'stopped') {
-                restorePersistedActivityLogs({ replace: true });
+                restorePersistedActivityLogs({ replace: true, forceOnline: true });
+            } else {
+                // 热恢复/崩溃拉起：即使没整表替换，也按最近日志把绿点补回来
+                syncChannelStatusTilesFromLogs({ forceOnline: true });
             }
             // 冷启动：维持 starting 做端口探测；自启时进度可能已非 0，避免按钮一直停在「启动中」
             if (currentProgress > 0 && !gatewayFullyReady) {
@@ -8846,6 +8947,13 @@ function applyLanguage(lang) {
             }
         }
     } catch (e) {}
+
+    // 会话归档：动态列表/详情跟随系统语言
+    try {
+        if (typeof renderSessionArchiveView === 'function' && typeof sessionArchiveState !== 'undefined' && sessionArchiveState.initialized) {
+            renderSessionArchiveView();
+        }
+    } catch (e) {}
 }
 
 // 发送系统桌面横幅通知
@@ -10022,7 +10130,7 @@ function archiveMessageToText(message) {
     if (!message) return '';
     const content = message.content;
     if (Array.isArray(content)) {
-        return content.map((item) => item && (item.text || (item.image_url ? '[图片]' : ''))).filter(Boolean).join('\n');
+        return content.map((item) => item && (item.text || (item.image_url ? t('session_archive.image') : ''))).filter(Boolean).join('\n');
     }
     return stripSessionHtml(content || '');
 }
@@ -10034,7 +10142,7 @@ function recordActiveChatArchiveMessage(message) {
     activeChatArchiveMessages.push({
         id: `msg_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         role: message.role,
-        content: text || '[图片附件]',
+        content: text || t('session_archive.image_attachment'),
         attachment: message.attachment || '',
         createdAt: message.createdAt || new Date().toISOString()
     });
@@ -10045,20 +10153,20 @@ function recordActiveChatArchiveMessage(message) {
 
 function buildArchiveTitle(messages) {
     const firstUser = (messages || []).find((m) => m.role === 'user' && archiveMessageToText(m).trim());
-    const base = firstUser ? archiveMessageToText(firstUser).trim() : '未命名会话';
+    const base = firstUser ? archiveMessageToText(firstUser).trim() : t('session_archive.untitled');
     return base.length > 24 ? `${base.slice(0, 24)}…` : base;
 }
 
 function buildArchiveSummary(messages) {
     const parts = (messages || []).slice(0, 4).map((m) => archiveMessageToText(m).trim()).filter(Boolean);
-    const summary = parts.join(' / ') || '手动创建的空归档';
+    const summary = parts.join(' / ') || t('session_archive.summary.empty');
     return summary.length > 120 ? `${summary.slice(0, 120)}…` : summary;
 }
 
 function archiveCurrentChatSession(options = {}) {
     const messages = activeChatArchiveMessages.slice();
     if (!messages.length) {
-        if (!options.silent) showToast('当前没有可归档的会话内容');
+        if (!options.silent) showToast(t('session_archive.toast.nothing'));
         return null;
     }
     const now = new Date().toISOString();
@@ -10068,7 +10176,7 @@ function archiveCurrentChatSession(options = {}) {
         id: `archive_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         title: buildArchiveTitle(messages),
         summary: buildArchiveSummary(messages),
-        tags: ['模型会话'],
+        tags: [t('session_archive.tag.chat')],
         model,
         createdAt: now,
         updatedAt: now,
@@ -10086,10 +10194,17 @@ function archiveCurrentChatSession(options = {}) {
     } else {
         renderSessionArchiveView();
     }
-    if (!options.silent) showToast('📦 当前会话已归档');
+    if (!options.silent) showToast(t('session_archive.toast.archived'));
     return item;
 }
 window.archiveCurrentChatSession = archiveCurrentChatSession;
+
+function getSessionArchiveLocaleTag() {
+    const lang = localStorage.getItem('setting_language') || 'zh-CN';
+    if (lang === 'en-US') return 'en-US';
+    if (lang === 'zh-TW') return 'zh-TW';
+    return 'zh-CN';
+}
 
 function getFilteredSessionArchives() {
     const query = String(sessionArchiveState.query || '').trim().toLowerCase();
@@ -10101,8 +10216,9 @@ function getFilteredSessionArchives() {
         });
     }
     const sort = sessionArchiveState.sort || 'updatedDesc';
+    const locale = getSessionArchiveLocaleTag();
     list.sort((a, b) => {
-        if (sort === 'titleAsc') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN');
+        if (sort === 'titleAsc') return String(a.title || '').localeCompare(String(b.title || ''), locale);
         const field = sort === 'createdDesc' ? 'createdAt' : 'updatedAt';
         return new Date(b[field] || 0) - new Date(a[field] || 0);
     });
@@ -10111,11 +10227,18 @@ function getFilteredSessionArchives() {
 
 function formatArchiveTime(value) {
     if (!value) return '--';
-    try { return new Date(value).toLocaleString('zh-CN', { hour12: false }); } catch (_) { return value; }
+    try { return new Date(value).toLocaleString(getSessionArchiveLocaleTag(), { hour12: false }); } catch (_) { return value; }
 }
 
 function escapeSessionArchiveHtml(value) {
     return String(value || '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function sessionArchiveSourceLabel(item, detailed = false) {
+    if (!item) return t('session_archive.source.system');
+    if (item.source === 'local') return t('session_archive.source.local');
+    if (item.source === 'channel') return detailed ? t('session_archive.source.channel_history') : t('session_archive.source.channel');
+    return detailed ? t('session_archive.source.openclaw') : t('session_archive.source.system');
 }
 
 function renderSessionArchiveView() {
@@ -10124,18 +10247,22 @@ function renderSessionArchiveView() {
     const countEl = document.getElementById('session-archive-count');
     if (!listEl || !detailEl) return;
     const list = getFilteredSessionArchives();
-    if (countEl) countEl.textContent = `${list.length} 条会话${sessionArchiveState.externalLoading ? ' · 正在读取历史…' : ''}`;
+    if (countEl) {
+        const countText = t('session_archive.count').replace('{count}', String(list.length));
+        const loadingText = sessionArchiveState.externalLoading ? t('session_archive.count_loading') : '';
+        countEl.textContent = `${countText}${loadingText}`;
+    }
     if (list.length && !list.some((item) => item.id === sessionArchiveState.selectedId)) {
         sessionArchiveState.selectedId = list[0].id;
     }
     listEl.innerHTML = list.length ? list.map((item) => `
         <div class="session-archive-card ${item.id === sessionArchiveState.selectedId ? 'active' : ''}" data-archive-id="${escapeSessionArchiveHtml(item.id)}">
-            <div class="session-archive-card-title">${escapeSessionArchiveHtml(item.title || '未命名会话')}</div>
-            <div class="session-archive-card-meta"><span>${item.source === 'local' ? '本地归档' : (item.source === 'channel' ? '通讯渠道' : '系统历史')}</span><span>${escapeSessionArchiveHtml(item.model || 'unknown')}</span><span>更新 ${formatArchiveTime(item.updatedAt)}</span><span>${(item.messages || []).length} 条</span></div>
+            <div class="session-archive-card-title">${escapeSessionArchiveHtml(item.title || t('session_archive.untitled'))}</div>
+            <div class="session-archive-card-meta"><span>${sessionArchiveSourceLabel(item)}</span><span>${escapeSessionArchiveHtml(item.model || 'unknown')}</span><span>${t('session_archive.meta.updated').replace('{time}', formatArchiveTime(item.updatedAt))}</span><span>${t('session_archive.meta.messages').replace('{count}', String((item.messages || []).length))}</span></div>
             <div class="session-archive-card-summary">${escapeSessionArchiveHtml(item.summary || '')}</div>
             <div class="session-archive-tags">${(item.tags || []).map((tag) => `<span class="session-archive-tag">${escapeSessionArchiveHtml(tag)}</span>`).join('')}</div>
         </div>
-    `).join('') : '<div class="session-archive-detail-empty">还没有归档会话。去“模型会话”聊几句后点归档，或者手动新建一条。</div>';
+    `).join('') : `<div class="session-archive-detail-empty">${escapeSessionArchiveHtml(t('session_archive.empty_list'))}</div>`;
     listEl.querySelectorAll('.session-archive-card').forEach((card) => {
         card.addEventListener('click', () => {
             sessionArchiveState.selectedId = card.dataset.archiveId || '';
@@ -10144,20 +10271,28 @@ function renderSessionArchiveView() {
     });
     const selected = getAllSessionArchives().find((item) => item.id === sessionArchiveState.selectedId);
     if (!selected) {
-        detailEl.innerHTML = '<div class="session-archive-detail-empty">选择左侧归档查看详情。小抽屉空空如也。</div>';
+        detailEl.innerHTML = `<div class="session-archive-detail-empty">${escapeSessionArchiveHtml(t('session_archive.empty_detail'))}</div>`;
         return;
     }
+    const detailMeta = [
+        sessionArchiveSourceLabel(selected, true),
+        t('session_archive.meta.created').replace('{time}', formatArchiveTime(selected.createdAt)),
+        t('session_archive.meta.updated').replace('{time}', formatArchiveTime(selected.updatedAt)),
+        escapeSessionArchiveHtml(selected.model || 'unknown')
+    ];
+    if (selected.channel) detailMeta.push(escapeSessionArchiveHtml(selected.channel));
+    if (selected.target) detailMeta.push(escapeSessionArchiveHtml(selected.target));
     detailEl.innerHTML = `
         <div class="session-archive-detail-head">
             <div>
-                <h3 class="session-archive-detail-title">${escapeSessionArchiveHtml(selected.title || '未命名会话')}</h3>
-                <div class="session-archive-detail-meta">${selected.source === 'local' ? '本地归档' : (selected.source === 'channel' ? '通讯渠道历史' : 'OpenClaw历史')} · 创建 ${formatArchiveTime(selected.createdAt)} · 更新 ${formatArchiveTime(selected.updatedAt)} · ${escapeSessionArchiveHtml(selected.model || 'unknown')}${selected.channel ? ' · ' + escapeSessionArchiveHtml(selected.channel) : ''}${selected.target ? ' · ' + escapeSessionArchiveHtml(selected.target) : ''}</div>
+                <h3 class="session-archive-detail-title">${escapeSessionArchiveHtml(selected.title || t('session_archive.untitled'))}</h3>
+                <div class="session-archive-detail-meta">${detailMeta.join(' · ')}</div>
                 <div class="session-archive-tags">${(selected.tags || []).map((tag) => `<span class="session-archive-tag">${escapeSessionArchiveHtml(tag)}</span>`).join('')}</div>
             </div>
             <div class="session-archive-detail-actions">
-                <button class="session-archive-btn ghost" data-archive-action="restore">恢复到会话</button>
-                <button class="session-archive-btn" data-archive-action="edit">${selected.readOnly ? '转存编辑' : '编辑'}</button>
-                <button class="session-archive-btn danger" data-archive-action="delete" ${selected.readOnly ? 'disabled title="系统历史为只读，不能从这里删除" style="opacity:.45;cursor:not-allowed;"' : ''}>删除</button>
+                <button class="session-archive-btn ghost" data-archive-action="restore">${escapeSessionArchiveHtml(t('session_archive.btn.restore'))}</button>
+                <button class="session-archive-btn" data-archive-action="edit">${escapeSessionArchiveHtml(selected.readOnly ? t('session_archive.btn.clone_edit') : t('session_archive.btn.edit'))}</button>
+                <button class="session-archive-btn danger" data-archive-action="delete" ${selected.readOnly ? `disabled title="${escapeSessionArchiveHtml(t('session_archive.readonly_title'))}" style="opacity:.45;cursor:not-allowed;"` : ''}>${escapeSessionArchiveHtml(t('session_archive.btn.delete'))}</button>
             </div>
         </div>
         <div class="session-archive-messages">
@@ -10166,7 +10301,7 @@ function renderSessionArchiveView() {
                     <div class="session-archive-msg-role">${msg.role === 'user' ? 'USER' : 'AI'} · ${formatArchiveTime(msg.createdAt)}</div>
                     <div class="session-archive-msg-content">${escapeSessionArchiveHtml(msg.content || '')}</div>
                 </div>
-            `).join('') : `<div class="session-archive-detail-empty">这条归档暂无消息内容。</div>`}
+            `).join('') : `<div class="session-archive-detail-empty">${escapeSessionArchiveHtml(t('session_archive.empty_messages'))}</div>`}
         </div>
     `;
     detailEl.querySelector('[data-archive-action="restore"]')?.addEventListener('click', () => restoreArchivedSession(selected.id));
@@ -10178,23 +10313,23 @@ function renderSessionArchiveEditor(item) {
     const detailEl = document.getElementById('session-archive-detail');
     if (!detailEl) return;
     const isNew = !item || !item.id;
-    const draft = item || { title: '', summary: '', tags: ['手动归档'], messages: [], model: 'manual' };
+    const draft = item || { title: '', summary: '', tags: [t('session_archive.tag.manual')], messages: [], model: 'manual' };
     detailEl.innerHTML = `
-        <div class="session-archive-detail-head"><h3 class="session-archive-detail-title">${isNew ? '新建归档' : '编辑归档'}</h3></div>
+        <div class="session-archive-detail-head"><h3 class="session-archive-detail-title">${escapeSessionArchiveHtml(isNew ? t('session_archive.editor.new') : t('session_archive.editor.edit'))}</h3></div>
         <div class="session-archive-editor">
-            <label>标题<input id="archive-edit-title" value="${escapeSessionArchiveHtml(draft.title || '')}" placeholder="例如：微信机器人排查记录"></label>
-            <label>标签（逗号分隔）<input id="archive-edit-tags" value="${escapeSessionArchiveHtml((draft.tags || []).join(', '))}" placeholder="模型会话, 排查, 备忘"></label>
-            <label>摘要<textarea id="archive-edit-summary" placeholder="这条归档主要记录了什么？">${escapeSessionArchiveHtml(draft.summary || '')}</textarea></label>
-            <label>消息/备注<textarea id="archive-edit-content" placeholder="可以写入人工整理后的会话摘要、解决方案或备忘。">${escapeSessionArchiveHtml((draft.messages || []).map((m) => m.content).join('\n\n'))}</textarea></label>
+            <label>${escapeSessionArchiveHtml(t('session_archive.editor.title'))}<input id="archive-edit-title" value="${escapeSessionArchiveHtml(draft.title || '')}" placeholder="${escapeSessionArchiveHtml(t('session_archive.editor.title_ph'))}"></label>
+            <label>${escapeSessionArchiveHtml(t('session_archive.editor.tags'))}<input id="archive-edit-tags" value="${escapeSessionArchiveHtml((draft.tags || []).join(', '))}" placeholder="${escapeSessionArchiveHtml(t('session_archive.editor.tags_ph'))}"></label>
+            <label>${escapeSessionArchiveHtml(t('session_archive.editor.summary'))}<textarea id="archive-edit-summary" placeholder="${escapeSessionArchiveHtml(t('session_archive.editor.summary_ph'))}">${escapeSessionArchiveHtml(draft.summary || '')}</textarea></label>
+            <label>${escapeSessionArchiveHtml(t('session_archive.editor.content'))}<textarea id="archive-edit-content" placeholder="${escapeSessionArchiveHtml(t('session_archive.editor.content_ph'))}">${escapeSessionArchiveHtml((draft.messages || []).map((m) => m.content).join('\n\n'))}</textarea></label>
             <div class="session-archive-detail-actions">
-                <button class="session-archive-btn primary" id="archive-edit-save">保存</button>
-                <button class="session-archive-btn" id="archive-edit-cancel">取消</button>
+                <button class="session-archive-btn primary" id="archive-edit-save">${escapeSessionArchiveHtml(t('session_archive.btn.save'))}</button>
+                <button class="session-archive-btn" id="archive-edit-cancel">${escapeSessionArchiveHtml(t('session_archive.btn.cancel'))}</button>
             </div>
         </div>
     `;
     document.getElementById('archive-edit-save')?.addEventListener('click', () => {
         const now = new Date().toISOString();
-        const title = document.getElementById('archive-edit-title')?.value.trim() || '未命名归档';
+        const title = document.getElementById('archive-edit-title')?.value.trim() || t('session_archive.untitled_archive');
         const summary = document.getElementById('archive-edit-summary')?.value.trim() || '';
         const tags = (document.getElementById('archive-edit-tags')?.value || '').split(/[,，]/).map((v) => v.trim()).filter(Boolean);
         const content = document.getElementById('archive-edit-content')?.value.trim() || summary;
@@ -10208,7 +10343,7 @@ function renderSessionArchiveEditor(item) {
             if (idx >= 0) list[idx] = { ...list[idx], title, summary, tags, updatedAt: now, messages: content ? [{ id: `msg_${Date.now()}`, role: 'assistant', content, createdAt: now }] : list[idx].messages || [] };
         }
         saveSessionArchives(list);
-        showToast('归档已保存');
+        showToast(t('session_archive.toast.saved'));
         renderSessionArchiveView();
     });
     document.getElementById('archive-edit-cancel')?.addEventListener('click', renderSessionArchiveView);
@@ -10216,11 +10351,11 @@ function renderSessionArchiveEditor(item) {
 
 function deleteArchivedSession(id) {
     if (!id) return;
-    if (!confirm('确定删除这条归档吗？此操作不可撤销。')) return;
+    if (!confirm(t('session_archive.confirm_delete'))) return;
     const list = safeParseSessionArchives().filter((item) => item.id !== id);
     saveSessionArchives(list);
     sessionArchiveState.selectedId = list[0] ? list[0].id : '';
-    showToast('归档已删除');
+    showToast(t('session_archive.toast.deleted'));
     renderSessionArchiveView();
 }
 
@@ -10228,7 +10363,7 @@ function restoreArchivedSession(id) {
     const item = safeParseSessionArchives().find((entry) => entry.id === id);
     if (!item) return;
     if (!Array.isArray(item.messages) || item.messages.length === 0) {
-        showToast('这条通讯渠道历史只有路由信息，暂无可恢复的消息内容');
+        showToast(t('session_archive.toast.no_restore'));
         return;
     }
     clearChatHistory({ skipArchive: true });
@@ -10241,7 +10376,7 @@ function restoreArchivedSession(id) {
     });
     const chatNav = document.querySelector('.nav-item[data-tab="chat-view"]');
     if (chatNav) chatNav.click();
-    showToast('已恢复到模型会话');
+    showToast(t('session_archive.toast.restored'));
 }
 
 function initSessionArchiveView() {
@@ -10267,7 +10402,7 @@ async function handleSendMessage() {
 
     inputArea.value = '';
     const file = chatAttachmentBase64;
-    const userArchiveMessage = { role: 'user', content: text || (file ? '[图片附件]' : ''), attachment: file || '', createdAt: new Date().toISOString() };
+    const userArchiveMessage = { role: 'user', content: text || (file ? t('session_archive.image_attachment') : ''), attachment: file || '', createdAt: new Date().toISOString() };
     
     document.getElementById('chat-file-upload-input').value = '';
     document.getElementById('chat-attachment-preview-bar').style.display = 'none';

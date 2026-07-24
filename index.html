@@ -718,20 +718,20 @@
           <div class="session-archive-shell">
             <div class="session-archive-header">
               <div>
-                <h2>会话归档</h2>
-                <p>管理已归档的模型会话：搜索、查看、恢复、编辑、删除，也可以手动创建一条归档备忘。</p>
+                <h2 data-i18n="session_archive.title">会话归档</h2>
+                <p data-i18n="session_archive.desc">管理已归档的模型会话：搜索、查看、恢复、编辑、删除，也可以手动创建一条归档备忘。</p>
               </div>
               <div class="session-archive-actions">
-                <button type="button" class="session-archive-btn ghost" id="btn-archive-active-chat">归档当前会话</button>
-                <button type="button" class="session-archive-btn primary" id="btn-create-archive-session">新建归档</button>
+                <button type="button" class="session-archive-btn ghost" id="btn-archive-active-chat" data-i18n="session_archive.btn.archive_current">归档当前会话</button>
+                <button type="button" class="session-archive-btn primary" id="btn-create-archive-session" data-i18n="session_archive.btn.create">新建归档</button>
               </div>
             </div>
             <div class="session-archive-toolbar">
-              <input id="session-archive-search" type="text" placeholder="搜索标题、摘要、标签或消息内容..." autocomplete="off">
-              <select id="session-archive-sort" title="排序方式">
-                <option value="updatedDesc">最近更新</option>
-                <option value="createdDesc">最近创建</option>
-                <option value="titleAsc">标题 A-Z</option>
+              <input id="session-archive-search" type="text" placeholder="搜索标题、摘要、标签或消息内容..." data-i18n-placeholder="session_archive.search.placeholder" autocomplete="off">
+              <select id="session-archive-sort" title="排序方式" data-i18n-title="session_archive.sort.title">
+                <option value="updatedDesc" data-i18n="session_archive.sort.updated">最近更新</option>
+                <option value="createdDesc" data-i18n="session_archive.sort.created">最近创建</option>
+                <option value="titleAsc" data-i18n="session_archive.sort.title_asc">标题 A-Z</option>
               </select>
               <span id="session-archive-count" class="session-archive-count">0 条归档</span>
             </div>
