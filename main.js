@@ -7513,6 +7513,81 @@ ipcMain.handle('get-dashboard-url', async () => {
     return rememberDashboardUrl(global.latestAcpDashboardUrl || buildGatewayDashboardUrl());
 });
 
+// ─── 数据中心（嵌入 openclaw-dashboard，读 CONFIG_DIR 下 SQLite）───
+let dataCenterRuntime = null;
+let dataCenterStartPromise = null;
+
+function getDataCenterServerPath() {
+    return path.join(__dirname, 'data-center', 'server.js');
+}
+
+async function ensureDataCenterServer() {
+    try {
+        if (dataCenterRuntime && dataCenterRuntime.server && dataCenterRuntime.server.listening) {
+            return {
+                ok: true,
+                url: dataCenterRuntime.url,
+                port: dataCenterRuntime.port,
+                stateRoot: dataCenterRuntime.stateRoot,
+            };
+        }
+    } catch (_) {}
+
+    if (dataCenterStartPromise) return dataCenterStartPromise;
+
+    dataCenterStartPromise = (async () => {
+        const serverPath = getDataCenterServerPath();
+        if (!fs.existsSync(serverPath)) {
+            throw new Error('data-center/server.js missing');
+        }
+        const { start } = require(serverPath);
+        const runtime = await start({
+            stateDir: CONFIG_DIR,
+            preferredPort: 3210,
+        });
+        dataCenterRuntime = runtime;
+        return {
+            ok: true,
+            url: runtime.url,
+            port: runtime.port,
+            stateRoot: runtime.stateRoot,
+        };
+    })().catch((err) => {
+        dataCenterStartPromise = null;
+        dataCenterRuntime = null;
+        throw err;
+    });
+
+    return dataCenterStartPromise;
+}
+
+async function stopDataCenterServer() {
+    const runtime = dataCenterRuntime;
+    dataCenterRuntime = null;
+    dataCenterStartPromise = null;
+    if (!runtime || !runtime.server) return;
+    await new Promise((resolve) => {
+        try {
+            runtime.server.close(() => resolve());
+            setTimeout(resolve, 800);
+        } catch (_) {
+            resolve();
+        }
+    });
+}
+
+ipcMain.handle('data-center-get-url', async () => {
+    try {
+        return await ensureDataCenterServer();
+    } catch (err) {
+        console.error('[DataCenter] start failed:', err);
+        return {
+            ok: false,
+            error: (err && err.message) ? String(err.message) : String(err),
+        };
+    }
+});
+
 // 清除内置 Control UI webview 的持久化会话（过期 token / 限流后重建）
 ipcMain.handle('clear-openclaw-panel-session', async () => {
     try {
@@ -8450,6 +8525,9 @@ app.on('will-quit', async (e) => {
     e.preventDefault();
     try {
         voiceRuntime.dispose();
+    } catch (err) {}
+    try {
+        await stopDataCenterServer();
     } catch (err) {}
     try {
         acceleration.setIsQuitting(true);

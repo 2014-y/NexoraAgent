@@ -1162,8 +1162,47 @@ body.theme-custom.has-custom-bg .title-bar {
   min-width: 0;
 }
 
-/* OpenClaw 内置面板铺满视口，避免外层 padding 挤压 webview */
-.content-viewport:has(#openclaw-panel-view.active) {
+/* 侧栏切页时右侧加载遮罩 */
+.page-load-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 18, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: opacity 0.18s ease;
+}
+.page-load-mask[hidden] {
+  display: none !important;
+}
+.page-load-mask-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 28px;
+}
+.page-load-mask-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid rgba(var(--accent-rgb), 0.15);
+  border-top-color: var(--accent-color);
+  animation: spin 0.8s linear infinite;
+}
+.page-load-mask-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+/* OpenClaw / 数据中心 内置面板铺满视口，避免外层 padding 挤压 */
+.content-viewport:has(#openclaw-panel-view.active),
+.content-viewport:has(#data-center-view.active) {
   padding: 0;
 }
 
@@ -4342,12 +4381,37 @@ input:focus, select:focus, textarea:focus {
   padding: 24px 10px;
 }
 
+/* 折叠态导航左右对称；滚动条不占宽度，否则图标会被挤向左侧 */
+.sidebar.collapsed .sidebar-nav {
+  margin: 0 -10px;
+  padding: 8px 10px;
+  align-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/旧 Edge */
+}
+
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar-thumb,
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
 /* 隐藏折叠状态下的图标旁的长文字 */
 .sidebar.collapsed .nav-item {
   justify-content: center;
   padding: 12px 0;
   font-size: 0 !important;
   gap: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sidebar.collapsed .nav-item svg {
@@ -4428,12 +4492,18 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* 折叠状态下隐藏图表和数值，但保留折叠按钮并转化为大卡片按钮 */
+.sidebar.collapsed .sidebar-bottom {
+  margin: 0 -10px;
+  align-items: center;
+}
+
 .sidebar.collapsed .sidebar-mini-chart-container {
   background: transparent !important;
   border: none !important;
-  padding: 0 !important;
-  margin-bottom: 0 !important;
+  padding: 0 10px !important;
+  margin: 0 !important;
   width: 100% !important;
+  box-sizing: border-box !important;
   display: flex !important;
   flex-direction: row !important;
   justify-content: center !important;
@@ -4446,14 +4516,21 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* 破除残留 Flex div 的干扰，使其直接定位 */
-.sidebar.collapsed .sidebar-mini-chart-container div {
-  display: contents !important;
+.sidebar.collapsed .sidebar-mini-chart-container > div,
+.sidebar.collapsed .sidebar-mini-chart-container > div > div {
+  display: flex !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 0 !important;
 }
 
-/* 折叠状态下转化为居中且大尺寸的卡片折叠按钮 */
+/* 折叠状态下转化为居中且与导航图标同轴的卡片按钮 */
 .sidebar.collapsed .collapse-toggle-btn {
-  width: 38px !important;
-  height: 38px !important;
+  width: 36px !important;
+  height: 36px !important;
   border: 1px solid var(--border-color) !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.02) !important;
@@ -4461,7 +4538,8 @@ input:focus, select:focus, textarea:focus {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  margin: 0 auto !important; /* 精准居中对齐 */
+  margin: 0 auto !important;
+  flex-shrink: 0 !important;
 }
 
 .sidebar.collapsed .collapse-toggle-btn:hover {
@@ -6904,11 +6982,36 @@ input:focus, select:focus, textarea:focus {
   color: #38bdf8;
 }
 
-/* 卡片二：网络检测 (紫色系) */
+/* 卡片二：网络检测 (紫色系) — 可点击重测 */
 .acc-dash-stat-card:nth-child(2) .stat-icon {
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0.04) 100%);
   border: 1px solid rgba(var(--accent-rgb), 0.22);
   color: var(--accent-color);
+}
+
+#acc-dash-ip-detect-card {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+  user-select: none;
+}
+
+#acc-dash-ip-detect-card:hover {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.18);
+}
+
+#acc-dash-ip-detect-card:active {
+  transform: scale(0.98);
+}
+
+#acc-dash-ip-detect-card.is-detecting {
+  opacity: 0.9;
+  /* 检测中也允许点击强制重测，避免「点了没反应」 */
+}
+
+#acc-dash-ip-detect-card:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.55);
+  outline-offset: 2px;
 }
 
 /* 卡片四：内存信息 (青色系) */

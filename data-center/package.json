@@ -1,0 +1,12 @@
+{
+  "name": "nexora-data-center",
+  "version": "1.0.0",
+  "description": "Nexora Agent 数据中心（嵌入自 openclaw-dashboard）",
+  "main": "server.js",
+  "private": true,
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "sql.js": "^1.12.0"
+  }
+}

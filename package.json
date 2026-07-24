@@ -32,10 +32,11 @@
     "probe": "openclaw mcp probe",
     "logs": "type logs\\openclaw-%date%.log",
     "app:start": "electron .",
-    "preapp:dist": "node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js",
+    "preapp:dist": "node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "app:dist": "electron-builder --windows nsis",
     "app:pack": "electron-packager . \"Nexora Agent\" --platform=win32 --arch=x64 --out=dist --overwrite",
-    "pack:runtime": "node scripts/pack-gateway-runtime.js"
+    "pack:runtime": "node scripts/pack-gateway-runtime.js",
+    "data-center:install": "npm --prefix data-center install --omit=dev"
   },
   "dependencies": {
     "@openclaw/feishu": "2026.6.11",
@@ -71,6 +72,7 @@
       "**/node_modules/node-pty/**",
       "**/node_modules/sherpa-onnx-node/**",
       "**/node_modules/sherpa-onnx-win-x64/**",
+      "**/data-center/node_modules/**",
       "**/tts-worker.js",
       "**/*.node",
       "**/*.dll"
@@ -166,6 +168,22 @@
       "node_modules/xterm/**/*",
       "node_modules/xterm-addon-fit/**/*",
       "plugins/**/*",
+      "data-center/server.js",
+      "data-center/package.json",
+      "data-center/public/**/*",
+      {
+        "from": "data-center/node_modules",
+        "to": "data-center/node_modules",
+        "filter": [
+          "**/*",
+          "!ai-assistant/**/*",
+          "!.staging/**/*",
+          "!**/{test,tests,__tests__,docs,doc,example,examples,coverage,.github}/**",
+          "!**/*.{md,markdown,map,ts,tsx}",
+          "!**/LICENSE*",
+          "!**/LICENCE*"
+        ]
+      },
       "media-cli/**/*",
       "extensions/media-http.js",
       "extensions/media-core-resolve.js",

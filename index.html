@@ -90,6 +90,14 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
               <span data-i18n="nav.console">控制台</span>
             </div>
+            <div class="nav-item" data-tab="data-center-view" id="btn-nav-data-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                <path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5"/>
+                <path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/>
+              </svg>
+              <span data-i18n="nav.data_center">数据中心</span>
+            </div>
             <div class="nav-item" data-tab="chat-view" id="tour-nav-chat">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               <span data-i18n="nav.chat">模型会话</span>
@@ -202,6 +210,13 @@
 
       <!-- 3. 右侧内容区域 -->
       <main class="content-viewport">
+        <!-- 侧栏切页加载遮罩：等目标页彻底就绪后再关 -->
+        <div id="page-load-mask" class="page-load-mask" hidden aria-hidden="true">
+          <div class="page-load-mask-inner">
+            <div class="page-load-mask-spinner" aria-hidden="true"></div>
+            <div id="page-load-mask-text" class="page-load-mask-text">正在加载…</div>
+          </div>
+        </div>
         
         <!-- Tab 1: 控制台 -->
         <section class="tab-pane active" id="console-view">
@@ -1645,12 +1660,12 @@
                 </div>
               </div>
 
-              <!-- 网络检测 -->
-              <div id="acc-dash-ip-detect-card" class="acc-card acc-dash-stat-card" style="position: relative;">
+              <!-- 网络检测（整卡可点，重新检测出口 IP） -->
+              <div id="acc-dash-ip-detect-card" class="acc-card acc-dash-stat-card" style="position: relative;" role="button" tabindex="0" title="点击重新检测出口 IP">
                 <div class="stat-icon">🌐</div>
                 <div class="stat-main">
                   <div class="stat-label" data-i18n="acc.stat.net_detect">网络检测</div>
-                  <div id="acc-dash-ip-detect-result" class="stat-value" style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="自动检测本机或代理出口 IP" data-i18n="acc.stat.detecting" data-i18n-title="acc.stat.net_detect_title">检测中...</div>
+                  <div id="acc-dash-ip-detect-result" class="stat-value" style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="点击重新检测出口 IP">点击检测</div>
                 </div>
               </div>
 
@@ -1816,9 +1831,19 @@
                   <span id="acc-delay-progress" class="acc-delay-progress" hidden aria-live="polite"></span>
                 </div>
               </div>
-              <div class="acc-view-tabs" style="margin-bottom: 12px; display: flex; gap: 8px; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
+              <div class="acc-view-tabs" style="margin-bottom: 8px; display: flex; gap: 8px; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
                 <button type="button" id="acc-view-tab-nodes" class="acc-subtab active" style="margin: 0; padding: 5px 12px; font-size: 12px; height: auto;" data-i18n="acc.proxy.tab_nodes">所有节点</button>
                 <button type="button" id="acc-view-tab-groups" class="acc-subtab" style="margin: 0; padding: 5px 12px; font-size: 12px; height: auto;" data-i18n="acc.proxy.tab_groups">策略分流</button>
+              </div>
+              <!-- 地区标签置顶：一进代理页即可见，不必先切配置商 -->
+              <div id="acc-node-country-filters" class="acc-country-filters" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; flex-shrink: 0; padding: 0 4px;">
+                <button type="button" class="acc-country-pill active" data-country="all" data-i18n="acc.proxy.country_all">全部</button>
+                <button type="button" class="acc-country-pill" data-country="hk" data-i18n="acc.proxy.country_hk">🇭🇰 香港</button>
+                <button type="button" class="acc-country-pill" data-country="jp" data-i18n="acc.proxy.country_jp">🇯🇵 日本</button>
+                <button type="button" class="acc-country-pill" data-country="sg" data-i18n="acc.proxy.country_sg">🇸🇬 新加坡</button>
+                <button type="button" class="acc-country-pill" data-country="us" data-i18n="acc.proxy.country_us">🇺🇸 美国</button>
+                <button type="button" class="acc-country-pill" data-country="tw" data-i18n="acc.proxy.country_tw">🇹🇼 台湾</button>
+                <button type="button" class="acc-country-pill" data-country="other" data-i18n="acc.proxy.country_other">其他</button>
               </div>
               <div id="acc-node-toolbar" class="acc-node-toolbar" style="flex-shrink: 0;">
                 <input id="acc-node-search" class="acc-input acc-input-grow" type="search" placeholder="搜索节点名称、地区或协议" data-i18n-placeholder="acc.proxy.search_placeholder">
@@ -1831,15 +1856,6 @@
                   <option value="name" data-i18n="acc.proxy.sort_name">按名称排序</option>
                 </select>
                 <span id="acc-node-count" class="acc-muted">0 个节点</span>
-              </div>
-              <div id="acc-node-country-filters" class="acc-country-filters" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; flex-shrink: 0; padding: 0 4px;">
-                <button type="button" class="acc-country-pill active" data-country="all" data-i18n="acc.proxy.country_all">全部</button>
-                <button type="button" class="acc-country-pill" data-country="hk" data-i18n="acc.proxy.country_hk">🇭🇰 香港</button>
-                <button type="button" class="acc-country-pill" data-country="jp" data-i18n="acc.proxy.country_jp">🇯🇵 日本</button>
-                <button type="button" class="acc-country-pill" data-country="sg" data-i18n="acc.proxy.country_sg">🇸🇬 新加坡</button>
-                <button type="button" class="acc-country-pill" data-country="us" data-i18n="acc.proxy.country_us">🇺🇸 美国</button>
-                <button type="button" class="acc-country-pill" data-country="tw" data-i18n="acc.proxy.country_tw">🇹🇼 台湾</button>
-                <button type="button" class="acc-country-pill" data-country="other" data-i18n="acc.proxy.country_other">其他</button>
               </div>
               <div class="acc-node-grid-wrap">
                 <div id="acc-node-grid" class="acc-node-grid">
@@ -2050,6 +2066,11 @@
         <!-- Tab 7: 内置 OpenClaw 面板 -->
         <section class="tab-pane" id="openclaw-panel-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: transparent;">
           <webview id="openclaw-iframe" partition="persist:nexora-agent-openclaw-panel" allowtransparency="true" style="width: 100%; height: 100%; border: none; background: transparent;" src=""></webview>
+        </section>
+
+        <!-- 数据中心：嵌入 openclaw-dashboard（本地 Express + SQLite） -->
+        <section class="tab-pane" id="data-center-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: #0a0e17;">
+          <iframe id="data-center-iframe" title="数据中心" style="width: 100%; height: 100%; border: none; background: #0a0e17;" src="about:blank"></iframe>
         </section>
 
       </main>

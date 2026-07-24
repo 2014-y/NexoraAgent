@@ -6739,6 +6739,7 @@ function updateMemoryMock() {
 const SIDEBAR_NAV_ORDER_KEY = 'setting_sidebar_nav_order';
 const SIDEBAR_NAV_I18N_BY_TAB = {
     'console-view': 'nav.console',
+    'data-center-view': 'nav.data_center',
     'chat-view': 'nav.chat',
     'config-view': 'nav.config',
     'communication-view': 'nav.communication',
@@ -6801,10 +6802,34 @@ function normalizeSidebarNavOrder(preferred) {
         seen.add(tab);
         out.push(tab);
     }
-    for (const tab of defaults) {
+    // 新增内置菜单：插到默认相对位置（避免一直堆在末尾）
+    for (let i = 0; i < defaults.length; i++) {
+        const tab = defaults[i];
         if (seen.has(tab)) continue;
         seen.add(tab);
-        out.push(tab);
+        let insertAt = out.length;
+        if (i === 0) {
+            insertAt = 0;
+        } else {
+            for (let j = i - 1; j >= 0; j--) {
+                const prevIdx = out.indexOf(defaults[j]);
+                if (prevIdx >= 0) {
+                    insertAt = prevIdx + 1;
+                    break;
+                }
+                if (j === 0) insertAt = 0;
+            }
+        }
+        out.splice(insertAt, 0, tab);
+    }
+    // 默认：Nexora Agent 在「数据中心」之上（纠正早期嵌入时二者相邻反序）
+    {
+        const iDc = out.indexOf('data-center-view');
+        const iCon = out.indexOf('console-view');
+        if (iDc >= 0 && iCon >= 0 && iDc === iCon - 1) {
+            out[iDc] = 'console-view';
+            out[iCon] = 'data-center-view';
+        }
     }
     return out;
 }
@@ -6962,6 +6987,122 @@ function setupTabSwitching() {
     const allTabPanes = Array.from(document.querySelectorAll('.tab-pane'));
     let activeNav = document.querySelector('.nav-item.active');
     let activePane = document.querySelector('.tab-pane.active');
+    let pageLoadMaskToken = 0;
+
+    function showPageLoadMask(label) {
+        const mask = document.getElementById('page-load-mask');
+        const text = document.getElementById('page-load-mask-text');
+        if (text) text.textContent = label || t('正在加载…', 'Loading…', '正在載入…');
+        if (mask) {
+            mask.hidden = false;
+            mask.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function hidePageLoadMask() {
+        const mask = document.getElementById('page-load-mask');
+        if (mask) {
+            mask.hidden = true;
+            mask.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    async function waitForPaint() {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await new Promise((r) => setTimeout(r, 40));
+    }
+
+    /** 进入某页后的实质加载（遮罩盖住直到完成） */
+    async function hydrateTabContent(tabId) {
+        if (tabId === 'dashboard-view') {
+            try { renderUsageCharts(); } catch (err) { console.error(err); }
+            return;
+        }
+        if (tabId === 'console-view') {
+            try { updateConsoleChannelStatusUI(); } catch (err) { console.error(err); }
+            try { flushDeferredConsoleLogsInstant(); } catch (err) {}
+            return;
+        }
+        if (tabId === 'terminal-view' && typeof initBuiltinTerminal === 'function') {
+            initBuiltinTerminal();
+            return;
+        }
+        if (tabId === 'plugins-view') {
+            await Promise.resolve().then(() => renderPluginsGrid());
+            return;
+        }
+        if (tabId === 'roles-view') {
+            if (typeof loadRoleConfigState === 'function') {
+                await loadRoleConfigState({ preferActive: true });
+            }
+            return;
+        }
+        if (tabId === 'voice-view') {
+            if (typeof refreshVoicePanel === 'function') {
+                await refreshVoicePanel();
+            }
+            return;
+        }
+        if (tabId === 'chat-view') {
+            if (typeof loadRoleConfigState === 'function') {
+                await loadRoleConfigState({ silent: true, preferActive: false, clearEditing: false });
+            }
+            if (!chatInitialized) {
+                chatInitialized = true;
+                try { initChatView(); } catch (err) { console.error(err); }
+            } else {
+                try { loadChatModels(); } catch (err) { console.error(err); }
+            }
+            return;
+        }
+        if (tabId === 'openclaw-panel-view') {
+            await loadOpenclawControlUi(true, { clearSession: false });
+            return;
+        }
+        if (tabId === 'data-center-view') {
+            await loadDataCenterUi(true);
+            return;
+        }
+        if (tabId === 'syslogs-view') {
+            try { loadAndRenderSystemLogs(); } catch (err) { console.error(err); }
+            return;
+        }
+        if (tabId === 'settings-view') {
+            const settingLangSel = document.getElementById('setting-language-select');
+            if (settingLangSel) {
+                const initLang = localStorage.getItem('setting_language') || 'zh-CN';
+                settingLangSel.value = initLang;
+            }
+            return;
+        }
+        if (tabId === 'acceleration-view') {
+            // 恢复子页 + 地区标签，并主动刷节点（避免必须先切配置商才出完整标签/列表）
+            const savedPanel = loadAccelerationUiPref('panel', 'dashboard') || 'dashboard';
+            accelerationUi.countryFilter = loadAccelerationUiPref('countryFilter', 'all') || 'all';
+            accelerationUi.viewMode = loadAccelerationUiPref('viewMode', 'nodes') || 'nodes';
+            setAccelerationPanel(savedPanel);
+            applyAccelerationProxiesViewMode(accelerationUi.viewMode, { skipRender: true });
+            syncAccelerationCountryFilterUi();
+            try {
+                await refreshAccelerationChannel();
+            } catch (err) {
+                console.error(err);
+            }
+            syncAccelerationCountryFilterUi();
+            if (accelerationUi.panel === 'proxies') {
+                maybeAutoDelayOnProxiesTab();
+            }
+            return;
+        }
+        if (tabId === 'communication-view') {
+            // 通讯页按需轻量刷新（若有）
+            try {
+                if (typeof refreshCommunicationPanel === 'function') {
+                    await refreshCommunicationPanel();
+                }
+            } catch (_) {}
+        }
+    }
 
     allNavItems.forEach((tab) => {
         tab.addEventListener('click', (e) => {
@@ -6990,9 +7131,26 @@ function setupTabSwitching() {
             if (nextTab === currentTab && tab.classList.contains('active')) {
                 // 已在 OpenClaw：再点一次强制刷新控制台（空白页可自愈）
                 if (nextTab === 'openclaw-panel-view' && gatewayFullyReady) {
+                    const token = ++pageLoadMaskToken;
+                    showPageLoadMask(t('正在刷新 OpenClaw…', 'Refreshing OpenClaw…', '正在重新整理 OpenClaw…'));
                     Promise.resolve()
                         .then(() => loadOpenclawControlUi(true, { clearSession: false }))
-                        .catch((err) => console.error(err));
+                        .catch((err) => console.error(err))
+                        .finally(async () => {
+                            await waitForPaint();
+                            if (token === pageLoadMaskToken) hidePageLoadMask();
+                        });
+                }
+                if (nextTab === 'data-center-view') {
+                    const token = ++pageLoadMaskToken;
+                    showPageLoadMask(t('正在刷新数据中心…', 'Refreshing Data Center…', '正在重新整理數據中心…'));
+                    Promise.resolve()
+                        .then(() => loadDataCenterUi(true))
+                        .catch((err) => console.error(err))
+                        .finally(async () => {
+                            await waitForPaint();
+                            if (token === pageLoadMaskToken) hidePageLoadMask();
+                        });
                 }
                 return;
             }
@@ -7014,11 +7172,17 @@ function setupTabSwitching() {
                 try { flushDeferredConsoleLogsInstant(); } catch (err) {}
             }
 
-            // 离开 OpenClaw 面板时先藏 webview，减轻后台合成压力
+            // 离开 OpenClaw / 数据中心 面板时先藏 iframe/webview，减轻后台合成压力
             if (prevTab === 'openclaw-panel-view' || nextTab === 'openclaw-panel-view') {
                 const wv = document.getElementById('openclaw-iframe');
                 if (wv) {
                     wv.style.visibility = (nextTab === 'openclaw-panel-view') ? 'visible' : 'hidden';
+                }
+            }
+            if (prevTab === 'data-center-view' || nextTab === 'data-center-view') {
+                const frame = document.getElementById('data-center-iframe');
+                if (frame) {
+                    frame.style.visibility = (nextTab === 'data-center-view') ? 'visible' : 'hidden';
                 }
             }
 
@@ -7035,85 +7199,24 @@ function setupTabSwitching() {
                 endCommBinding({ cancelBackend: true, toast: '已离开通讯管理，绑定已取消' });
             }
 
-            // 重活全部丢到下一任务，保证菜单点击瞬时响应
-            setTimeout(() => {
-                if (currentTab !== nextTab) return;
+            // 遮罩盖住右侧，直到该页内容彻底 hydrate
+            const token = ++pageLoadMaskToken;
+            const maskLabel =
+                nextTab === 'openclaw-panel-view' ? t('正在加载 OpenClaw…', 'Loading OpenClaw…', '正在載入 OpenClaw…')
+                : nextTab === 'data-center-view' ? t('正在加载数据中心…', 'Loading Data Center…', '正在載入數據中心…')
+                : nextTab === 'acceleration-view' ? t('正在加载 Nexora Clash…', 'Loading Nexora Clash…', '正在載入 Nexora Clash…')
+                : t('正在加载…', 'Loading…', '正在載入…');
+            showPageLoadMask(maskLabel);
 
-                if (currentTab === 'dashboard-view') {
-                    try { renderUsageCharts(); } catch (err) { console.error(err); }
-                }
-
-                if (currentTab === 'console-view') {
-                    try { updateConsoleChannelStatusUI(); } catch (err) { console.error(err); }
-                    // 同步路径已 flush；此处兜底再刷一次（队列为空则 no-op）
-                    try { flushDeferredConsoleLogsInstant(); } catch (err) {}
-                }
-
-                if (currentTab === 'terminal-view' && typeof initBuiltinTerminal === 'function') {
-                    initBuiltinTerminal();
-                }
-
-                if (currentTab === 'plugins-view') {
-                    Promise.resolve().then(() => renderPluginsGrid()).catch((err) => console.error(err));
-                }
-
-                if (currentTab === 'roles-view') {
-                    Promise.resolve().then(() => {
-                        if (typeof loadRoleConfigState === 'function') {
-                            return loadRoleConfigState({ preferActive: true });
-                        }
-                    }).catch((err) => console.error(err));
-                }
-
-                if (currentTab === 'voice-view') {
-                    Promise.resolve().then(() => {
-                        if (typeof refreshVoicePanel === 'function') {
-                            return refreshVoicePanel();
-                        }
-                    }).catch((err) => console.error(err));
-                }
-
-                if (currentTab === 'chat-view') {
-                    Promise.resolve().then(() => {
-                        if (typeof loadRoleConfigState === 'function') {
-                            return loadRoleConfigState({ silent: true, preferActive: false, clearEditing: false });
-                        }
-                    }).catch((err) => console.error(err));
-                }
-
-                if (currentTab === 'openclaw-panel-view') {
-                    // 每次进入都自动加载；不清 session，避免反复清 Cookie 触发限流
-                    Promise.resolve()
-                        .then(() => loadOpenclawControlUi(true, { clearSession: false }))
-                        .catch((err) => console.error(err));
-                }
-
-                if (currentTab === 'syslogs-view') {
-                    try { loadAndRenderSystemLogs(); } catch (err) { console.error(err); }
-                }
-
-                if (currentTab === 'settings-view') {
-                    const settingLangSel = document.getElementById('setting-language-select');
-                    if (settingLangSel) {
-                        const initLang = localStorage.getItem('setting_language') || 'zh-CN';
-                        settingLangSel.value = initLang;
-                        // 强制重绘
-                        const dummy = document.createElement('option');
-                        dummy.style.display = 'none';
-                        settingLangSel.appendChild(dummy);
-                        settingLangSel.removeChild(dummy);
+            Promise.resolve()
+                .then(() => hydrateTabContent(nextTab))
+                .catch((err) => console.error(err))
+                .finally(async () => {
+                    await waitForPaint();
+                    if (token === pageLoadMaskToken && currentTab === nextTab) {
+                        hidePageLoadMask();
                     }
-                }
-
-                if (currentTab === 'chat-view') {
-                    if (!chatInitialized) {
-                        chatInitialized = true;
-                        try { initChatView(); } catch (err) { console.error(err); }
-                    } else {
-                        try { loadChatModels(); } catch (err) { console.error(err); }
-                    }
-                }
-            }, 0);
+                });
         });
     });
 
@@ -11001,6 +11104,52 @@ function syncOpenclawThemeToWebview() {
     } catch (e) {}
 }
 
+async function loadDataCenterUi(forceReload = false) {
+    const frame = document.getElementById('data-center-iframe');
+    if (!frame) return;
+    try {
+        if (!window.api || typeof window.api.getDataCenterUrl !== 'function') {
+            throw new Error('getDataCenterUrl unavailable');
+        }
+        const info = await window.api.getDataCenterUrl();
+        if (!info || !info.ok || !info.url) {
+            throw new Error((info && info.error) || 'data-center start failed');
+        }
+        const url = String(info.url).replace(/\/?$/, '/');
+        const currentSrc = (frame.getAttribute('src') || '').trim();
+        if (!forceReload && currentSrc && currentSrc === url) {
+            return;
+        }
+        const waitLoad = new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                frame.removeEventListener('load', finish);
+                resolve();
+            };
+            frame.addEventListener('load', finish);
+            setTimeout(finish, 12000);
+        });
+        if (currentSrc === url) {
+            frame.src = 'about:blank';
+            await new Promise((r) => setTimeout(r, 30));
+        }
+        frame.src = url;
+        await waitLoad;
+    } catch (err) {
+        console.error('[DataCenter]', err);
+        try {
+            const detail = (err && err.message) ? String(err.message) : '';
+            showToast(
+                detail
+                    ? t('数据中心启动失败：', 'Data Center failed: ', '數據中心啟動失敗：') + detail
+                    : t('数据中心启动失败', 'Data Center failed to start', '數據中心啟動失敗')
+            );
+        } catch (_) {}
+    }
+}
+
 async function loadOpenclawControlUi(forceReload = false, opts = {}) {
     const webview = document.getElementById('openclaw-iframe');
     if (!webview || __openclawPanelLoading) return;
@@ -11421,14 +11570,84 @@ let accelerationState = null;
 let accelerationBusy = false;
 let accelerationBusyMessage = '';
 let accelerationUi = {
-    panel: 'profiles',
+    panel: loadAccelerationUiPref('panel', 'dashboard'),
     importMode: 'url',
     search: '',
     protocol: '',
-    sort: 'latency',
-    viewMode: 'nodes',
-    countryFilter: 'all'
+    sort: loadAccelerationUiPref('sort', 'latency'),
+    viewMode: loadAccelerationUiPref('viewMode', 'nodes'),
+    countryFilter: loadAccelerationUiPref('countryFilter', 'all')
 };
+
+function loadAccelerationUiPref(key, fallback) {
+    try {
+        const raw = localStorage.getItem('acc_ui_' + key);
+        if (raw == null || raw === '') return fallback;
+        return raw;
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function saveAccelerationUiPref(key, value) {
+    try {
+        localStorage.setItem('acc_ui_' + key, String(value == null ? '' : value));
+    } catch (_) {}
+}
+
+/** 把已保存的地区标签同步到按钮高亮，并确保「所有节点」视图下标签条可见 */
+function syncAccelerationCountryFilterUi() {
+    const countryContainer = document.getElementById('acc-node-country-filters');
+    if (!countryContainer) return;
+    const want = String(accelerationUi.countryFilter || 'all').toLowerCase();
+    accelerationUi.countryFilter = want;
+    countryContainer.querySelectorAll('.acc-country-pill[data-country]').forEach((btn) => {
+        const c = String(btn.getAttribute('data-country') || '').toLowerCase();
+        btn.classList.toggle('active', c === want);
+    });
+    // 所有节点视图：始终展示完整地区标签（不依赖先切配置商）
+    if (accelerationUi.viewMode !== 'groups') {
+        countryContainer.style.display = 'flex';
+        countryContainer.hidden = false;
+    }
+}
+
+/** 代理页：所有节点 / 策略分流视图 */
+function applyAccelerationProxiesViewMode(mode, options = {}) {
+    const next = mode === 'groups' ? 'groups' : 'nodes';
+    accelerationUi.viewMode = next;
+    saveAccelerationUiPref('viewMode', next);
+
+    const tabNodes = document.getElementById('acc-view-tab-nodes');
+    const tabGroups = document.getElementById('acc-view-tab-groups');
+    const nodeToolbar = document.getElementById('acc-node-toolbar');
+    const nodeGrid = document.getElementById('acc-node-grid');
+    const groupsContainer = document.getElementById('acc-groups-container');
+    const countryFilters = document.getElementById('acc-node-country-filters');
+    const nodeGridWrap = document.querySelector('.acc-node-grid-wrap');
+    const showNodes = next === 'nodes';
+
+    if (tabNodes) tabNodes.classList.toggle('active', showNodes);
+    if (tabGroups) tabGroups.classList.toggle('active', !showNodes);
+    if (nodeToolbar) nodeToolbar.style.display = showNodes ? '' : 'none';
+    if (countryFilters) {
+        countryFilters.style.display = showNodes ? 'flex' : 'none';
+        countryFilters.hidden = !showNodes;
+    }
+    if (nodeGridWrap) nodeGridWrap.style.display = showNodes ? '' : 'none';
+    if (nodeGrid) nodeGrid.style.display = showNodes ? '' : 'none';
+    if (groupsContainer) {
+        if (showNodes) {
+            groupsContainer.style.display = 'none';
+            groupsContainer.hidden = true;
+        } else {
+            groupsContainer.hidden = false;
+            groupsContainer.style.display = 'flex';
+        }
+    }
+    if (!options.skipRender && accelerationState) renderAccelerationChannel(accelerationState);
+    if (showNodes) syncAccelerationCountryFilterUi();
+}
 let expandedGroups = new Set();
 let connPollInterval = null;
 let connSearchText = '';
@@ -11591,18 +11810,28 @@ function maybeAutoAccelerationIpDetect(options = {}) {
     if (accelerationIpDetectInFlight && Date.now() - accelerationIpDetectStartedAt > 35000) {
         accelerationIpDetectInFlight = false;
     }
-    return runAccelerationIpDetect({ force: !!options.force, reason: options.reason || 'auto' });
+    const text = getAccelerationIpDetectResultText();
+    // 失败态（代理未就绪等）进仪表盘必须强制重测，不能被 8s 节流挡住
+    const forceRetry = !!options.force || /代理未就绪|检测失败|检测超时|检测中|未检测|点击检测|连接被重置|DNS 失败/i.test(text);
+    return runAccelerationIpDetect({ force: forceRetry, reason: options.reason || 'auto' });
 }
 
 async function runAccelerationIpDetect(options = {}) {
     const { force = false } = options;
-    if (accelerationIpDetectInFlight) return null;
+    // 强制重测：允许打断卡住的检测（否则点卡片完全没反应）
+    if (accelerationIpDetectInFlight) {
+        if (!force || Date.now() - accelerationIpDetectStartedAt < 1200) return null;
+        accelerationIpDetectInFlight = false;
+        const stuckCard = document.getElementById('acc-dash-ip-detect-card');
+        if (stuckCard) stuckCard.classList.remove('is-detecting');
+    }
     if (!force && Date.now() - lastAccelerationIpDetectAt < 8000) return null;
 
     const resultEl = document.getElementById('acc-ip-detect-result');
     const dashResultEl = document.getElementById('acc-dash-ip-detect-result');
     const ipDetectBtn = document.getElementById('acc-ip-detect-btn');
     const dashIpDetectBtn = document.getElementById('acc-dash-ip-detect-btn');
+    const dashIpDetectCard = document.getElementById('acc-dash-ip-detect-card');
     const countryCodeToFlag = (cc) => {
         if (!cc || cc.length !== 2) return '🌐';
         const upper = cc.toUpperCase();
@@ -11621,6 +11850,8 @@ async function runAccelerationIpDetect(options = {}) {
     const paint = (text, color, title) => {
         [resultEl, dashResultEl].forEach((el) => {
             if (!el) return;
+            // 动态结果不要被 i18n 扫回去盖成「检测中...」
+            try { el.removeAttribute('data-i18n'); } catch (_) {}
             el.textContent = text;
             el.style.color = color || '';
             el.title = title || text;
@@ -11632,16 +11863,17 @@ async function runAccelerationIpDetect(options = {}) {
         return null;
     }
 
-    const viaProxy = !!(accelerationState && accelerationState.running);
+    const viaProxy = !!(accelerationState && (accelerationState.running || accelerationState.enabled));
     accelerationIpDetectInFlight = true;
     accelerationIpDetectStartedAt = Date.now();
     paint(t('检测中...', 'Detecting...', '檢測中...'), '', viaProxy ? t('正在检测代理出口 IP', 'Detecting proxy exit IP', '正在檢測代理出口 IP') : t('正在检测本机公网出口', 'Detecting local exit IP', '正在檢測本機公網出口'));
     if (ipDetectBtn) ipDetectBtn.disabled = true;
     if (dashIpDetectBtn) dashIpDetectBtn.disabled = true;
+    if (dashIpDetectCard) dashIpDetectCard.classList.add('is-detecting');
     try {
         const data = await Promise.race([
             window.api.detectAccelerationIp(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时')), 22000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时')), 28000))
         ]);
         lastAccelerationIpDetectAt = Date.now();
         if (data && data.success && data.ip) {
@@ -11654,25 +11886,40 @@ async function runAccelerationIpDetect(options = {}) {
                 data.region,
                 data.city,
                 data.isp,
-                data.selectedProxy
+                data.selectedProxy,
+                t('点击可重新检测', 'Click to detect again', '點擊可重新檢測')
             ].filter(Boolean).join(' · ');
             paint(formatted, isDirect ? 'var(--text-primary)' : 'var(--success-color, #22c55e)', tooltip);
             return data;
         }
         {
             const rawErr = (data && data.error) || '检测失败';
-            paint(shortenIpDetectError(rawErr), '#ef4444', rawErr);
+            paint(shortenIpDetectError(rawErr), '#ef4444', rawErr + ' · ' + t('点击重试', 'Click to retry', '點擊重試'));
+            // 代理刚启动时端口偶发未就绪：自动再试一次
+            if (/ECONNREFUSED|代理未就绪/i.test(String(rawErr))) {
+                setTimeout(() => {
+                    if (!shouldAutoAccelerationIpDetect()) return;
+                    runAccelerationIpDetect({ force: true, reason: 'auto-retry-refused' }).catch(() => {});
+                }, 2500);
+            }
         }
         return data;
     } catch (e) {
         lastAccelerationIpDetectAt = Date.now();
         const rawErr = e.message || '检测超时';
-        paint(shortenIpDetectError(rawErr), '#ef4444', rawErr);
+        paint(shortenIpDetectError(rawErr), '#ef4444', rawErr + ' · ' + t('点击重试', 'Click to retry', '點擊重試'));
+        if (/ECONNREFUSED|代理未就绪|检测超时/i.test(String(rawErr))) {
+            setTimeout(() => {
+                if (!shouldAutoAccelerationIpDetect()) return;
+                runAccelerationIpDetect({ force: true, reason: 'auto-retry-error' }).catch(() => {});
+            }, 2500);
+        }
         return null;
     } finally {
         accelerationIpDetectInFlight = false;
         if (ipDetectBtn) ipDetectBtn.disabled = false;
         if (dashIpDetectBtn) dashIpDetectBtn.disabled = false;
+        if (dashIpDetectCard) dashIpDetectCard.classList.remove('is-detecting');
     }
 }
 
@@ -11739,6 +11986,7 @@ async function onAccelerationProfileSwitched(res) {
 function setAccelerationPanel(panel) {
     const prev = accelerationUi.panel;
     accelerationUi.panel = panel || 'dashboard';
+    saveAccelerationUiPref('panel', accelerationUi.panel);
     document.querySelectorAll('.acc-subtab[data-acc-panel]').forEach((btn) => {
         btn.classList.toggle('active', btn.getAttribute('data-acc-panel') === accelerationUi.panel);
     });
@@ -11759,9 +12007,21 @@ function setAccelerationPanel(panel) {
         stopConnectionPolling();
     }
 
+    if (accelerationUi.panel === 'proxies') {
+        // 每次进代理页：恢复地区标签 / 视图，并保证标签条可见
+        applyAccelerationProxiesViewMode(accelerationUi.viewMode || 'nodes', { skipRender: true });
+        // 从 localStorage 再读一次，防止内存态被其它路径冲掉
+        accelerationUi.countryFilter = loadAccelerationUiPref('countryFilter', accelerationUi.countryFilter || 'all') || 'all';
+        syncAccelerationCountryFilterUi();
+        if (accelerationState) renderAccelerationChannel(accelerationState);
+        // 主动刷节点：不依赖「先切配置商」才出现完整地区标签/列表
+        refreshAccelerationChannel().then(() => {
+            syncAccelerationCountryFilterUi();
+        }).catch(() => {});
+    }
+
     if (accelerationUi.panel === 'proxies' && prev !== 'proxies') {
         maybeAutoDelayOnProxiesTab();
-        // 进入代理页再刷一次间隔下拉，修复「显示≠缓存、点一下才一致」
         syncAccelerationAutoSelectIntervalSelect();
     }
 }
@@ -12588,6 +12848,8 @@ function renderAccelerationChannel(data) {
         const totalNonInfo = (data.nodes || []).filter(node => !isAccelerationInfoNode(node)).length;
         count.textContent = `${finalNodes.length}/${totalNonInfo} 个节点`;
     }
+    // 渲染后保持地区标签高亮/可见（避免被其它逻辑盖掉）
+    syncAccelerationCountryFilterUi();
 
     const grid = document.getElementById('acc-node-grid');
     if (grid) {
@@ -13180,8 +13442,12 @@ function applyAppInstanceBadge() {
 }
 
 function initAccelerationChannel() {
-    setAccelerationPanel('dashboard');
+    // 恢复上次子页（代理/配置等），不要每次强制回仪表盘导致标签/筛选丢失
+    const savedPanel = loadAccelerationUiPref('panel', 'dashboard');
+    setAccelerationPanel(savedPanel || 'dashboard');
     setAccelerationImportMode('url');
+    applyAccelerationProxiesViewMode(accelerationUi.viewMode || 'nodes', { skipRender: true });
+    syncAccelerationCountryFilterUi();
 
     if (window.api && window.api.onAccelerationDelayProgress) {
         window.api.onAccelerationDelayProgress((payload) => {
@@ -13482,8 +13748,10 @@ function initAccelerationChannel() {
     }
     const sortSelect = document.getElementById('acc-node-sort');
     if (sortSelect) {
+        if (accelerationUi.sort) sortSelect.value = accelerationUi.sort;
         sortSelect.addEventListener('change', (e) => {
             accelerationUi.sort = e.target.value || 'default';
+            saveAccelerationUiPref('sort', accelerationUi.sort);
             if (accelerationState) renderAccelerationChannel(accelerationState);
         });
     }
@@ -13570,10 +13838,9 @@ function initAccelerationChannel() {
             const pill = e.target.closest('.acc-country-pill[data-country]');
             if (!pill) return;
             const country = pill.getAttribute('data-country') || 'all';
-            countryContainer.querySelectorAll('.acc-country-pill[data-country]').forEach((btn) => {
-                btn.classList.toggle('active', btn === pill);
-            });
             accelerationUi.countryFilter = country;
+            saveAccelerationUiPref('countryFilter', country);
+            syncAccelerationCountryFilterUi();
             if (accelerationState) renderAccelerationChannel(accelerationState);
             // 开着自动时：换标签立刻在该分类里选最低延迟
             if (isAccelerationAutoSelectEnabled() && accelerationState && accelerationState.enabled) {
@@ -13665,11 +13932,31 @@ function initAccelerationChannel() {
         });
     });
 
-    // 仪表盘：一键网络检测
+    // 仪表盘：点「网络检测」卡片即可重测（document 委托，避免漏绑）
+    if (!window.__nexoraDashIpDetectDelegated) {
+        window.__nexoraDashIpDetectDelegated = true;
+        const triggerDashDetect = (e) => {
+            const card = e.target && e.target.closest && e.target.closest('#acc-dash-ip-detect-card');
+            if (!card) return;
+            if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            e.stopPropagation();
+            runAccelerationIpDetect({ force: true, reason: 'manual-dash' }).catch(() => {});
+        };
+        document.addEventListener('click', triggerDashDetect, true);
+        document.addEventListener('keydown', triggerDashDetect, true);
+    }
+    const dashIpDetectCard = document.getElementById('acc-dash-ip-detect-card');
+    if (dashIpDetectCard) {
+        dashIpDetectCard.setAttribute('role', 'button');
+        dashIpDetectCard.setAttribute('tabindex', '0');
+        dashIpDetectCard.title = t('点击重新检测出口 IP', 'Click to re-detect exit IP', '點擊重新檢測出口 IP');
+    }
     const dashIpDetectBtn = document.getElementById('acc-dash-ip-detect-btn');
-    if (dashIpDetectBtn) {
+    if (dashIpDetectBtn && !dashIpDetectBtn.__nexoraBound) {
+        dashIpDetectBtn.__nexoraBound = true;
         dashIpDetectBtn.addEventListener('click', () => {
-            runAccelerationIpDetect({ force: true });
+            runAccelerationIpDetect({ force: true, reason: 'manual-dash-btn' }).catch(() => {});
         });
     }
 
@@ -13704,37 +13991,12 @@ function initAccelerationChannel() {
     // 代理页面：所有节点 vs 策略组 视图切换绑定
     const tabNodes = document.getElementById('acc-view-tab-nodes');
     const tabGroups = document.getElementById('acc-view-tab-groups');
-    const nodeToolbar = document.getElementById('acc-node-toolbar');
-    const nodeGrid = document.getElementById('acc-node-grid');
-    const groupsContainer = document.getElementById('acc-groups-container');
 
-    const setViewMode = (mode) => {
-        accelerationUi.viewMode = mode;
-        if (tabNodes) tabNodes.classList.toggle('active', mode === 'nodes');
-        if (tabGroups) tabGroups.classList.toggle('active', mode === 'groups');
-
-        const countryFilters = document.getElementById('acc-node-country-filters');
-        const nodeGridWrap = document.querySelector('.acc-node-grid-wrap');
-        const showNodes = mode === 'nodes';
-
-        if (nodeToolbar) nodeToolbar.style.display = showNodes ? '' : 'none';
-        if (countryFilters) countryFilters.style.display = showNodes ? 'flex' : 'none';
-        if (nodeGridWrap) nodeGridWrap.style.display = showNodes ? '' : 'none';
-        if (nodeGrid) nodeGrid.style.display = showNodes ? '' : 'none';
-        if (groupsContainer) {
-            if (showNodes) {
-                groupsContainer.style.display = 'none';
-                groupsContainer.hidden = true;
-            } else {
-                groupsContainer.hidden = false;
-                groupsContainer.style.display = 'flex';
-            }
-        }
-        if (accelerationState) renderAccelerationChannel(accelerationState);
-    };
-
-    if (tabNodes) tabNodes.addEventListener('click', () => setViewMode('nodes'));
-    if (tabGroups) tabGroups.addEventListener('click', () => setViewMode('groups'));
+    if (tabNodes) tabNodes.addEventListener('click', () => applyAccelerationProxiesViewMode('nodes'));
+    if (tabGroups) tabGroups.addEventListener('click', () => applyAccelerationProxiesViewMode('groups'));
+    // 启动时按记忆恢复视图 + 地区标签高亮
+    applyAccelerationProxiesViewMode(accelerationUi.viewMode || 'nodes', { skipRender: true });
+    syncAccelerationCountryFilterUi();
 
     // 连接管理页面事件绑定
     const connSearch = document.getElementById('acc-conn-search');

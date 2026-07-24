@@ -2762,11 +2762,19 @@ function parseOutboundIpPayload(text) {
 
 /**
  * 出口 IP 检测：
- * - 已启用加速：经本地 mixed 端口走当前节点
+ * - 已启用加速：经本地 mixed 端口走当前节点（端口未就绪时短暂重试）
  * - 未启用：直连探测本机公网出口（国内 IP 也正常显示）
  */
 async function detectOutboundIp() {
-    const viaProxy = !!state.enabled;
+    const wantProxy = !!state.enabled;
+    if (wantProxy) {
+        // 内核刚起来时 mixed-port 可能尚未监听，先等最多 ~4s
+        for (let i = 0; i < 8; i++) {
+            if (await isPortProbablyOpen(MIXED_PORT, '127.0.0.1', 350)) break;
+            await new Promise((r) => setTimeout(r, 500));
+        }
+    }
+    const viaProxy = wantProxy && (await isPortProbablyOpen(MIXED_PORT, '127.0.0.1', 400));
     const endpoints = viaProxy
         ? [
             'http://1.1.1.1/cdn-cgi/trace',
@@ -2774,14 +2782,14 @@ async function detectOutboundIp() {
             'http://api.ipify.org?format=json'
         ]
         : [
-            // 未启用时优先国内可达源，拿本机真实出口
+            // 未启用 / 端口未就绪：直连探测，避免一直 ECONNREFUSED 显示「代理未就绪」
             'http://ip-api.com/json/?lang=zh-CN&fields=status,message,country,countryCode,regionName,city,isp,query',
             'http://ip.3322.net/',
             'http://myip.ipip.net/',
             'http://api.ipify.org?format=json',
             'http://1.1.1.1/cdn-cgi/trace'
         ];
-    let lastError = '检测超时';
+    let lastError = wantProxy && !viaProxy ? 'connect ECONNREFUSED 127.0.0.1:' + MIXED_PORT : '检测超时';
     for (const url of endpoints) {
         try {
             const text = await httpGetAbsolute(url, { viaProxy, timeoutMs: viaProxy ? 6000 : 5000 });
@@ -2797,6 +2805,45 @@ async function detectOutboundIp() {
             lastError = '未解析到 IP';
         } catch (e) {
             lastError = e.message || String(e);
+            // 代理路径被拒绝时再等一会重试同一地址一次
+            if (viaProxy && /ECONNREFUSED/i.test(lastError)) {
+                await new Promise((r) => setTimeout(r, 600));
+                try {
+                    const text2 = await httpGetAbsolute(url, { viaProxy: true, timeoutMs: 6000 });
+                    const parsed2 = parseOutboundIpPayload(text2);
+                    if (parsed2 && parsed2.ip) {
+                        return {
+                            success: true,
+                            ...parsed2,
+                            via: 'proxy',
+                            selectedProxy: state.selectedProxy || null
+                        };
+                    }
+                } catch (e2) {
+                    lastError = e2.message || String(e2);
+                }
+            }
+        }
+    }
+    // 启用了加速但代理探测全失败：再尝试直连，至少给出可点可用的结果
+    if (wantProxy && viaProxy) {
+        for (const url of [
+            'http://ip-api.com/json/?lang=zh-CN&fields=status,message,country,countryCode,regionName,city,isp,query',
+            'http://api.ipify.org?format=json'
+        ]) {
+            try {
+                const text = await httpGetAbsolute(url, { viaProxy: false, timeoutMs: 5000 });
+                const parsed = parseOutboundIpPayload(text);
+                if (parsed && parsed.ip) {
+                    return {
+                        success: true,
+                        ...parsed,
+                        via: 'direct',
+                        selectedProxy: null,
+                        warning: 'proxy-detect-failed-fallback-direct'
+                    };
+                }
+            } catch (_) {}
         }
     }
     return { success: false, error: lastError === 'timeout' ? '检测超时' : lastError, via: viaProxy ? 'proxy' : 'direct' };

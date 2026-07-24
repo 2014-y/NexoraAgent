@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('api', {
         return () => ipcRenderer.removeListener('acceleration-delay-progress', listener);
     },
     getDashboardUrl: () => ipcRenderer.invoke('get-dashboard-url'),
+    getDataCenterUrl: () => ipcRenderer.invoke('data-center-get-url'),
     clearOpenclawPanelSession: () => ipcRenderer.invoke('clear-openclaw-panel-session'),
     onDashboardUrlUpdated: (callback) => ipcRenderer.on('dashboard-url-updated', (event, url) => callback(url)),
     
