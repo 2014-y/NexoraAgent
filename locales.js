@@ -2,7 +2,7 @@
 window.LOCALES = {
   'zh-CN': {
     // 导航
-    'nav.console': 'Nexora Agent',
+    'nav.console': 'Agent',
     'nav.chat': '模型会话',
     'nav.config': '模型配置',
     'nav.plugins': '内置插件',
@@ -12,7 +12,7 @@ window.LOCALES = {
     'nav.settings': '系统设置',
     'nav.about': '关于 Nexora Agent',
     'nav.update': '检查更新',
-    'nav.acceleration_channel': 'Nexora Clash',
+    'nav.acceleration_channel': 'Clash',
     'nav.openclaw_panel': 'OpenClaw',
     'nav.data_center': '数据中心',
     'nav.communication': '通讯管理',
@@ -110,7 +110,7 @@ window.LOCALES = {
     'roles.new.prompt': '请用清晰、自然、有个性的口吻回复用户。保持事实正确与安全边界。',
 
     // 控制台 (Console)
-    'console.title': 'Nexora Agent',
+    'console.title': 'Agent',
     'console.desc': '实时监控本地 Nexora Agent 的消息处理流与日志输出',
     
     // 通讯管理 (Communication)
@@ -139,8 +139,8 @@ window.LOCALES = {
     
     'console.status.stopped': '核心进程检测完成，当前处于【已停止】闲置状态。',
     'console.status.guide': '请点击左上角“启动Nexora Agent”按钮，拉起本地 AI 服务总线...',
-    'console.btn.start': '启动Nexora Agent',
-    'console.btn.stop': '终止Nexora Agent',
+    'console.btn.start': '启动 Nexora Agent',
+    'console.btn.stop': '终止 Nexora Agent',
     'console.port': '端口监听',
     'console.mem': '运行内存占用',
     'console.uptime': '运行时间',
@@ -166,13 +166,13 @@ window.LOCALES = {
     'console.app_uptime': '应用运行时间',
 
     // 通道加速
-    'settings.acc.title': '⚡ Nexora Clash',
-    'settings.acc.desc': '开启后启用内置 Nexora Clash（mihomo 核心），优化Nexora Agent在海外模型网络下的连通性能。',
+    'settings.acc.title': '⚡ Clash',
+    'settings.acc.desc': '开启后启用内置 Clash（mihomo 核心），优化 Agent 在海外模型网络下的连通性能。',
     'settings.acc.btn': '打开',
     'settings.terminal.title': '⌨️ 内置终端',
     'settings.terminal.desc': '在当前页面直接管理底层沙箱、网关运行时与本地命令，无需跳转。',
     'settings.terminal.btn': '打开终端',
-    'acc.title': 'Nexora Clash',
+    'acc.title': 'Clash',
     'acc.desc': '内置 mihomo（ClashMeta）核心，支持订阅导入、节点选择、规则/全局/直连与系统代理。',
     'acc.enable': '启用',
     'acc.enable.title': '启用加速通道',
@@ -180,6 +180,7 @@ window.LOCALES = {
     'acc.status.enabled': '已启用',
     'acc.status.disabled': '未启用',
     'acc.status.stopped': '已停止',
+    'acc.status.starting': '正在重启内核…',
     'acc.status.running': '内核运行中',
     'acc.status.tun': 'TUN 已开启',
     'acc.status.system_proxy': '系统代理已开',
@@ -277,6 +278,8 @@ window.LOCALES = {
     'acc.proxy.country_us': '🇺🇸 美国',
     'acc.proxy.country_tw': '🇹🇼 台湾',
     'acc.proxy.country_other': '其他',
+    'acc.proxy.latency_available': '可用节点',
+    'acc.proxy.latency_timeout': '超时节点',
     'acc.proxy.list_empty': '暂无节点。请先到「配置」页添加加速厂商。',
     'acc.proxy.no_match': '没有匹配当前筛选条件的节点。',
     'acc.proxy.testing_title': '正在测速',
@@ -354,6 +357,8 @@ window.LOCALES = {
     'chat.title': '模型对话',
     'chat.label.current_model': '当前模型:',
     'chat.label.current_role': '当前角色:',
+    'chat.model.search_placeholder': '搜索模型…',
+    'chat.model.empty': '无匹配模型',
     'chat.help.wechat': '💬 微信掉线/连接失败',
     'chat.help.wechat.q': '微信机器人经常掉线或无法连接怎么解决？',
     'chat.help.crash': '⚡ Nexora Agent启动闪退排查',
@@ -838,7 +843,7 @@ window.LOCALES = {
   
   'en-US': {
     // Navigation
-    'nav.console': 'Nexora Agent Status',
+    'nav.console': 'Agent',
     'nav.chat': 'Chat Room',
     'nav.config': 'Model Config',
     'nav.plugins': 'Plugins',
@@ -848,7 +853,7 @@ window.LOCALES = {
     'nav.settings': 'Settings',
     'nav.about': 'About',
     'nav.update': 'Check Update',
-    'nav.acceleration_channel': 'Acceleration Channel',
+    'nav.acceleration_channel': 'Clash',
     'nav.openclaw_panel': 'OpenClaw',
     'nav.data_center': 'Data Center',
     'nav.communication': 'Channels',
@@ -946,8 +951,8 @@ window.LOCALES = {
     'roles.new.prompt': 'Reply in a clear, natural, distinctive tone. Keep facts accurate and respect safety boundaries.',
 
     // Console
-    'console.title': 'Nexora Agent Status',
-    'console.desc': 'Monitor the message processing stream and log outputs of your local Nexora Agent in real-time',
+    'console.title': 'Agent',
+    'console.desc': 'Monitor the message processing stream and log outputs of your local Agent in real-time',
     
     // Communication
     'comm.title': 'Multi-channel Communication',
@@ -1002,13 +1007,13 @@ window.LOCALES = {
     'console.app_uptime': 'App Running Uptime',
 
     // Acceleration channel
-    'settings.acc.title': '⚡ Acceleration Channel',
-    'settings.acc.desc': 'Enable the built-in acceleration channel (mihomo core) to optimize connectivity to overseas model networks.',
+    'settings.acc.title': '⚡ Clash',
+    'settings.acc.desc': 'Enable the built-in Clash (mihomo core) to optimize connectivity to overseas model networks.',
     'settings.acc.btn': 'Open',
     'settings.terminal.title': '⌨️ Built-in Terminal',
     'settings.terminal.desc': 'Manage the sandbox, gateway runtime, and local commands directly on this page.',
     'settings.terminal.btn': 'Open Terminal',
-    'acc.title': 'Acceleration Channel',
+    'acc.title': 'Clash',
     'acc.desc': 'Built-in mihomo (ClashMeta) core with subscription import, node selection, rule/global/direct modes, and system proxy.',
     'acc.enable': 'Enable',
     'acc.enable.title': 'Enable Acceleration Channel',
@@ -1016,6 +1021,7 @@ window.LOCALES = {
     'acc.status.enabled': 'Enabled',
     'acc.status.disabled': 'Disabled',
     'acc.status.stopped': 'Stopped',
+    'acc.status.starting': 'Restarting core…',
     'acc.status.running': 'Core Running',
     'acc.status.tun': 'TUN Active',
     'acc.status.system_proxy': 'System Proxy On',
@@ -1113,6 +1119,8 @@ window.LOCALES = {
     'acc.proxy.country_us': '🇺🇸 USA',
     'acc.proxy.country_tw': '🇹🇼 Taiwan',
     'acc.proxy.country_other': 'Others',
+    'acc.proxy.latency_available': 'Available',
+    'acc.proxy.latency_timeout': 'Timed out',
     'acc.proxy.list_empty': 'No nodes found. Add a configuration on the "Profiles" page first.',
     'acc.proxy.no_match': 'No nodes matching the current filters.',
     'acc.proxy.testing_title': 'Testing Latency',
@@ -1190,6 +1198,8 @@ window.LOCALES = {
     'chat.title': 'Model Chat',
     'chat.label.current_model': 'Model:',
     'chat.label.current_role': 'Role:',
+    'chat.model.search_placeholder': 'Search models…',
+    'chat.model.empty': 'No matching models',
     'chat.help.wechat': '💬 WeChat Connection Fix',
     'chat.help.wechat.q': 'How to solve WeChat bot disconnecting or failing to connect?',
     'chat.help.crash': '⚡ Nexora Agent Crash Debug',
@@ -1673,7 +1683,7 @@ window.LOCALES = {
 
   'zh-TW': {
     // 導航
-    'nav.console': 'Nexora Agent',
+    'nav.console': 'Agent',
     'nav.chat': '模型對話',
     'nav.config': '模型配置',
     'nav.plugins': '內置插件',
@@ -1683,7 +1693,7 @@ window.LOCALES = {
     'nav.settings': '系統設定',
     'nav.about': '關於 Nexora Agent',
     'nav.update': '檢查更新',
-    'nav.acceleration_channel': 'Nexora Clash',
+    'nav.acceleration_channel': 'Clash',
     'nav.openclaw_panel': 'OpenClaw',
     'nav.data_center': '數據中心',
     'nav.communication': '通訊管理',
@@ -1781,7 +1791,7 @@ window.LOCALES = {
     'roles.new.prompt': '請用清晰、自然、有個性的口吻回覆使用者。保持事實正確與安全邊界。',
 
     // 控制台 (Console)
-    'console.title': 'Nexora Agent',
+    'console.title': 'Agent',
     'console.desc': '實時監控本地 Nexora Agent 的消息处理流與日誌輸出',
     
     // 通訊管理 (Communication)
@@ -1810,8 +1820,8 @@ window.LOCALES = {
     
     'console.status.stopped': '核心進程檢測完成，當前處於【已停止】閒置狀態。',
     'console.status.guide': '請點擊左上角“啟動Nexora Agent”按鈕，拉起本地 AI 服務總線...',
-    'console.btn.start': '啟動Nexora Agent',
-    'console.btn.stop': '終止Nexora Agent',
+    'console.btn.start': '啟動 Nexora Agent',
+    'console.btn.stop': '終止 Nexora Agent',
     'console.port': '端口監聽',
     'console.mem': '運行內存佔用',
     'console.uptime': '運行時間',
@@ -1837,13 +1847,13 @@ window.LOCALES = {
     'console.app_uptime': '應用運行時間',
 
     // 通道加速
-    'settings.acc.title': '⚡ Nexora Clash',
-    'settings.acc.desc': '開啟後啟用內建 Nexora Clash（mihomo 核心），優化Nexora Agent在海外模型網絡下的連通性能。',
+    'settings.acc.title': '⚡ Clash',
+    'settings.acc.desc': '開啟後啟用內建 Clash（mihomo 核心），優化 Agent 在海外模型網絡下的連通性能。',
     'settings.acc.btn': '打開',
     'settings.terminal.title': '⌨️ 內建終端',
     'settings.terminal.desc': '在當前頁面直接管理底層沙箱、網關運行時與本地命令，無需跳轉。',
     'settings.terminal.btn': '打開終端',
-    'acc.title': 'Nexora Clash',
+    'acc.title': 'Clash',
     'acc.desc': '內建 mihomo（ClashMeta）核心，支持訂閱導入、節點選擇、規則/全局/直連與系統代理。',
     'acc.enable': '啟用',
     'acc.enable.title': '啟用加速通道',
@@ -1851,6 +1861,7 @@ window.LOCALES = {
     'acc.status.enabled': '已啟用',
     'acc.status.disabled': '未啟用',
     'acc.status.stopped': '已停止',
+    'acc.status.starting': '正在重啟核心…',
     'acc.status.running': '核心運行中',
     'acc.status.tun': 'TUN 已開啟',
     'acc.status.system_proxy': '系統代理已開',
@@ -1948,6 +1959,8 @@ window.LOCALES = {
     'acc.proxy.country_us': '🇺🇸 美國',
     'acc.proxy.country_tw': '🇹🇼 台灣',
     'acc.proxy.country_other': '其他',
+    'acc.proxy.latency_available': '可用節點',
+    'acc.proxy.latency_timeout': '超時節點',
     'acc.proxy.list_empty': '暫無節點。請先到「配置」頁添加加速廠商。',
     'acc.proxy.no_match': '沒有匹配當前篩選條件的節點。',
     'acc.proxy.testing_title': '正在測速',
@@ -2024,6 +2037,8 @@ window.LOCALES = {
     'chat.title': '模型對話',
     'chat.label.current_model': '當前模型:',
     'chat.label.current_role': '當前角色:',
+    'chat.model.search_placeholder': '搜尋模型…',
+    'chat.model.empty': '無匹配模型',
     'chat.help.wechat': '💬 微信掉線/連接失敗',
     'chat.help.wechat.q': '微信機器人經常掉線或無法連接怎麼解決？',
     'chat.help.crash': '⚡ Nexora Agent啟動閃退排查',

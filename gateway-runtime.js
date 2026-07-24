@@ -237,7 +237,26 @@ async function ensureGatewayRuntime(app, opts = {}) {
 
     onProgress({ phase: 'extract', percent: 10, message: '正在补齐渠道插件运行时…' });
 
-    // 全面覆盖：直接解压到目标目录，不先整树删除（删几万文件极慢）
+    // 残缺/版本不匹配时先清再解压，避免旧文件残留导致启动报错
+    const staleRoot = root + '.stale-' + Date.now();
+    try {
+        if (fs.existsSync(root)) {
+            try {
+                fs.renameSync(root, staleRoot);
+                deferRmTree(staleRoot);
+            } catch (renameErr) {
+                // 重命名失败则尽力同步删；失败也不阻断后续解压覆盖
+                try {
+                    if (process.platform === 'win32') {
+                        await runSpawn('cmd.exe', ['/c', 'rmdir', '/s', '/q', root]);
+                    } else {
+                        fs.rmSync(root, { recursive: true, force: true });
+                    }
+                } catch (rmErr) {}
+            }
+        }
+    } catch (e) {}
+
     fs.mkdirSync(root, { recursive: true });
     try {
         await extractZip(zip, root);

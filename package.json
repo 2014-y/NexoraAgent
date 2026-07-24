@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Nexora Agent",
   "keywords": [
     "ai",
@@ -113,7 +113,7 @@
       "include": "config/installer.nsh",
       "installerIcon": "config/icon.ico",
       "uninstallerIcon": "config/icon.ico",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": true
     },
     "extraResources": [
       {

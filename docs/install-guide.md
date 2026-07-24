@@ -115,6 +115,30 @@
 
 ---
 
+## 6.1 升级与彻底卸载
+
+**升级 / 覆盖安装**（直接跑新版 Setup）时：安装程序会先清掉旧的 `%LOCALAPPDATA%\NexoraAgent\gateway-runtime` 再解压新运行时，避免旧缓存导致启动报错。您的模型 Key、微信绑定、记忆库（`%USERPROFILE%\.openclaw`）以及客户端界面设置**不会被清掉**。
+
+**卸载**时通过「设置 → 应用」或开始菜单里的卸载程序即可。新版本会清掉应用缓存；用户配置默认保留，方便以后重装继续用。
+
+| 内容 | 存放路径 | 升级时 | 卸载时 |
+| :--- | :--- | :--- | :--- |
+| **安装目录** | 您选择的安装路径（常见如 `C:\Program Files\Nexora Agent`） | 覆盖更新 | 自动删除 |
+| **网关 runtime 缓存** | `%LOCALAPPDATA%\NexoraAgent\gateway-runtime` | **先删再建**（必清） | 随本地缓存一并删除 |
+| **本地应用缓存目录** | `%LOCALAPPDATA%\NexoraAgent` | 保留目录，只换 runtime | 清缓存；若其中有回退的 `.openclaw` 则保留 |
+| **兼容回退目录** | `%APPDATA%\NexoraAgent` | 不动 | 清缓存；若其中有回退的 `.openclaw` 则保留 |
+| **客户端界面数据** | `%APPDATA%\Nexora Agent` | 保留 | 勾选「删除应用数据」后删除 |
+| **模型 Key / 微信 / 记忆库** | `%USERPROFILE%\.openclaw` | **保留** | **默认保留**；要全清请手动删除 |
+
+若卸载后仍想腾出磁盘或完全重装成「全新状态」，请先退出软件，再在资源管理器地址栏打开并删除上表中仍存在的路径。
+
+少数云电脑 / 受限环境还可能把数据写到 `D:\NexoraAgent-data`、`%ProgramData%\NexoraAgent` 等目录；若存在且确认不再需要，也可一并手动删除。
+
+> [!TIP]
+> 删除 `%USERPROFILE%\.openclaw` 前，如需保留 API Key 与记忆，请先按第 6 节备份该文件夹。
+
+---
+
 ## 7. 面向开发者的源码安装与打包说明
 
 > 💡 **提示**：本小节仅供具备 Node.js 基础的开发者阅读，普通用户请直接跳过。

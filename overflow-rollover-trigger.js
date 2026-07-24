@@ -25,6 +25,13 @@ function isCompactionOverflowFailureLog(text) {
   if (/Auto-compaction could not recover/i.test(t)) return true;
   if (/Compaction timed out/i.test(t)) return true;
   if (/context overflow detected/i.test(t) && /attempt/i.test(t)) return true;
+  // 角色奇偶 / 会话状态损坏：OpenClaw 只会吐 /new 文案，必须同样触发静默换新
+  if (/Message ordering conflict/i.test(t)) return true;
+  if (/roles must alternate/i.test(t)) return true;
+  if (/incorrect role information/i.test(t)) return true;
+  if (/use \/new to start a fresh session/i.test(t)) return true;
+  if (/rejected the conversation state/i.test(t)) return true;
+  if (/Session history looks corrupted/i.test(t)) return true;
   return false;
 }
 
@@ -73,7 +80,9 @@ function queueOverflowRolloverFromLog(stateDir, text) {
     v: 1,
     at: now,
     sessionKey: sessionKey || '',
-    reason: 'compaction-diag-failed',
+    reason: /ordering|roles must alternate|conversation state/i.test(String(text || ''))
+      ? 'ordering-or-state-failed'
+      : 'compaction-diag-failed',
     preview: String(text || '').replace(/\s+/g, ' ').slice(0, 240),
   };
   try {

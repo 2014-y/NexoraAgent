@@ -45,6 +45,8 @@ const DIAGNOSTIC_HARD_SUBSTRINGS = [
   'reserveTokensFloor',
   'Preserving existing session mapping',
   'Context is too large and auto-compaction',
+  'Message ordering conflict',
+  'roles must alternate',
   'Please try again in a few minutes.',
   'Rate-limited — ready in',
   '暂时限流',
@@ -71,6 +73,9 @@ const DIAGNOSTIC_HARD_REGEXES = [
   /Auto-compaction could not recover/i,
   /Context overflow:\s*prompt too large/i,
   /use \/compact,\s*or use \/new/i,
+  /use \/new to start/i,
+  /Message ordering conflict/i,
+  /roles must alternate/i,
   /increase your compaction buffer/i,
   /所有模型.*(限流|过载|繁忙)/i,
   /暂时(限流|过载|不可用)/i,
@@ -143,7 +148,7 @@ function isSystemDiagnosticBannerOnly(text) {
   const stripped = raw.replace(/⚠️/g, '').replace(/\s+/g, ' ').trim();
   // 长诊断行（compaction-diag 常 >700 字）也必须拦
   const looksDiag =
-    /rate[\s-]?limit|overloaded|auto-compaction|compaction[-_ ]?diag|compaction timed|compaction timeout|context[_\s-]?overflow|prompt too large|reserveTokensFloor|try again (in|later|shortly)|\/compact|\/new to start|\[agent\/embedded\]|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|runId\s*=|outcome\s*=\s*failed|所有模型|暂时限流|暂时过载|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
+    /rate[\s-]?limit|overloaded|auto-compaction|compaction[-_ ]?diag|compaction timed|compaction timeout|context[_\s-]?overflow|prompt too large|reserveTokensFloor|try again (in|later|shortly)|\/compact|\/new to start|Message ordering conflict|roles must alternate|\[agent\/embedded\]|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|runId\s*=|outcome\s*=\s*failed|所有模型|暂时限流|暂时过载|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
       stripped
     );
   if (!looksDiag) return false;
@@ -179,6 +184,51 @@ function shouldBlockOutbound(text) {
 function stateDir() {
   return process.env.OPENCLAW_STATE_DIR
     || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw');
+}
+
+/** 溢出/奇偶 /new 类横幅被拦截时，通知 session-overflow-rollover 归档续聊（防钩子短路哑火） */
+function needsSessionRollover(text) {
+  const t = String(text || '');
+  if (!t) return false;
+  return (
+    /auto-compaction|context[_\s-]?overflow|prompt too large|compaction[-_ ]?diag|use \/compact|use \/new|\/new to start|Message ordering conflict|roles must alternate|incorrect role information|conversation state|reserveTokensFloor|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
+      t
+    )
+  );
+}
+
+function resolveSessionKeyFromEvent(event) {
+  if (!event || typeof event !== 'object') return '';
+  const cands = [
+    event.sessionKey,
+    event.session_key,
+    event.key,
+    event.to && event.to.sessionKey,
+    event.payload && event.payload.sessionKey,
+    event.metadata && event.metadata.sessionKey,
+  ];
+  for (const k of cands) {
+    if (typeof k === 'string' && k.trim()) return k.trim();
+  }
+  return '';
+}
+
+function queueOverflowRolloverTrigger(sessionKey, preview) {
+  try {
+    const file = path.join(stateDir(), 'overflow-rollover.trigger.json');
+    const payload = {
+      v: 1,
+      at: Date.now(),
+      sessionKey: sessionKey || '',
+      reason: 'error-filter-blocked-recovery-banner',
+      preview: String(preview || '').replace(/\s+/g, ' ').slice(0, 240),
+    };
+    fs.mkdirSync(stateDir(), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(payload), 'utf8');
+    console.log(`[${PLUGIN_ID}] queued overflow-rollover trigger key=${sessionKey || '(freshest)'}`);
+  } catch (e) {
+    console.warn(`[${PLUGIN_ID}] queue rollover trigger failed:`, e && e.message);
+  }
 }
 
 function unixPath(filePath) {
@@ -563,6 +613,10 @@ function register(api) {
       const preview = text.replace(/\s+/g, ' ').slice(0, 100);
       try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled outbound: ${preview}`); } catch (_) {}
       console.log(`[${PLUGIN_ID}] cancelled outbound: ${preview}`);
+      // 关键：拦 /new 类恢复文案时必须通知 rollover，否则通讯渠道只见静默不见续答
+      if (needsSessionRollover(text)) {
+        queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+      }
       return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
     } catch (e) {
       console.warn(`[${PLUGIN_ID}] message_sending hook error:`, e && e.message);

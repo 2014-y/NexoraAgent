@@ -46,6 +46,11 @@ let tempMihomoProc = null;
 let tempCoreProfileId = null;
 let tempCoreIdleTimer = null;
 let lastDelayTestResults = null;
+let statusChangeListeners = [];
+let unexpectedRestartTimer = null;
+let unexpectedRestartAttempts = 0;
+let unexpectedRestartWindowStart = 0;
+let startingCore = false;
 let state = {
     enabled: false,
     autoStart: true,
@@ -58,6 +63,83 @@ let state = {
     systemProxyOwned: false,
     systemProxySnapshot: null
 };
+
+function onStatusChange(listener) {
+    if (typeof listener !== 'function') return () => {};
+    statusChangeListeners.push(listener);
+    return () => {
+        statusChangeListeners = statusChangeListeners.filter((fn) => fn !== listener);
+    };
+}
+
+function emitStatusChange(extra = {}) {
+    let payload;
+    try {
+        payload = { ...getStatus(), ...extra, ts: Date.now() };
+    } catch (_) {
+        payload = { ...extra, ts: Date.now() };
+    }
+    for (const fn of statusChangeListeners.slice()) {
+        try { fn(payload); } catch (e) {}
+    }
+}
+
+function clearUnexpectedRestartTimer() {
+    if (unexpectedRestartTimer) {
+        clearTimeout(unexpectedRestartTimer);
+        unexpectedRestartTimer = null;
+    }
+}
+
+function scheduleUnexpectedCoreRestart(exitCode) {
+    if (appIsQuitting || !state.enabled) return;
+
+    const now = Date.now();
+    if (now - unexpectedRestartWindowStart > 60000) {
+        unexpectedRestartAttempts = 0;
+        unexpectedRestartWindowStart = now;
+    }
+    unexpectedRestartAttempts += 1;
+
+    emitStatusChange({
+        reason: 'core-exit',
+        exitCode,
+        restarting: unexpectedRestartAttempts <= 3,
+        restartAttempt: unexpectedRestartAttempts
+    });
+
+    if (unexpectedRestartAttempts > 3) {
+        state.enabled = false;
+        saveState();
+        console.log(`[Acceleration] mihomo exited (code=${exitCode}); auto-restart gave up after ${unexpectedRestartAttempts - 1} tries`);
+        emitStatusChange({ reason: 'core-exit-gave-up', exitCode, restarting: false });
+        return;
+    }
+
+    const delay = Math.min(1500 * unexpectedRestartAttempts, 6000);
+    clearUnexpectedRestartTimer();
+    console.log(`[Acceleration] mihomo exited (code=${exitCode}); auto-restart in ${delay}ms (attempt ${unexpectedRestartAttempts}/3)`);
+    unexpectedRestartTimer = setTimeout(() => {
+        unexpectedRestartTimer = null;
+        if (appIsQuitting || !state.enabled) return;
+        const id = state.activeProfileId;
+        if (!id) {
+            state.enabled = false;
+            saveState();
+            emitStatusChange({ reason: 'core-exit-no-profile', restarting: false });
+            return;
+        }
+        startCore(id).then(() => {
+            unexpectedRestartAttempts = 0;
+            unexpectedRestartWindowStart = 0;
+            emitStatusChange({ reason: 'core-restarted', restarting: false });
+            console.log('[Acceleration] mihomo auto-restart succeeded');
+        }).catch((err) => {
+            console.warn('[Acceleration] mihomo auto-restart failed:', err && err.message);
+            scheduleUnexpectedCoreRestart(exitCode);
+        });
+    }, delay);
+}
 
 function getRootDir() {
     const base = appRef && appRef.getPath
@@ -1645,6 +1727,7 @@ async function waitControllerReady(timeoutMs = 12000) {
 }
 
 async function stopCore() {
+    clearUnexpectedRestartTimer();
     const proc = mihomoProc;
     mihomoProc = null;
     if (mihomoMemoryTimer) {
@@ -1701,6 +1784,15 @@ async function startCore(profileId, onProgress) {
     const content = getProfileContent(id);
     if (!content) throw new Error('订阅配置文件不存在');
 
+    startingCore = true;
+    try {
+        return await startCoreInner(id, content, onProgress);
+    } finally {
+        startingCore = false;
+    }
+}
+
+async function startCoreInner(id, content, onProgress) {
     const ensured = await ensureCore(onProgress);
     if (!ensured.success) throw new Error(ensured.error || '内核不可用');
     const runnable = assertCoreRunnable();
@@ -1743,19 +1835,23 @@ async function startCore(profileId, onProgress) {
     const currentProc = mihomoProc;
     mihomoProc.on('exit', (code) => {
         const isCurrent = (mihomoProc === currentProc);
-        mihomoProc = null;
+        if (isCurrent) mihomoProc = null;
         if (mihomoMemoryTimer) {
             clearInterval(mihomoMemoryTimer);
             mihomoMemoryTimer = null;
         }
         lastMihomoMemoryText = 'INACTIVE';
         if (isCurrent && state.enabled && !appIsQuitting) {
-            state.enabled = false;
-            saveState();
-            // 内核意外退出时，必须立即清理系统代理，否则用户会断网
+            // 启动流程内的失败由 startCore 自己抛错处理，避免与自动重启抢跑
             applySystemProxy(false).catch(() => {});
-            console.log(`[Acceleration] mihomo exited unexpectedly (code=${code}), system proxy cleared`);
+            if (startingCore) {
+                console.log(`[Acceleration] mihomo exited during start (code=${code})`);
+                if (bootLog.trim()) console.log(`[Acceleration] mihomo log:\n${bootLog.trim().slice(-1500)}`);
+                return;
+            }
+            console.log(`[Acceleration] mihomo exited unexpectedly (code=${code}), scheduling auto-restart`);
             if (bootLog.trim()) console.log(`[Acceleration] mihomo log:\n${bootLog.trim().slice(-1500)}`);
+            scheduleUnexpectedCoreRestart(code);
         }
     });
 
@@ -1796,13 +1892,21 @@ async function startCore(profileId, onProgress) {
 
 async function setEnabled(enabled, profileId, onProgress) {
     if (enabled) {
-        return startCore(profileId || state.activeProfileId, onProgress);
+        unexpectedRestartAttempts = 0;
+        unexpectedRestartWindowStart = 0;
+        const dash = await startCore(profileId || state.activeProfileId, onProgress);
+        emitStatusChange({ reason: 'enabled' });
+        return dash;
     }
+    clearUnexpectedRestartTimer();
+    unexpectedRestartAttempts = 0;
     await stopCore();
     await applySystemProxy(false);
     state.enabled = false;
     saveState();
-    return getDashboardData();
+    const dash = await getDashboardData();
+    emitStatusChange({ reason: 'disabled' });
+    return dash;
 }
 
 function powershell(script) {
@@ -2853,6 +2957,7 @@ module.exports = {
     get MIXED_PORT() { return MIXED_PORT; },
     init,
     setIsQuitting,
+    onStatusChange,
     ensureCore,
     isCoreReady,
     listProfiles,

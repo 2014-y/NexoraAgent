@@ -76,6 +76,11 @@ contextBridge.exposeInMainWorld('api', {
     setAccelerationOptions: (options) => ipcRenderer.invoke('acceleration-set-options', options),
     setAccelerationActiveProfile: (id) => ipcRenderer.invoke('acceleration-set-active-profile', id),
     onAccelerationCoreProgress: (callback) => ipcRenderer.on('acceleration-core-progress', (event, data) => callback(data)),
+    onAccelerationStatusChanged: (callback) => {
+        const listener = (event, data) => callback(data);
+        ipcRenderer.on('acceleration-status-changed', listener);
+        return () => ipcRenderer.removeListener('acceleration-status-changed', listener);
+    },
     onAccelerationDelayProgress: (callback) => {
         const listener = (event, data) => callback(data);
         ipcRenderer.on('acceleration-delay-progress', listener);

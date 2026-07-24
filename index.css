@@ -2950,6 +2950,27 @@ textarea.acc-input {
   color: var(--accent-color);
 }
 
+.acc-filter-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 18px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.acc-country-pill.acc-latency-pill[data-latency="available"].active {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.55);
+  color: #4ade80;
+}
+
+.acc-country-pill.acc-latency-pill[data-latency="timeout"].active {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
 .acc-select:focus {
   border-color: rgba(var(--accent-rgb), 0.6);
   background: rgba(var(--accent-rgb), 0.02);
@@ -3487,7 +3508,7 @@ textarea.acc-input {
   color: var(--text-secondary);
 }
 
-input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+input:not([type="checkbox"]):not([type="radio"]), select:not(.chat-model-select-hidden):not(#chat-model-select), textarea {
   background: var(--bg-input) !important;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -7154,6 +7175,112 @@ input:focus, select:focus, textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-model-picker {
+  position: relative;
+  min-width: 220px;
+  max-width: 320px;
+  width: 280px;
+  height: 32px;
+  flex-shrink: 0;
+  overflow: visible;
+  z-index: 20;
+}
+
+.chat-model-search {
+  background: var(--bg-input) !important;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  height: 32px;
+  font-size: 12px;
+  color: var(--text-primary) !important;
+  padding: 0 28px 0 10px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 32px;
+}
+
+.chat-model-search:focus {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.18);
+}
+
+.chat-model-search-icon {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.45;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 模型选择逻辑用 select：移出布局，禁止被全局 select 皮肤画出来 */
+#chat-model-select,
+.chat-model-select-hidden {
+  position: absolute !important;
+  left: -99999px !important;
+  top: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background: transparent !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  z-index: -1 !important;
+}
+
+.chat-model-dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  z-index: 120;
+  padding: 4px;
+}
+
+.chat-model-dropdown:not([hidden]) {
+  display: block;
+}
+
+.chat-model-dropdown .chat-model-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .roles-search-input:focus {

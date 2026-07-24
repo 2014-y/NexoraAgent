@@ -1,8 +1,8 @@
 {
   "id": "session-overflow-rollover",
   "name": "Session Overflow Rollover",
-  "description": "上下文溢出或压缩失败时自动归档旧会话、开启新会话并继续回答上一问",
-  "version": "1.0.0",
+  "description": "上下文溢出、压缩失败或角色顺序冲突时：写入延续摘要到 MEMORY.md，归档旧会话并回投通讯渠道继续回答",
+  "version": "1.2.0",
   "main": "index.js",
   "type": "module",
   "activation": {

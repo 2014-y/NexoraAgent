@@ -6922,6 +6922,16 @@ function normalizeSidebarNavOrder(preferred) {
             out[iCon] = 'data-center-view';
         }
     }
+    // Clash 固定紧跟 Agent 下方
+    {
+        const iCon = out.indexOf('console-view');
+        const iAcc = out.indexOf('acceleration-view');
+        if (iCon >= 0 && iAcc >= 0 && iAcc !== iCon + 1) {
+            out.splice(iAcc, 1);
+            const insertAt = out.indexOf('console-view') + 1;
+            out.splice(insertAt, 0, 'acceleration-view');
+        }
+    }
     return out;
 }
 
@@ -8953,19 +8963,150 @@ function initChatView() {
         });
     });
 
+    initChatModelSearchPicker();
+
     // 首次进入加载模型
     loadChatModels();
 }
 
-async function loadChatModels() {
-    const select = document.getElementById('chat-model-select');
-    if (!select) return;
-    select.innerHTML = '';
-    
-    let hasModels = false;
+const CHAT_MODEL_PREF_KEY = 'client_pref_chat_model'; // provider/modelId
 
-    // 1. 如果启用了内置模型，强制将官方高速模型放于下拉菜单最顶端
+/** 保证模型 select 只存在于 body 底部隐藏位，绝不进顶栏布局 */
+function ensureChatModelSelect() {
+    let select = document.getElementById('chat-model-select');
+    if (!select) {
+        select = document.createElement('select');
+        select.id = 'chat-model-select';
+        select.className = 'chat-model-select-hidden';
+        select.setAttribute('aria-hidden', 'true');
+        select.tabIndex = -1;
+        select.hidden = true;
+        document.body.appendChild(select);
+    } else if (select.parentElement && select.parentElement.id === 'chat-model-picker') {
+        document.body.appendChild(select);
+    }
+    select.hidden = true;
+    select.classList.add('chat-model-select-hidden');
+    select.setAttribute('aria-hidden', 'true');
+    select.tabIndex = -1;
+    try {
+        select.style.cssText = 'position:absolute!important;left:-99999px!important;width:0!important;height:0!important;opacity:0!important;visibility:hidden!important;pointer-events:none!important;appearance:none!important;';
+    } catch (_) {}
+    return select;
+}
+
+function parseModelRef(ref) {
+    const raw = String(ref || '').trim();
+    if (!raw) return { provider: '', id: '' };
+    const idx = raw.indexOf('/');
+    if (idx <= 0) return { provider: '', id: raw };
+    return { provider: raw.slice(0, idx).trim(), id: raw.slice(idx + 1).trim() };
+}
+
+function formatModelRef(provider, id) {
+    const p = String(provider || '').trim();
+    const m = String(id || '').trim();
+    if (!m) return '';
+    return p ? `${p}/${m}` : m;
+}
+
+function getConfiguredPrimaryFallbackModels() {
+    const cfg = (typeof configData === 'object' && configData) ? configData : {};
+    const modelCfg = cfg.agents && cfg.agents.defaults && cfg.agents.defaults.model
+        ? cfg.agents.defaults.model
+        : {};
+    const primary = parseModelRef(modelCfg.primary || '');
+    const fbRaw = Array.isArray(modelCfg.fallbacks) ? modelCfg.fallbacks[0] : '';
+    const fallback = parseModelRef(fbRaw || '');
+    // UI 输入框可能还没写回 configData，兜底读 DOM
+    try {
+        const pEl = document.getElementById('model-primary');
+        const ppEl = document.getElementById('model-primary-provider');
+        const fEl = document.getElementById('model-fallback');
+        const fpEl = document.getElementById('model-fallback-provider');
+        if ((!primary.id || !primary.provider) && pEl && pEl.value.trim()) {
+            primary.id = pEl.value.trim();
+            primary.provider = (ppEl && ppEl.value) || primary.provider;
+        }
+        if ((!fallback.id || !fallback.provider) && fEl && fEl.value.trim()) {
+            fallback.id = fEl.value.trim();
+            fallback.provider = (fpEl && fpEl.value) || fallback.provider;
+        }
+    } catch (_) {}
+    return { primary, fallback };
+}
+
+function readPersistedChatModel() {
+    try {
+        return parseModelRef(localStorage.getItem(CHAT_MODEL_PREF_KEY) || '');
+    } catch (_) {
+        return { provider: '', id: '' };
+    }
+}
+
+function persistChatModelSelection(provider, id) {
+    const ref = formatModelRef(provider, id);
+    if (!ref) return;
+    try { localStorage.setItem(CHAT_MODEL_PREF_KEY, ref); } catch (_) {}
+}
+
+function findChatModelOptionIndex(select, id, provider) {
+    if (!select || !id) return -1;
+    if (provider) {
+        for (let i = 0; i < select.options.length; i++) {
+            const opt = select.options[i];
+            if (opt.value === id && opt.getAttribute('data-provider') === provider) return i;
+        }
+    }
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === id) return i;
+    }
+    return -1;
+}
+
+async function loadChatModels() {
+    const select = ensureChatModelSelect();
+    if (!select) return;
+
     const useBuiltIn = getUseBuiltIn();
+    const { primary, fallback } = getConfiguredPrimaryFallbackModels();
+    const persisted = readPersistedChatModel();
+
+    // 当前 DOM 选择（同页刷新时优先）
+    const liveId = select.value || '';
+    const liveProvider = select.selectedOptions && select.selectedOptions[0]
+        ? (select.selectedOptions[0].getAttribute('data-provider') || '')
+        : '';
+
+    /** @type {Array<{id:string, provider:string, label:string, rank:number}>} */
+    const collected = [];
+    const seen = new Set();
+
+    const pushModel = (providerKey, modelId, label, rank) => {
+        if (!modelId || !providerKey) return;
+        if (useBuiltIn && !isBuiltinAllowedProvider(providerKey)) return;
+        const key = `${providerKey}::${modelId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        collected.push({
+            id: modelId,
+            provider: providerKey,
+            label: label || `${providerKey} / ${modelId}`,
+            rank: Number.isFinite(rank) ? rank : 100,
+        });
+    };
+
+    // 主用 / 备用排最前
+    if (primary.id) {
+        const p = primary.provider || 'agnes-ai';
+        pushModel(p, primary.id, `${p} / ${primary.id}${t(' (主用)', ' (Primary)', ' (主用)')}`, 0);
+    }
+    if (fallback.id && !(fallback.provider === primary.provider && fallback.id === primary.id)) {
+        const p = fallback.provider || primary.provider || 'agnes-ai';
+        pushModel(p, fallback.id, `${p} / ${fallback.id}${t(' (备用)', ' (Fallback)', ' (備用)')}`, 1);
+    }
+
+    // 内置模型清单
     if (useBuiltIn) {
         const builtInOpts = [
             { id: 'agnes-2.0-flash', label: `agnes-ai / agnes-2.0-flash${t(' (内置默认)', ' (Built-in Default)', ' (內置默認)')}` },
@@ -8974,51 +9115,234 @@ async function loadChatModels() {
             { id: 'agnes-image-2.1-flash', label: `agnes-ai / agnes-image-2.1-flash${t(' (内置图像)', ' (Built-in Image)', ' (內置圖像)')}` },
             { id: 'agnes-image-2.0-flash', label: `agnes-ai / agnes-image-2.0-flash${t(' (内置图像默认)', ' (Built-in Image Default)', ' (內置圖像默認)')}` }
         ];
-        builtInOpts.forEach(optData => {
-            const opt = document.createElement('option');
-            opt.value = optData.id;
-            opt.setAttribute('data-provider', 'agnes-ai');
-            opt.innerText = optData.label;
-            select.appendChild(opt);
+        builtInOpts.forEach((optData, i) => {
+            pushModel('agnes-ai', optData.id, optData.label, 10 + i);
         });
-        hasModels = true;
     }
 
-    // 2. 遍历其它已配置提供商：内置开追加本地 ollama；关则全部
-    for (const providerKey of Object.keys(localProviders)) {
+    // 其余已配置提供商模型
+    for (const providerKey of Object.keys(localProviders || {})) {
         if (useBuiltIn && !isBuiltinAllowedProvider(providerKey)) continue;
-        // 开启内置时，跳过重复渲染 agnes-ai（上方已注入）
         if (useBuiltIn && providerKey === 'agnes-ai') continue;
-
         const provider = localProviders[providerKey];
         const models = provider.models || [];
-
-        models.forEach(model => {
-            if (model.id) {
-                const opt = document.createElement('option');
-                opt.value = model.id;
-                opt.setAttribute('data-provider', providerKey);
-                opt.innerText = `${providerKey} / ${model.id}`;
-                select.appendChild(opt);
-                hasModels = true;
-            }
+        models.forEach((model) => {
+            if (!model || !model.id) return;
+            pushModel(providerKey, model.id, `${providerKey} / ${model.id}`, 50);
         });
     }
 
-    if (!hasModels) {
-        select.innerHTML = `
-            <option value="agnes-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-2.0-flash${t(' (内置默认)', ' (Built-in Default)', ' (內置默認)')}</option>
-            <option value="agnes-1.5-flash" data-provider="agnes-ai">agnes-ai / agnes-1.5-flash${t(' (内置备用)', ' (Built-in Standby)', ' (內置備用)')}</option>
-            <option value="agnes-video-v2.0" data-provider="agnes-ai">agnes-ai / agnes-video-v2.0${t(' (内置视频)', ' (Built-in Video)', ' (內置視頻)')}</option>
-            <option value="agnes-image-2.1-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.1-flash${t(' (内置图像)', ' (Built-in Image)', ' (內置圖像)')}</option>
-            <option value="agnes-image-2.0-flash" data-provider="agnes-ai">agnes-ai / agnes-image-2.0-flash${t(' (内置图像默认)', ' (Built-in Image Default)', ' (內置圖像默認)')}</option>
-        `;
+    if (!collected.length) {
+        pushModel('agnes-ai', 'agnes-2.0-flash', `agnes-ai / agnes-2.0-flash${t(' (内置默认)', ' (Built-in Default)', ' (內置默認)')}`, 0);
+        pushModel('agnes-ai', 'agnes-1.5-flash', `agnes-ai / agnes-1.5-flash${t(' (内置备用)', ' (Built-in Standby)', ' (內置備用)')}`, 1);
     }
 
-    // 3. 强制在启用内置大模型时，默认选中 agnes-2.0-flash
-    if (useBuiltIn) {
-        select.value = 'agnes-2.0-flash';
+    collected.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+
+    select.innerHTML = '';
+    collected.forEach((item) => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.setAttribute('data-provider', item.provider);
+        opt.innerText = item.label;
+        select.appendChild(opt);
+    });
+
+    // 选择优先级：当前页已选 → 本地记住的对话模型 → 主用 → 备用 → 第一项
+    const candidates = [
+        { id: liveId, provider: liveProvider },
+        { id: persisted.id, provider: persisted.provider },
+        { id: primary.id, provider: primary.provider },
+        { id: fallback.id, provider: fallback.provider },
+        { id: collected[0].id, provider: collected[0].provider },
+    ];
+    let applied = false;
+    for (const c of candidates) {
+        if (!c.id) continue;
+        const idx = findChatModelOptionIndex(select, c.id, c.provider);
+        if (idx >= 0) {
+            select.selectedIndex = idx;
+            applied = true;
+            break;
+        }
     }
+    if (!applied && select.options.length) select.selectedIndex = 0;
+
+    const sel = select.options[select.selectedIndex];
+    if (sel) persistChatModelSelection(sel.getAttribute('data-provider') || '', sel.value);
+
+    syncChatModelSearchFromSelect();
+    // 列表刷新时展示完整列表，避免沿用搜索框旧过滤串
+    renderChatModelDropdown('');
+}
+
+function getChatModelOptions() {
+    const select = ensureChatModelSelect();
+    if (!select) return [];
+    return Array.from(select.options).map((opt, index) => ({
+        index,
+        value: opt.value,
+        provider: opt.getAttribute('data-provider') || '',
+        label: (opt.textContent || '').trim(),
+    })).filter((o) => o.value);
+}
+
+function syncChatModelSearchFromSelect() {
+    const select = ensureChatModelSelect();
+    const input = document.getElementById('chat-model-search');
+    if (!select || !input) return;
+    const opt = select.options[select.selectedIndex];
+    if (opt && opt.value) {
+        input.value = (opt.textContent || '').trim();
+        input.dataset.selectedValue = opt.value;
+        input.dataset.selectedProvider = opt.getAttribute('data-provider') || '';
+    } else {
+        input.value = '';
+        input.dataset.selectedValue = '';
+        input.dataset.selectedProvider = '';
+    }
+    input.placeholder = t('chat.model.search_placeholder');
+}
+
+function setChatModelSelection(value, provider) {
+    const select = ensureChatModelSelect();
+    if (!select) return false;
+    const idx = findChatModelOptionIndex(select, value, provider);
+    if (idx < 0) return false;
+    select.selectedIndex = idx;
+    const opt = select.options[idx];
+    persistChatModelSelection(opt.getAttribute('data-provider') || provider || '', opt.value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    syncChatModelSearchFromSelect();
+    return true;
+}
+
+function renderChatModelDropdown(filterText) {
+    const dropdown = document.getElementById('chat-model-dropdown');
+    const select = ensureChatModelSelect();
+    if (!dropdown || !select) return;
+    const q = String(filterText || '').trim().toLowerCase();
+    const selectedValue = select.value;
+    const selectedProvider = select.options[select.selectedIndex]
+        ? (select.options[select.selectedIndex].getAttribute('data-provider') || '')
+        : '';
+    const items = getChatModelOptions().filter((o) => {
+        if (!q) return true;
+        return (
+            o.label.toLowerCase().includes(q) ||
+            o.value.toLowerCase().includes(q) ||
+            o.provider.toLowerCase().includes(q)
+        );
+    });
+
+    if (!items.length) {
+        dropdown.innerHTML = `<div style="padding:10px 12px; font-size:12px; color:var(--text-secondary);">${t('chat.model.empty')}</div>`;
+        return;
+    }
+
+    dropdown.innerHTML = items.map((o) => {
+        const active = o.value === selectedValue && (!selectedProvider || o.provider === selectedProvider);
+        const bg = active ? 'rgba(140,82,255,0.22)' : 'transparent';
+        const mark = active ? '✓ ' : '';
+        return `<button type="button" class="chat-model-option" data-value="${escapeHtml(o.value)}" data-provider="${escapeHtml(o.provider)}" style="display:block; width:100%; text-align:left; background:${bg}; border:none; color:var(--text-primary); font-size:12px; padding:8px 10px; border-radius:8px; cursor:pointer; line-height:1.35;">${mark}${escapeHtml(o.label)}</button>`;
+    }).join('');
+
+    dropdown.querySelectorAll('.chat-model-option').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            setChatModelSelection(btn.getAttribute('data-value'), btn.getAttribute('data-provider') || '');
+            hideChatModelDropdown();
+        });
+        btn.addEventListener('mouseenter', () => {
+            btn.style.background = 'rgba(140,82,255,0.18)';
+        });
+        btn.addEventListener('mouseleave', () => {
+            const active = btn.getAttribute('data-value') === selectedValue;
+            btn.style.background = active ? 'rgba(140,82,255,0.22)' : 'transparent';
+        });
+    });
+}
+
+function showChatModelDropdown() {
+    const dropdown = document.getElementById('chat-model-dropdown');
+    const input = document.getElementById('chat-model-search');
+    if (!dropdown || !input) return;
+    renderChatModelDropdown(input.value);
+    dropdown.hidden = false;
+    dropdown.style.display = 'block';
+}
+
+function hideChatModelDropdown() {
+    const dropdown = document.getElementById('chat-model-dropdown');
+    if (!dropdown) return;
+    dropdown.hidden = true;
+    dropdown.style.display = 'none';
+}
+
+function initChatModelSearchPicker() {
+    const input = document.getElementById('chat-model-search');
+    const picker = document.getElementById('chat-model-picker');
+    const select = ensureChatModelSelect();
+    if (!input || !picker || input.dataset.bound === 'true') return;
+    input.dataset.bound = 'true';
+    hideChatModelDropdown();
+
+    if (select && select.dataset.persistBound !== 'true') {
+        select.dataset.persistBound = 'true';
+        select.addEventListener('change', () => {
+            const opt = select.options[select.selectedIndex];
+            if (opt && opt.value) {
+                persistChatModelSelection(opt.getAttribute('data-provider') || '', opt.value);
+            }
+            syncChatModelSearchFromSelect();
+        });
+    }
+
+    input.addEventListener('focus', () => {
+        // 点开时展示完整列表（不要用当前模型全名当过滤关键字）
+        renderChatModelDropdown('');
+        const dropdown = document.getElementById('chat-model-dropdown');
+        if (dropdown) {
+            dropdown.hidden = false;
+            dropdown.style.display = 'block';
+        }
+        try { input.select(); } catch (_) {}
+    });
+
+    input.addEventListener('input', () => {
+        showChatModelDropdown();
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            syncChatModelSearchFromSelect();
+            hideChatModelDropdown();
+            input.blur();
+            return;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const dropdown = document.getElementById('chat-model-dropdown');
+            const first = dropdown && dropdown.querySelector('.chat-model-option');
+            if (first) {
+                setChatModelSelection(first.getAttribute('data-value'), first.getAttribute('data-provider') || '');
+            }
+            hideChatModelDropdown();
+            input.blur();
+        }
+    });
+
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            // 失焦若未选中有效项，恢复显示当前模型名
+            syncChatModelSearchFromSelect();
+            hideChatModelDropdown();
+        }, 150);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!picker.contains(e.target)) hideChatModelDropdown();
+    });
 }
 
 // 为 AI 的气泡消息添加朗读操作按钮
@@ -9274,7 +9598,7 @@ function toLocalMediaFileUrl(filePath) {
     return '';
 }
 
-const CHAT_MEDIA_IMG_STYLE = 'max-width: min(100%, 420px); border-radius: 8px; margin-top: 8px; display: block; border: 1px solid rgba(255,255,255,0.1); cursor: zoom-in;';
+const CHAT_MEDIA_IMG_STYLE = 'max-width: min(100%, 920px); width: auto; height: auto; image-rendering: auto; border-radius: 8px; margin-top: 8px; display: block; border: 1px solid rgba(255,255,255,0.1); cursor: zoom-in;';
 
 /** 将回复里的 MEDIA:本地路径 / [[image]] 转成可点开的 <img>/<video> */
 function renderChatMediaHtml(content) {
@@ -9548,8 +9872,8 @@ async function handleSendMessage() {
         if (roleCommandHandled) return;
     }
 
-    const modelSelect = document.getElementById('chat-model-select');
-    if (!modelSelect || modelSelect.selectedIndex === -1) {
+    const modelSelect = ensureChatModelSelect();
+    if (!modelSelect || modelSelect.selectedIndex === -1 || !modelSelect.value) {
         appendChatMessage('ai', '⚠️ 请先在右上角选择对话所用的大模型！如果下拉框为空，请先在【模型配置】中配置厂家模型。');
         return;
     }
@@ -9859,7 +10183,7 @@ async function handleActionGenerate(type) {
         }
 
         // 获取当前选中的模型
-        const modelSelect = document.getElementById('chat-model-select');
+        const modelSelect = ensureChatModelSelect();
         if (type === 'image') {
             const selectVal = modelSelect ? modelSelect.value : '';
             if (selectVal && selectVal.includes('image')) {
@@ -11388,12 +11712,12 @@ function buildOpenclawMediaEnhanceScript(magicPrefix) {
 
         function buildMediaTag(filePath) {
             var src = mediaFileSrc(filePath);
-            var style = 'max-width:min(100%,420px);border-radius:8px;margin:8px 0;display:block;border:1px solid rgba(255,255,255,0.12);';
+            var style = 'max-width:min(100%,920px);width:auto;height:auto;image-rendering:auto;border-radius:8px;margin:8px 0;display:block;border:1px solid rgba(255,255,255,0.12);cursor:zoom-in;';
             if (/\.(mp4|mov|webm)$/i.test(filePath)) {
                 return '<video class="nexora-media-img" src="' + src + '" controls style="' + style + '"></video>';
             }
             if (/\.(mp3|wav|m4a)$/i.test(filePath)) {
-                return '<audio class="nexora-media-img" src="' + src + '" controls style="width:min(100%,420px);margin:8px 0;display:block;"></audio>';
+                return '<audio class="nexora-media-img" src="' + src + '" controls style="width:min(100%,640px);margin:8px 0;display:block;"></audio>';
             }
             return '<img class="nexora-media-img chat-message-image" src="' + src + '" alt="media" style="' + style + 'cursor:zoom-in;" />';
         }
@@ -11703,6 +12027,26 @@ function setupUpdateModal() {
     });
 }
 
+function loadAccelerationLatencyFilters() {
+    try {
+        const raw = String(localStorage.getItem('acc_ui_latencyFilters') || '');
+        return raw.split(',')
+            .map((s) => s.trim())
+            .filter((s) => s === 'available' || s === 'timeout');
+    } catch (_) {
+        return [];
+    }
+}
+
+function saveAccelerationLatencyFilters(list) {
+    const cleaned = (Array.isArray(list) ? list : [])
+        .filter((s) => s === 'available' || s === 'timeout');
+    // 去重并保持 available → timeout 顺序
+    const ordered = ['available', 'timeout'].filter((k) => cleaned.includes(k));
+    accelerationUi.latencyFilters = ordered;
+    saveAccelerationUiPref('latencyFilters', ordered.join(','));
+}
+
 let accelerationState = null;
 let accelerationBusy = false;
 let accelerationBusyMessage = '';
@@ -11713,7 +12057,8 @@ let accelerationUi = {
     protocol: '',
     sort: loadAccelerationUiPref('sort', 'latency'),
     viewMode: loadAccelerationUiPref('viewMode', 'nodes'),
-    countryFilter: loadAccelerationUiPref('countryFilter', 'all')
+    countryFilter: loadAccelerationUiPref('countryFilter', 'all'),
+    latencyFilters: loadAccelerationLatencyFilters()
 };
 
 function loadAccelerationUiPref(key, fallback) {
@@ -11732,7 +12077,7 @@ function saveAccelerationUiPref(key, value) {
     } catch (_) {}
 }
 
-/** 把已保存的地区标签同步到按钮高亮，并确保「所有节点」视图下标签条可见 */
+/** 把已保存的地区 / 延迟标签同步到按钮高亮，并确保「所有节点」视图下标签条可见 */
 function syncAccelerationCountryFilterUi() {
     const countryContainer = document.getElementById('acc-node-country-filters');
     if (!countryContainer) return;
@@ -11741,6 +12086,15 @@ function syncAccelerationCountryFilterUi() {
     countryContainer.querySelectorAll('.acc-country-pill[data-country]').forEach((btn) => {
         const c = String(btn.getAttribute('data-country') || '').toLowerCase();
         btn.classList.toggle('active', c === want);
+    });
+    if (!Array.isArray(accelerationUi.latencyFilters)) {
+        accelerationUi.latencyFilters = loadAccelerationLatencyFilters();
+    }
+    const latencySet = new Set(accelerationUi.latencyFilters);
+    countryContainer.querySelectorAll('.acc-latency-pill[data-latency]').forEach((btn) => {
+        const key = String(btn.getAttribute('data-latency') || '');
+        btn.classList.toggle('active', latencySet.has(key));
+        btn.setAttribute('aria-pressed', latencySet.has(key) ? 'true' : 'false');
     });
     // 所有节点视图：始终展示完整地区标签（不依赖先切配置商）
     if (accelerationUi.viewMode !== 'groups') {
@@ -12436,6 +12790,7 @@ function getFilteredAccelerationNodes(data) {
         return name.includes(search) || type.includes(search) || flag.includes(search);
     });
     list = filterAccelerationNodesByCountry(list, accelerationUi.countryFilter);
+    list = filterAccelerationNodesByLatency(list, accelerationUi.latencyFilters);
     if (accelerationUi.sort === 'latency') {
         list.sort((a, b) => {
             const la = (typeof a.latency === 'number' && a.latency > 0) ? a.latency : Number.MAX_SAFE_INTEGER;
@@ -12495,6 +12850,23 @@ function filterAccelerationNodesByCountry(nodes, countryFilter) {
     }
     const want = String(filter).toLowerCase();
     return list.filter((n) => getNodeCountryCode(n) === want);
+}
+
+/** available = 有正延迟；timeout = 测速超时(latency===0)；未测节点两者都不算 */
+function getAccelerationNodeLatencyStatus(node) {
+    if (!node) return 'untested';
+    if (typeof node.latency === 'number' && node.latency > 0) return 'available';
+    if (node.latency === 0) return 'timeout';
+    return 'untested';
+}
+
+function filterAccelerationNodesByLatency(nodes, latencyFilters) {
+    const selected = Array.isArray(latencyFilters)
+        ? latencyFilters.filter((s) => s === 'available' || s === 'timeout')
+        : [];
+    if (!selected.length) return nodes || [];
+    const want = new Set(selected);
+    return (nodes || []).filter((n) => want.has(getAccelerationNodeLatencyStatus(n)));
 }
 
 /** 在当前选中的地区分类标签范围内，挑选延迟最低的可用节点 */
@@ -12644,16 +13016,21 @@ async function refreshAccelerationChannel() {
 function renderAccelerationChannel(data) {
     const enabled = !!(data && data.enabled);
     const running = !!(data && data.running);
+    // 重启中 enabled 仍为 true：总开关保持开启，避免仪表盘/更多页看起来“莫名其妙关了”
+    const channelOn = !!(running || enabled || (data && data.restarting));
     const settingToggle = document.getElementById('setting-acceleration-toggle');
     const pageToggle = document.getElementById('acc-page-enabled-toggle');
     const controlsToggle = document.getElementById('acc-controls-enabled-toggle');
     const systemProxyToggle = document.getElementById('acc-system-proxy-toggle');
     const tunToggle = document.getElementById('acc-tun-toggle');
     if (settingToggle) settingToggle.checked = !!(data && data.autoStart);
-    if (pageToggle) pageToggle.checked = running;
-    if (controlsToggle) controlsToggle.checked = running;
-    if (systemProxyToggle) systemProxyToggle.checked = !!data.systemProxy;
-    if (tunToggle) tunToggle.checked = !!data.virtualNic;
+    if (pageToggle) pageToggle.checked = channelOn;
+    if (controlsToggle) controlsToggle.checked = channelOn;
+    // 总开关未运行时，系统代理 / TUN 界面显示未生效（偏好仍保留，重启后自动恢复）
+    const systemProxyOn = !!(running && data && data.systemProxy);
+    const tunOn = !!(running && data && data.virtualNic);
+    if (systemProxyToggle) systemProxyToggle.checked = systemProxyOn;
+    if (tunToggle) tunToggle.checked = tunOn;
 
     // 未启用时：系统代理 / TUN 不可操作，并提示先开总开关
     const subToggles = document.getElementById('acc-ctrl-sub-toggles');
@@ -12689,9 +13066,9 @@ function renderAccelerationChannel(data) {
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
     const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
     const dashTunToggle = document.getElementById('acc-dash-tun-toggle');
-    if (dashEnabledToggle) dashEnabledToggle.checked = running;
-    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = !!data.systemProxy;
-    if (dashTunToggle) dashTunToggle.checked = !!data.virtualNic;
+    if (dashEnabledToggle) dashEnabledToggle.checked = channelOn;
+    if (dashSystemProxyToggle) dashSystemProxyToggle.checked = systemProxyOn;
+    if (dashTunToggle) dashTunToggle.checked = tunOn;
 
     const dashSubToggles = document.getElementById('acc-dash-sub-toggles');
     if (dashSubToggles) dashSubToggles.classList.toggle('is-disabled', !running);
@@ -12768,7 +13145,7 @@ function renderAccelerationChannel(data) {
         if (dashRunStatus.parentElement) {
             dashRunStatus.parentElement.classList.toggle('enabled', running);
         }
-        const statusKey = !running
+        let statusKey = !running
             ? (enabled ? 'acc.status.stopped' : 'acc.status.disabled')
             : data.virtualNic && data.systemProxy
                 ? 'acc.status.tun_proxy'
@@ -12777,6 +13154,9 @@ function renderAccelerationChannel(data) {
                     : data.systemProxy
                         ? 'acc.status.system_proxy'
                         : 'acc.status.running';
+        if (!running && data && data.restarting) {
+            statusKey = 'acc.status.starting';
+        }
         dashRunStatus.setAttribute('data-i18n', statusKey);
         dashRunStatus.textContent = t(statusKey);
     }
@@ -12797,6 +13177,8 @@ function renderAccelerationChannel(data) {
         let pillKey = 'acc.status.disabled';
         if (running) {
             pillKey = 'acc.status.enabled';
+        } else if (data && data.restarting) {
+            pillKey = 'acc.status.starting';
         } else if (enabled) {
             pillKey = 'acc.status.stopped';
         }
@@ -13592,6 +13974,26 @@ function initAccelerationChannel() {
         });
     }
 
+    if (window.api && window.api.onAccelerationStatusChanged && !window.__nexoraAccStatusBound) {
+        window.__nexoraAccStatusBound = true;
+        window.api.onAccelerationStatusChanged((payload) => {
+            if (!payload || typeof payload !== 'object') return;
+            accelerationState = { ...(accelerationState || {}), ...payload };
+            try { renderAccelerationChannel(accelerationState); } catch (_) {}
+            if (payload.reason === 'core-exit' && payload.restarting) {
+                showToast(t('加速内核异常退出，正在自动重启…', 'Acceleration core crashed, restarting…', '加速核心異常退出，正在自動重啟…'));
+            } else if (payload.reason === 'core-restarted') {
+                showToast(t('加速内核已自动恢复', 'Acceleration core restored', '加速核心已自動恢復'));
+                setTimeout(() => {
+                    runAccelerationIpDetect({ force: true, reason: 'auto-restart' }).catch(() => {});
+                }, 800);
+            } else if (payload.reason === 'core-exit-gave-up') {
+                showToast(t('加速内核多次重启失败，已关闭通道', 'Acceleration core failed to restart, channel disabled', '加速核心多次重啟失敗，已關閉通道'));
+            }
+            updateAccelerationBusyUi();
+        });
+    }
+
     document.querySelectorAll('.acc-subtab[data-acc-panel]').forEach((btn) => {
         btn.addEventListener('click', () => {
             setAccelerationPanel(btn.getAttribute('data-acc-panel'));
@@ -13972,6 +14374,23 @@ function initAccelerationChannel() {
     const countryContainer = document.getElementById('acc-node-country-filters');
     if (countryContainer) {
         countryContainer.addEventListener('click', (e) => {
+            // 可用 / 超时：多选，可与地区标签叠加
+            const latencyPill = e.target.closest('.acc-latency-pill[data-latency]');
+            if (latencyPill) {
+                const key = String(latencyPill.getAttribute('data-latency') || '');
+                if (key !== 'available' && key !== 'timeout') return;
+                const current = Array.isArray(accelerationUi.latencyFilters)
+                    ? accelerationUi.latencyFilters.slice()
+                    : loadAccelerationLatencyFilters();
+                const idx = current.indexOf(key);
+                if (idx >= 0) current.splice(idx, 1);
+                else current.push(key);
+                saveAccelerationLatencyFilters(current);
+                syncAccelerationCountryFilterUi();
+                if (accelerationState) renderAccelerationChannel(accelerationState);
+                return;
+            }
+
             const pill = e.target.closest('.acc-country-pill[data-country]');
             if (!pill) return;
             const country = pill.getAttribute('data-country') || 'all';

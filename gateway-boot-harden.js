@@ -312,6 +312,7 @@ function patchTrustedPluginGatewayRequestAccess(runtimeRoot) {
   const dist = path.join(runtimeRoot || '', 'node_modules', 'openclaw', 'dist');
   if (!exists(dist)) return { ok: false, reason: 'no-dist' };
   const marker = '__NEXORA_TRUSTED_PLUGIN_IDS__';
+  const adminMarker = '__NEXORA_TRUSTED_PLUGIN_ADMIN_SCOPES__';
   const trusted = [
     'session-overflow-rollover',
     'session-tool-heal',
@@ -333,6 +334,15 @@ function patchTrustedPluginGatewayRequestAccess(runtimeRoot) {
     '\tif (!params.pluginId) return false;\n' +
     `\tconst ${marker} = new Set(${JSON.stringify(trusted)});\n` +
     `\tif (${marker}.has(params.pluginId)) return true;`;
+  // 微信默认 dmScope=main → chat.send 仅 deliver:true 无法回投渠道，需 admin 才能带 originatingChannel/To
+  const adminNeedle =
+    'return await dispatchGatewayMethod(method, params, {\n\t\tforceSyntheticClient: true,\n\t\tpluginRuntimeOwnerId: pluginId,';
+  const adminInject =
+    `const ${adminMarker} = ["operator.admin","operator.write"];\n` +
+    '\treturn await dispatchGatewayMethod(method, params, {\n' +
+    '\t\tforceSyntheticClient: true,\n' +
+    `\t\tsyntheticScopes: ${adminMarker},\n` +
+    '\t\tpluginRuntimeOwnerId: pluginId,';
   let patched = 0;
   try {
     for (const name of fs.readdirSync(dist)) {
@@ -341,21 +351,31 @@ function patchTrustedPluginGatewayRequestAccess(runtimeRoot) {
       let src = fs.readFileSync(file, 'utf8');
       if (!src.includes('canTrustedOfficialPluginRequestScopes')) continue;
       if (!src.includes('Gateway requests are only available to bundled or trusted official plugins')) continue;
-      if (src.includes(marker)) {
-        patched += 1;
-        continue;
-      }
       let next = src;
-      if (next.includes(needle)) {
-        next = next.split(needle).join(inject);
-      } else {
-        next = next.replace(
-          /function canTrustedOfficialPluginRequestScopes\(params\)\s*\{\s*if\s*\(\s*!params\.pluginId\s*\)\s*return false;/,
-          inject
-        );
+      if (!next.includes(marker)) {
+        if (next.includes(needle)) {
+          next = next.split(needle).join(inject);
+        } else {
+          next = next.replace(
+            /function canTrustedOfficialPluginRequestScopes\(params\)\s*\{\s*if\s*\(\s*!params\.pluginId\s*\)\s*return false;/,
+            inject
+          );
+        }
+      }
+      if (!next.includes(adminMarker) && next.includes('dispatchTrustedPluginGatewayMethod')) {
+        if (next.includes(adminNeedle)) {
+          next = next.split(adminNeedle).join(adminInject);
+        } else {
+          next = next.replace(
+            /return await dispatchGatewayMethod\(method,\s*params,\s*\{\s*forceSyntheticClient:\s*true,\s*pluginRuntimeOwnerId:\s*pluginId,/,
+            adminInject.replace(/\n/g, ' ')
+          );
+        }
       }
       if (next !== src && next.includes(marker)) {
         fs.writeFileSync(file, next, 'utf8');
+        patched += 1;
+      } else if (next.includes(marker) && next.includes(adminMarker)) {
         patched += 1;
       }
     }

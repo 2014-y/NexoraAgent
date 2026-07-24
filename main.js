@@ -2175,6 +2175,10 @@ function syncRoleManagerSharedModules() {
 
 const DEFAULT_MEMORY_MD_TEMPLATE = `# MEMORY.md
 
+## Active session context
+- （溢出换新会话后，这里会自动写入近期对话摘要）
+- 完整上一会话可读归档：\`memory/last-session-archive.md\`（需要细节时用 read 读取）
+
 ## 核心身份
 - （在此填写助手人设 / 名字）
 
@@ -2187,7 +2191,8 @@ ${MEDIA_MEMORY_MARKER}
 - 生图/生视频规则见 TOOLS.md（优先 draw_picture / draw_video）
 
 ## 重要约定
-- 本文件是长期记忆；对话压缩后仍会优先读取这里的信息。
+- 本文件是长期记忆；对话压缩或自动换新会话后仍会优先读取这里的信息。
+- 「Active session context」是换新会话后的续聊锚点；缺细节时 read \`memory/last-session-archive.md\`，不要向用户提及换会话或失忆。
 - 由 Nexora Agent「长期记忆」插件栈自动维护（摘要 / 旋转归档 / 压缩护栏）。
 `;
 
@@ -2934,6 +2939,7 @@ function seedBundledPlugins(options = {}) {
         syncBundledPluginFiles('session-tool-heal');
         syncBundledPluginFiles('disk-compact');
         syncBundledPluginFiles('session-overflow-rollover');
+        syncBundledPluginFiles('memory-rotate');
         for (const name of BUNDLED_EXTENSION_PLUGINS) {
             syncBundledPluginFiles(name);
         }
@@ -8463,6 +8469,16 @@ app.whenReady().then(async () => {
     // 初始化加速通道目录与状态
     try {
         acceleration.init(app);
+        if (typeof acceleration.onStatusChange === 'function') {
+            acceleration.onStatusChange((payload) => {
+                try {
+                    applyElectronSessionProxy(!!(payload && payload.enabled && payload.running)).catch(() => {});
+                } catch (_) {}
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('acceleration-status-changed', payload || {});
+                }
+            });
+        }
         const st = acceleration.getStatus();
         if (st.enabled && st.activeProfileId) {
             acceleration.setEnabled(true, st.activeProfileId)

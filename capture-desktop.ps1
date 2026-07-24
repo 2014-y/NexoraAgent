@@ -1,7 +1,13 @@
-# Full-desktop screenshot with DPI-safe metrics.
+# Full-desktop / active-monitor screenshot with DPI-safe metrics.
 # Compatible with home PCs, Wuying/cloud desktops, multi-monitor, 125%/150%/200% scaling.
+#
+# Default Scope=Active: capture the monitor with the focused window (sharpest for chat preview).
+# Scope=Primary: primary monitor only.
+# Scope=All: entire virtual desktop (all monitors) — often looks soft when shown small in chat.
 param(
-    [string]$OutPath = ""
+    [string]$OutPath = "",
+    [ValidateSet('Active', 'Primary', 'All')]
+    [string]$Scope = 'Active'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +23,13 @@ public class ScreenCapNative {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
     [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateDC(string lpszDriver, string lpszDevice, string lpszOutput, IntPtr lpInitData);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern int BitBlt(IntPtr hDestDC, int x, int y, int nWidth, int nHeight, IntPtr hSrcDC, int xSrc, int ySrc, int dwRop);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
 
     public const int SM_CXSCREEN = 0;
     public const int SM_CYSCREEN = 1;
@@ -25,6 +38,8 @@ public class ScreenCapNative {
     public const int SM_CXVIRTUALSCREEN = 78;
     public const int SM_CYVIRTUALSCREEN = 79;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
+    public const int SRCCOPY = 0x00CC0020;
+    public const int CAPTUREBLT = 0x40000000;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
@@ -55,7 +70,6 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 function Get-VirtualDesktopRect {
-    # Ground truth for "whole desktop" including multi-monitor.
     $x = [ScreenCapNative]::GetSystemMetrics(76)
     $y = [ScreenCapNative]::GetSystemMetrics(77)
     $w = [ScreenCapNative]::GetSystemMetrics(78)
@@ -64,7 +78,6 @@ function Get-VirtualDesktopRect {
         return @{ X = $x; Y = $y; Width = $w; Height = $h; Source = 'GetSystemMetrics-Virtual' }
     }
 
-    $vs = [System.Windows.Forms.Screen]::PrimaryScreen
     try {
         $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
         if ($vs.Width -gt 0 -and $vs.Height -gt 0) {
@@ -72,6 +85,16 @@ function Get-VirtualDesktopRect {
         }
     } catch {}
 
+    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    return @{ X = $b.X; Y = $b.Y; Width = $b.Width; Height = $b.Height; Source = 'PrimaryScreen.Bounds' }
+}
+
+function Get-PrimaryMonitorRect {
+    $cx = [ScreenCapNative]::GetSystemMetrics(0)
+    $cy = [ScreenCapNative]::GetSystemMetrics(1)
+    if ($cx -gt 0 -and $cy -gt 0) {
+        return @{ X = 0; Y = 0; Width = $cx; Height = $cy; Source = 'SM_CXSCREEN' }
+    }
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     return @{ X = $b.X; Y = $b.Y; Width = $b.Width; Height = $b.Height; Source = 'PrimaryScreen.Bounds' }
 }
@@ -91,40 +114,78 @@ function Get-ActiveMonitorRect {
     return @{ X = $r.Left; Y = $r.Top; Width = $w; Height = $h; Source = 'MonitorFromWindow' }
 }
 
-# Default: full virtual desktop (all screens). Falls back to active monitor only if virtual metrics fail.
-$rect = Get-VirtualDesktopRect
+# Resolve capture rect by scope. Prefer single-monitor for sharpness in chat/WeChat.
+$rect = $null
+if ($Scope -eq 'All') {
+    $rect = Get-VirtualDesktopRect
+} elseif ($Scope -eq 'Primary') {
+    $rect = Get-PrimaryMonitorRect
+} else {
+    $rect = Get-ActiveMonitorRect
+    if (-not $rect) { $rect = Get-PrimaryMonitorRect }
+}
 
-# Sanity: if virtual size is absurdly smaller than primary physical screen, prefer primary metrics.
+# Sanity: if chosen rect is absurdly small vs primary physical screen, rebuild.
 $cx = [ScreenCapNative]::GetSystemMetrics(0)
 $cy = [ScreenCapNative]::GetSystemMetrics(1)
-if ($cx -gt 0 -and $cy -gt 0) {
-    if ($rect.Width -lt [Math]::Floor($cx * 0.9) -or $rect.Height -lt [Math]::Floor($cy * 0.9)) {
-        # Likely DPI-virtualized wrong bounds — rebuild from primary + active monitor max.
+if ($cx -gt 0 -and $cy -gt 0 -and $rect) {
+    if ($rect.Width -lt [Math]::Floor($cx * 0.5) -or $rect.Height -lt [Math]::Floor($cy * 0.5)) {
         $active = Get-ActiveMonitorRect
         $candidates = @(
-            @{ X = 0; Y = 0; Width = $cx; Height = $cy; Source = 'SM_CXSCREEN' },
+            (Get-PrimaryMonitorRect),
             $rect
         )
         if ($active) { $candidates += $active }
-        try {
-            $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
-            $candidates += @{ X = $vs.X; Y = $vs.Y; Width = $vs.Width; Height = $vs.Height; Source = 'VirtualScreen-retry' }
-        } catch {}
+        if ($Scope -eq 'All') {
+            try {
+                $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                $candidates += @{ X = $vs.X; Y = $vs.Y; Width = $vs.Width; Height = $vs.Height; Source = 'VirtualScreen-retry' }
+            } catch {}
+        }
         $rect = $candidates | Sort-Object { $_.Width * $_.Height } -Descending | Select-Object -First 1
     }
 }
 
-if ($rect.Width -lt 64 -or $rect.Height -lt 64) {
+if (-not $rect -or $rect.Width -lt 64 -or $rect.Height -lt 64) {
     throw "Invalid capture rect: $($rect.Width)x$($rect.Height) via $($rect.Source)"
 }
 
-$bitmap = New-Object System.Drawing.Bitmap([int]$rect.Width, [int]$rect.Height)
+# Use 32bpp ARGB + BitBlt(CAPTUREBLT) for sharper layered-window capture on some desktops.
+$bitmap = New-Object System.Drawing.Bitmap([int]$rect.Width, [int]$rect.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 try {
     $graphics.Clear([System.Drawing.Color]::Black)
-    $size = New-Object System.Drawing.Size([int]$rect.Width, [int]$rect.Height)
-    # CopyFromScreen uses desktop coordinates (supports negative X/Y on left/above primary monitors).
-    $graphics.CopyFromScreen([int]$rect.X, [int]$rect.Y, 0, 0, $size)
+    $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::None
+
+    $copied = $false
+    try {
+        $hdcDest = $graphics.GetHdc()
+        $hdcSrc = [ScreenCapNative]::CreateDC('DISPLAY', $null, $null, [IntPtr]::Zero)
+        if ($hdcSrc -ne [IntPtr]::Zero) {
+            $rop = [ScreenCapNative]::SRCCOPY -bor [ScreenCapNative]::CAPTUREBLT
+            $ok = [ScreenCapNative]::BitBlt(
+                $hdcDest, 0, 0, [int]$rect.Width, [int]$rect.Height,
+                $hdcSrc, [int]$rect.X, [int]$rect.Y, $rop
+            )
+            [ScreenCapNative]::DeleteDC($hdcSrc) | Out-Null
+            if ($ok) { $copied = $true }
+        }
+        $graphics.ReleaseHdc($hdcDest)
+    } catch {
+        try { $graphics.ReleaseHdc($hdcDest) } catch {}
+    }
+
+    if (-not $copied) {
+        $size = New-Object System.Drawing.Size([int]$rect.Width, [int]$rect.Height)
+        $graphics.CopyFromScreen(
+            [int]$rect.X, [int]$rect.Y, 0, 0, $size,
+            [System.Drawing.CopyPixelOperation]::SourceCopy
+        )
+    }
 
     if ([string]::IsNullOrWhiteSpace($OutPath)) {
         $OutPath = Join-Path $env:TEMP 'openclaw-screenshot.png'
@@ -133,6 +194,7 @@ try {
     if ($dir -and -not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
+    # PNG is lossless — keep full physical resolution
     $bitmap.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png)
     Write-Output $OutPath
 }

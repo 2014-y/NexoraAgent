@@ -187,6 +187,12 @@ function testSessionFileHeal() {
       'function response turn comes immediately after a function call turn'
     )
   );
+  assert.ok(
+    repair.looksLikeToolPairFormatError(
+      'Message ordering conflict - please try again. If this persists, use /new to start a fresh session.'
+    )
+  );
+  assert.ok(repair.looksLikeToolPairFormatError('roles must alternate between user and model'));
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

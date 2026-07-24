@@ -16,6 +16,13 @@ const PLUGIN_ID = 'session-overflow-rollover';
 const COOLDOWN_MS = 20_000;
 const TRIGGER_FILE = 'overflow-rollover.trigger.json';
 const ARCHIVE_NOTE_DIR_REL = path.join('workspace', 'compact-history');
+const ACTIVE_CONTEXT_HEADING = '## Active session context';
+const CONTINUITY_SUMMARY_MAX = 900;
+const CONTINUITY_PROMPT_MAX = 700;
+const RECENT_TURN_PAIRS = 6;
+const ARCHIVE_TURN_PAIRS = 24;
+const ARCHIVE_FILE_MAX_CHARS = 48_000;
+const LAST_ARCHIVE_REL = path.join('workspace', 'memory', 'last-session-archive.md');
 
 /** @type {Map<string, { text: string, at: number }>} */
 const lastUserBySession = new Map();
@@ -117,23 +124,411 @@ function resolveSessionFile(event, ctx) {
   return fs.existsSync(direct) ? direct : '';
 }
 
-function readLastUserTextFromSessionFile(sessionFile) {
+function resolveSessionFileByKey(sessionKey) {
   try {
-    if (!sessionFile || !fs.existsSync(sessionFile)) return '';
-    const lines = fs.readFileSync(sessionFile, 'utf8').split(/\r?\n/).filter((l) => l.trim());
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const obj = JSON.parse(lines[i]);
-        const msg = obj && obj.message;
-        if (!msg || msg.role !== 'user') continue;
-        const text = extractText(msg);
-        if (text && !isOverflowRecoveryText(text) && !text.startsWith('/')) return text;
-      } catch (_) {}
-    }
-  } catch (_) {}
-  return '';
+    if (!sessionKey) return '';
+    const storePath = path.join(stateDir(), 'agents', 'main', 'sessions', 'sessions.json');
+    if (!fs.existsSync(storePath)) return '';
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
+    const entry = store && store[sessionKey];
+    const sid = entry && entry.sessionId;
+    if (!sid) return '';
+    const file = path.join(stateDir(), 'agents', 'main', 'sessions', `${sid}.jsonl`);
+    return fs.existsSync(file) ? file : '';
+  } catch (_) {
+    return '';
+  }
 }
 
+/** 读取会话投递路由（微信默认落到 agent:main:main，仅 deliver:true 不够） */
+function readSessionDeliveryRoute(sessionKey) {
+  try {
+    if (!sessionKey) return null;
+    const storePath = path.join(stateDir(), 'agents', 'main', 'sessions', 'sessions.json');
+    if (!fs.existsSync(storePath)) return null;
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
+    const entry = store && store[sessionKey];
+    if (!entry || typeof entry !== 'object') return null;
+    const channel =
+      (entry.deliveryContext && entry.deliveryContext.channel) ||
+      entry.lastChannel ||
+      (entry.origin && (entry.origin.provider || entry.origin.channel)) ||
+      '';
+    const to =
+      (entry.deliveryContext && entry.deliveryContext.to) ||
+      entry.lastTo ||
+      (entry.origin && entry.origin.to) ||
+      '';
+    const accountId =
+      (entry.deliveryContext && entry.deliveryContext.accountId) ||
+      entry.lastAccountId ||
+      (entry.origin && entry.origin.accountId) ||
+      '';
+    const threadId =
+      (entry.deliveryContext && entry.deliveryContext.threadId) ||
+      entry.lastThreadId ||
+      '';
+    if (!channel || !to) return null;
+    if (/^webchat$/i.test(String(channel))) return null;
+    return {
+      channel: String(channel).trim(),
+      to: String(to).trim(),
+      accountId: accountId ? String(accountId).trim() : '',
+      threadId: threadId != null && String(threadId).trim() ? String(threadId).trim() : '',
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildChatSendParams(sessionKey, message, deliveryRoute) {
+  const params = {
+    sessionKey,
+    message,
+    deliver: true,
+    idempotencyKey: crypto.randomUUID(),
+  };
+  if (deliveryRoute && deliveryRoute.channel && deliveryRoute.to) {
+    params.originatingChannel = deliveryRoute.channel;
+    params.originatingTo = deliveryRoute.to;
+    if (deliveryRoute.accountId) params.originatingAccountId = deliveryRoute.accountId;
+    if (deliveryRoute.threadId) params.originatingThreadId = deliveryRoute.threadId;
+  }
+  return params;
+}
+
+function msgText(msg) {
+  if (!msg) return '';
+  const t = extractText(msg);
+  return String(t || '').replace(/\s+/g, ' ').trim();
+}
+
+function isNoiseUserText(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.startsWith('/')) return true;
+  if (isOverflowRecoveryText(t)) return true;
+  if (isRateLimitBannerText(t)) return true;
+  return false;
+}
+
+/**
+ * 从即将归档的 transcript 抽一段短摘要（不调大模型，溢出时 LLM 已不可用）。
+ * 用于写入 MEMORY.md / 续问上下文，避免换新会话后完全失忆。
+ */
+function buildContinuitySummary(sessionFile, lastUserText, opts = {}) {
+  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : CONTINUITY_SUMMARY_MAX;
+  const maxPairs = Number(opts.maxPairs) > 0 ? Number(opts.maxPairs) : RECENT_TURN_PAIRS;
+  const { facts, turns } = extractTranscriptTurns(sessionFile);
+  const recent = turns.slice(-maxPairs);
+  const parts = [];
+  if (facts.length) {
+    const uniq = [...new Set(facts)].slice(-5);
+    parts.push('关键约定/身份: ' + uniq.join('；'));
+  }
+  if (recent.length) {
+    parts.push(
+      '近期对话:\n' +
+        recent
+          .map((t, i) => `${i + 1}. 用户: ${t.q}\n   助手: ${t.a}`)
+          .join('\n')
+    );
+  }
+  const last = String(lastUserText || '').trim();
+  if (last && !isNoiseUserText(last)) {
+    parts.push('待续问: ' + last.slice(0, 200));
+  }
+
+  let out = parts.join('\n').trim();
+  if (!out) return '';
+  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
+  return out;
+}
+
+function extractTranscriptTurns(sessionFile) {
+  const facts = [];
+  const turns = [];
+  let pendingUser = null;
+  try {
+    if (sessionFile && fs.existsSync(sessionFile)) {
+      const lines = fs.readFileSync(sessionFile, 'utf8').split(/\r?\n/).filter((l) => l.trim());
+      for (const line of lines) {
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch (_) {
+          continue;
+        }
+        const msg = obj && obj.message;
+        if (!msg || !msg.role) continue;
+        const text = msgText(msg);
+        if (!text || text.length < 2) continue;
+        if (msg.role === 'user') {
+          if (isNoiseUserText(text)) continue;
+          if (/^(我叫|我的名字|我是|你是谁|你叫什么|记住|偏好|不要|禁止|喜欢|不喜欢|以后请|请你记住)/.test(text)) {
+            facts.push(text.slice(0, 120));
+          }
+          pendingUser = text.slice(0, 800);
+        } else if (msg.role === 'assistant' && pendingUser) {
+          if (isOverflowRecoveryText(text) || isRateLimitBannerText(text)) {
+            pendingUser = null;
+            continue;
+          }
+          turns.push({
+            q: pendingUser,
+            a: text.slice(0, 1200),
+          });
+          pendingUser = null;
+        }
+      }
+    }
+  } catch (_) {}
+  return { facts, turns };
+}
+
+/**
+ * 把旧会话写成 workspace 内可读 Markdown，新会话可用 read 工具按需打开。
+ * 稳定路径：memory/last-session-archive.md
+ */
+function writeReadableSessionArchive(sessionFile, sessionKey, lastUserText) {
+  try {
+    const { facts, turns } = extractTranscriptTurns(sessionFile);
+    if (!turns.length && !facts.length && !lastUserText) return '';
+
+    const recent = turns.slice(-ARCHIVE_TURN_PAIRS);
+    const stamp = new Date().toISOString();
+    const stableRel = LAST_ARCHIVE_REL;
+    const stableAbs = path.join(stateDir(), stableRel);
+    const datedRel = path.join(
+      'workspace',
+      'memory',
+      `session-archive-${stamp.replace(/[:.]/g, '-')}.md`
+    );
+    const datedAbs = path.join(stateDir(), datedRel);
+    fs.mkdirSync(path.dirname(stableAbs), { recursive: true });
+
+    const bodyParts = [
+      `# 上一会话归档（可读）`,
+      ``,
+      `- 时间: ${stamp}`,
+      `- sessionKey: ${sessionKey || ''}`,
+      `- 说明: 上下文溢出后自动换新会话。新会话可 \`read\` 本文件召回细节；勿向用户提换会话/失忆。`,
+      ``,
+    ];
+    if (facts.length) {
+      bodyParts.push(`## 关键约定/身份`, ...[...new Set(facts)].slice(-8).map((f) => `- ${f}`), ``);
+    }
+    bodyParts.push(`## 对话摘录（最近 ${recent.length} 轮）`, ``);
+    if (!recent.length) {
+      bodyParts.push('(无完整问答轮次)', ``);
+    } else {
+      recent.forEach((t, i) => {
+        bodyParts.push(`### ${i + 1}`);
+        bodyParts.push(`**用户:** ${t.q}`);
+        bodyParts.push(`**助手:** ${t.a}`);
+        bodyParts.push(``);
+      });
+    }
+    if (lastUserText) {
+      bodyParts.push(`## 待续问`, ``, String(lastUserText).slice(0, 500), ``);
+    }
+
+    let body = bodyParts.join('\n');
+    if (body.length > ARCHIVE_FILE_MAX_CHARS) {
+      body = body.slice(0, ARCHIVE_FILE_MAX_CHARS - 20) + '\n\n…(归档已截断)\n';
+    }
+    fs.writeFileSync(stableAbs, body, 'utf8');
+    try {
+      fs.writeFileSync(datedAbs, body, 'utf8');
+    } catch (_) {}
+
+    // 相对 workspace 的路径，方便模型 read
+    const workspaceRel = 'memory/last-session-archive.md';
+    console.log(`[${PLUGIN_ID}] readable archive written: ${workspaceRel} (${body.length} chars)`);
+    return workspaceRel;
+  } catch (e) {
+    console.warn(`[${PLUGIN_ID}] readable archive failed:`, e && e.message);
+    return '';
+  }
+}
+
+function workspaceMemoryPath() {
+  return path.join(stateDir(), 'workspace', 'MEMORY.md');
+}
+
+function workspaceDailyMemoryPath(date = new Date()) {
+  const ymd = date.toISOString().slice(0, 10);
+  return path.join(stateDir(), 'workspace', 'memory', `${ymd}.md`);
+}
+
+/** 把 Active session context 插到 MEMORY.md 靠前位置，供新会话 bootstrap 注入 */
+function upsertActiveSessionContext(summary, archivePath) {
+  const body = String(summary || '').trim();
+  if (!body && !archivePath) return false;
+  try {
+    const file = workspaceMemoryPath();
+    const dir = path.dirname(file);
+    fs.mkdirSync(dir, { recursive: true });
+    let raw = '';
+    try {
+      if (fs.existsSync(file)) raw = fs.readFileSync(file, 'utf8');
+    } catch (_) {}
+    if (!raw.trim()) raw = '# MEMORY.md\n\n';
+
+    const archiveHint = archivePath
+      ? `- 完整归档: \`${archivePath}\`（需要更多细节时用 read 工具读取，不要整文件贴进回复）\n`
+      : '';
+    const sectionBody =
+      `- 更新: ${new Date().toISOString()}\n` +
+      `- 说明: 上一会话因上下文过长已归档；续聊请优先参考本节；缺细节再 read 归档文件。勿向用户提及换会话或失忆。\n` +
+      archiveHint +
+      `${body || '(见归档文件)'}`;
+
+    const lines = raw.replace(/\r\n/g, '\n').split('\n');
+    const title = [];
+    const sections = [];
+    let cur = null;
+    for (const line of lines) {
+      if (/^#\s+/.test(line) && title.length === 0 && sections.length === 0 && !cur) {
+        title.push(line);
+        continue;
+      }
+      if (/^##\s+/.test(line)) {
+        if (cur) sections.push(cur);
+        cur = { heading: line.trim(), lines: [] };
+        continue;
+      }
+      if (cur) cur.lines.push(line);
+      else title.push(line);
+    }
+    if (cur) sections.push(cur);
+
+    const kept = sections.filter(
+      (s) => !/^##\s+Active session context\b/i.test(s.heading)
+    );
+    const active = {
+      heading: ACTIVE_CONTEXT_HEADING,
+      lines: sectionBody.split('\n'),
+    };
+    const ordered = [active, ...kept];
+
+    let next = (title.join('\n').trim() || '# MEMORY.md') + '\n\n';
+    next += ordered
+      .map((s) => [s.heading, ...s.lines].join('\n').replace(/\n+$/, '') + '\n')
+      .join('\n');
+
+    const MAX_MEMORY = 2400; // 对齐 bootstrapMaxChars≈2500，避免 Active 段被截到中间丢失
+    if (next.length > MAX_MEMORY) {
+      let head = (title.join('\n').trim() || '# MEMORY.md') + '\n\n';
+      head += [active.heading, ...active.lines].join('\n').replace(/\n+$/, '') + '\n\n';
+      let rest = kept
+        .map((s) => [s.heading, ...s.lines].join('\n').replace(/\n+$/, '') + '\n')
+        .join('\n');
+      const budget = Math.max(0, MAX_MEMORY - head.length - 40);
+      if (rest.length > budget) rest = rest.slice(0, budget) + '\n\n<!-- truncated after rollover continuity upsert -->\n';
+      next = head + rest;
+    }
+    fs.writeFileSync(file, next, 'utf8');
+    console.log(`[${PLUGIN_ID}] upserted ${ACTIVE_CONTEXT_HEADING} (${body.length} chars, archive=${archivePath || 'none'})`);
+    return true;
+  } catch (e) {
+    console.warn(`[${PLUGIN_ID}] MEMORY.md upsert failed:`, e && e.message);
+    return false;
+  }
+}
+
+function appendDailyContinuityNote(sessionKey, summary, lastUserText, archivePath) {
+  try {
+    const file = workspaceDailyMemoryPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const block = [
+      ``,
+      `## Session rollover ${new Date().toISOString()}`,
+      `- sessionKey: ${sessionKey || ''}`,
+      archivePath ? `- archive: ${archivePath}` : '',
+      ``,
+      summary || '(无摘要)',
+      ``,
+      lastUserText ? `待续问: ${String(lastUserText).slice(0, 300)}` : '',
+      ``,
+    ]
+      .filter((l, i, arr) => !(l === '' && arr[i - 1] === ''))
+      .join('\n');
+    fs.appendFileSync(file, block, 'utf8');
+    return file;
+  } catch (e) {
+    console.warn(`[${PLUGIN_ID}] daily continuity note failed:`, e && e.message);
+    return '';
+  }
+}
+
+function persistContinuityBeforeReset(sessionKey, lastUserText, sessionFile) {
+  const file = sessionFile || resolveSessionFileByKey(sessionKey);
+  const archivePath = writeReadableSessionArchive(file, sessionKey, lastUserText);
+  const summary = buildContinuitySummary(file, lastUserText);
+  if (!summary && !archivePath) {
+    console.log(`[${PLUGIN_ID}] continuity summary empty key=${sessionKey}`);
+    return { summary: '', memoryOk: false, daily: '', archivePath: '' };
+  }
+  const memoryOk = upsertActiveSessionContext(summary || '见 memory/last-session-archive.md', archivePath);
+  const daily = appendDailyContinuityNote(sessionKey, summary, lastUserText, archivePath);
+  return { summary, memoryOk, daily, sessionFile: file, archivePath };
+}
+
+function writeArchiveNote(sessionKey, lastUserText, continuitySummary, archivePath) {
+  try {
+    const dir = path.join(stateDir(), ARCHIVE_NOTE_DIR_REL);
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeKey = String(sessionKey || 'session').replace(/[^\w.-]+/g, '_').slice(0, 80);
+    const file = path.join(dir, `rollover_${safeKey}_${stamp}.md`);
+    const body = [
+      `# 会话自动归档`,
+      ``,
+      `- 时间: ${new Date().toISOString()}`,
+      `- sessionKey: ${sessionKey}`,
+      `- 原因: 上下文溢出 / 自动压缩失败 / 角色顺序冲突`,
+      archivePath ? `- 可读归档: ${archivePath}` : '',
+      ``,
+      `## 延续摘要`,
+      ``,
+      continuitySummary || '(无)',
+      ``,
+      `## 待续问`,
+      ``,
+      lastUserText || '(无)',
+      ``,
+    ].join('\n');
+    fs.writeFileSync(file, body, 'utf8');
+    return file;
+  } catch (_) {
+    return '';
+  }
+}
+
+function buildContinuePrompt(lastUserText, continuitySummary, archivePath) {
+  const q = String(lastUserText || '').trim();
+  if (!q) return '';
+  const summary = String(continuitySummary || '').trim();
+  const arch = String(archivePath || '').trim() || 'memory/last-session-archive.md';
+  if (!summary && !archivePath) return q;
+  let clipped = summary;
+  if (clipped.length > CONTINUITY_PROMPT_MAX) clipped = clipped.slice(0, CONTINUITY_PROMPT_MAX - 1) + '…';
+  return [
+    '[内部延续上下文] 此前长对话已归档。短摘要如下；若回答需要更多历史细节，请先 read `' +
+      arch +
+      '` 再作答。不要提及换会话、归档或失忆。',
+    clipped || '(详见归档文件)',
+    '',
+    '用户问题：',
+    q,
+  ].join('\n');
+}
+
+/**
+ * OpenClaw 在溢出 / 压缩失败 / 角色奇偶冲突时都会吐出「use /new」类恢复文案。
+ * 这些文案若只被 error-filter 静默拦截、却不归档换新，通讯渠道就会哑火。
+ */
 function isOverflowRecoveryText(text) {
   const t = String(text || '');
   if (!t) return false;
@@ -143,6 +538,8 @@ function isOverflowRecoveryText(text) {
     /auto-compaction failed/i.test(t) ||
     /Context overflow/i.test(t) ||
     /context[_\s-]?overflow/i.test(t) ||
+    /Context is too large and auto-compaction/i.test(t) ||
+    /Context limit exceeded/i.test(t) ||
     /prompt too large for the model/i.test(t) ||
     /Compaction timed out/i.test(t) ||
     /compaction timeout/i.test(t) ||
@@ -151,9 +548,17 @@ function isOverflowRecoveryText(text) {
     /diagId\s*=\s*ovf-/i.test(t) ||
     /\[agent\/embedded\].*(overflow|compaction)/i.test(t) ||
     /use \/compact/i.test(t) ||
+    /use \/new/i.test(t) ||
+    /\/new to start/i.test(t) ||
+    /Message ordering conflict/i.test(t) ||
+    /roles must alternate/i.test(t) ||
+    /incorrect role information/i.test(t) ||
+    /Session history looks corrupted/i.test(t) ||
+    /rejected the conversation state/i.test(t) ||
+    /provider rejected the conversation state/i.test(t) ||
     /increase your compaction buffer/i.test(t) ||
     /reserveTokensFloor/i.test(t) ||
-    /上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(t)
+    /上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new|角色(顺序|奇偶)|消息顺序冲突/i.test(t)
   );
 }
 
@@ -212,10 +617,10 @@ function looksLikeOverflowFailure(event, ctx) {
   }
   const blob = parts.join('\n');
   if (isOverflowRecoveryText(blob)) return true;
-  if (/context_overflow|compaction_failure|compaction.?timeout|compaction[-_ ]?diag|overflow recovery|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|outcome\s*=\s*failed[\s\S]{0,80}(overflow|compaction|timeout)|reason\s*=\s*timeout/i.test(blob)) {
+  if (/context_overflow|compaction_failure|compaction.?timeout|compaction[-_ ]?diag|overflow recovery|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|outcome\s*=\s*failed[\s\S]{0,80}(overflow|compaction|timeout)|reason\s*=\s*timeout|roles must alternate|Message ordering conflict|incorrect role information|rejected the conversation state/i.test(blob)) {
     return true;
   }
-  if (event && event.success === false && /overflow|compaction|too large|precheck|timeout/i.test(blob)) {
+  if (event && event.success === false && /overflow|compaction|too large|precheck|timeout|roles must alternate|ordering conflict|role information|\/new/i.test(blob)) {
     return true;
   }
   return false;
@@ -231,40 +636,25 @@ function rememberUserText(sessionKey, text) {
 function pickLastUserText(sessionKey, event, ctx) {
   const cached = lastUserBySession.get(sessionKey);
   if (cached && cached.text) return cached.text;
-  const file = resolveSessionFile(event, ctx);
+  const file = resolveSessionFile(event, ctx) || resolveSessionFileByKey(sessionKey);
   return readLastUserTextFromSessionFile(file);
 }
 
-function writeArchiveNote(sessionKey, lastUserText) {
+function readLastUserTextFromSessionFile(sessionFile) {
   try {
-    const dir = path.join(stateDir(), ARCHIVE_NOTE_DIR_REL);
-    fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const safeKey = String(sessionKey || 'session').replace(/[^\w.-]+/g, '_').slice(0, 80);
-    const file = path.join(dir, `rollover_${safeKey}_${stamp}.md`);
-    const body = [
-      `# 会话自动归档`,
-      ``,
-      `- 时间: ${new Date().toISOString()}`,
-      `- sessionKey: ${sessionKey}`,
-      `- 原因: 上下文溢出 / 自动压缩失败`,
-      ``,
-      `## 待续问`,
-      ``,
-      lastUserText || '(无)',
-      ``,
-    ].join('\n');
-    fs.writeFileSync(file, body, 'utf8');
-    return file;
-  } catch (_) {
-    return '';
-  }
-}
-
-function buildContinuePrompt(lastUserText) {
-  // 对用户完全静默：不提及归档/中断/新会话，只重提原问题
-  const q = String(lastUserText || '').trim();
-  return q;
+    if (!sessionFile || !fs.existsSync(sessionFile)) return '';
+    const lines = fs.readFileSync(sessionFile, 'utf8').split(/\r?\n/).filter((l) => l.trim());
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        const msg = obj && obj.message;
+        if (!msg || msg.role !== 'user') continue;
+        const text = extractText(msg);
+        if (text && !isOverflowRecoveryText(text) && !text.startsWith('/')) return text;
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return '';
 }
 
 async function gatewayRequest(api, method, params) {
@@ -287,11 +677,23 @@ async function performRollover(api, sessionKey, lastUserText, via) {
 
   inFlight.add(sessionKey);
   try {
-    const note = writeArchiveNote(sessionKey, lastUserText);
+    // 重置前：抽摘要 + 记下渠道投递路由（reset 会保留 lastChannel，但显式 originating 更稳）
+    const deliveryRoute = readSessionDeliveryRoute(sessionKey);
+    const continuity = persistContinuityBeforeReset(sessionKey, lastUserText);
+    const note = writeArchiveNote(
+      sessionKey,
+      lastUserText,
+      continuity.summary,
+      continuity.archivePath
+    );
     console.log(
       `[${PLUGIN_ID}] rollover start via=${via} key=${sessionKey}` +
         (note ? ` note=${note}` : '') +
-        ` lastUserChars=${(lastUserText || '').length}`
+        ` lastUserChars=${(lastUserText || '').length}` +
+        ` continuityChars=${(continuity.summary || '').length}` +
+        ` memoryOk=${Boolean(continuity.memoryOk)}` +
+        ` archive=${continuity.archivePath || 'none'}` +
+        ` route=${deliveryRoute ? `${deliveryRoute.channel}->${deliveryRoute.to}` : 'none'}`
     );
 
     await gatewayRequest(api, 'sessions.reset', {
@@ -299,31 +701,33 @@ async function performRollover(api, sessionKey, lastUserText, via) {
       reason: 'new',
     });
 
-    const continueText = buildContinuePrompt(lastUserText);
+    const continueText = buildContinuePrompt(
+      lastUserText,
+      continuity.summary,
+      continuity.archivePath
+    );
     if (!continueText) {
-      // 没有可续问的内容：只静默归档换新会话，不向用户发任何提示
       lastRolloverAt.set(sessionKey, Date.now());
       console.log(`[${PLUGIN_ID}] rollover archived without resume (empty last user) key=${sessionKey}`);
       return true;
     }
 
-    await gatewayRequest(api, 'chat.send', {
-      sessionKey,
-      message: continueText,
-      idempotencyKey: crypto.randomUUID(),
-    });
+    // deliver:true + 显式 originating*：覆盖微信 dmScope=main（仅 deliver 会掉进内部通道）
+    await gatewayRequest(api, 'chat.send', buildChatSendParams(sessionKey, continueText, deliveryRoute));
 
     lastRolloverAt.set(sessionKey, Date.now());
-    console.log(`[${PLUGIN_ID}] rollover done key=${sessionKey}`);
+    console.log(
+      `[${PLUGIN_ID}] rollover done key=${sessionKey} deliver=true` +
+        ` continuity=${Boolean(continuity.summary)}` +
+        ` explicitRoute=${Boolean(deliveryRoute)}`
+    );
     try {
-      api.logger?.info?.(`[${PLUGIN_ID}] archived & resumed: ${sessionKey}`);
+      api.logger?.info?.(`[${PLUGIN_ID}] archived & resumed with continuity: ${sessionKey}`);
     } catch (_) {}
     return true;
   } catch (e) {
-    // 失败不占冷却，否则主进程日志桥/二次触发会被错误挡住
     lastRolloverAt.delete(sessionKey);
     console.error(`[${PLUGIN_ID}] rollover failed:`, e && e.message ? e.message : e);
-    // 最后兜底：RPC 不可用时至少清空过大会话文件，避免下一轮继续 overflow 哑火
     try {
       filesystemEmergencyReset(sessionKey, lastUserText);
     } catch (_) {}
@@ -335,6 +739,10 @@ async function performRollover(api, sessionKey, lastUserText, via) {
 
 function filesystemEmergencyReset(sessionKey, lastUserText) {
   try {
+    // 清空前尽量落盘延续摘要
+    try {
+      persistContinuityBeforeReset(sessionKey, lastUserText);
+    } catch (_) {}
     const storePath = path.join(stateDir(), 'agents', 'main', 'sessions', 'sessions.json');
     if (!fs.existsSync(storePath)) return false;
     const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
@@ -358,7 +766,7 @@ function filesystemEmergencyReset(sessionKey, lastUserText) {
         fs.writeFileSync(storePath, JSON.stringify(store, null, 2), 'utf8');
       } catch (_) {}
     }
-    writeArchiveNote(sessionKey, lastUserText);
+    writeArchiveNote(sessionKey, lastUserText, '');
     console.log(`[${PLUGIN_ID}] filesystem emergency reset key=${sessionKey} sid=${sid}`);
     return true;
   } catch (e) {
@@ -388,13 +796,13 @@ async function performSilentRetry(api, sessionKey, lastUserText, via) {
     console.log(
       `[${PLUGIN_ID}] silent-retry start via=${via} key=${sessionKey} lastUserChars=${lastUserText.length}`
     );
-    await gatewayRequest(api, 'chat.send', {
+    await gatewayRequest(api, 'chat.send', buildChatSendParams(
       sessionKey,
-      message: String(lastUserText).trim(),
-      idempotencyKey: crypto.randomUUID(),
-    });
+      String(lastUserText).trim(),
+      readSessionDeliveryRoute(sessionKey)
+    ));
     lastRolloverAt.set(sessionKey, Date.now());
-    console.log(`[${PLUGIN_ID}] silent-retry done key=${sessionKey}`);
+    console.log(`[${PLUGIN_ID}] silent-retry done key=${sessionKey} deliver=true`);
     return true;
   } catch (e) {
     lastRolloverAt.delete(sessionKey);
@@ -476,7 +884,7 @@ function register(api) {
   try {
     api.logger?.info?.(`[${PLUGIN_ID}] loaded`);
   } catch (_) {}
-  console.log(`[${PLUGIN_ID}] loaded (overflow → archive+resume; rate-limit → silent retry; log-bridge)`);
+  console.log(`[${PLUGIN_ID}] loaded (overflow/ordering → archive+resume deliver; rate-limit → silent retry; log-bridge)`);
 
   // 主进程日志桥：compaction-diag 只出现在 stdout 时也能静默续聊
   try {
@@ -532,23 +940,31 @@ function register(api) {
     try {
       const text = extractText(event);
       if (!isUserFacingSystemErrorText(text)) return;
-      const key = resolveSessionKeyWithFallback(event, ctx);
+      let key = resolveSessionKeyWithFallback(event, ctx);
+      if (!key) key = resolveFreshestInteractiveSessionKey();
       const lastUser = key ? pickLastUserText(key, event, ctx) : '';
       if (isOverflowRecoveryText(text)) {
-        if (key) scheduleRollover(api, key, lastUser, 'message_sending');
-        console.log(`[${PLUGIN_ID}] cancel overflow recovery banner`);
-        return {
-          cancel: true,
-          cancelReason: 'session-overflow-rollover:auto-archive-and-resume',
-        };
+        // 只在能实际调度 rollover 时才静默；否则放行，避免「拦了却不修」导致通讯哑火
+        if (key) {
+          scheduleRollover(api, key, lastUser, 'message_sending');
+          console.log(`[${PLUGIN_ID}] cancel overflow/ordering recovery banner key=${key}`);
+          return {
+            cancel: true,
+            cancelReason: 'session-overflow-rollover:auto-archive-and-resume',
+          };
+        }
+        console.warn(`[${PLUGIN_ID}] overflow banner without sessionKey — not cancelling`);
+        return;
       }
       // 限流/过载横幅：对用户静默，并在后台重提原问题（不重置会话）
-      if (key && lastUser) scheduleSilentRetry(api, key, lastUser, 'message_sending');
-      console.log(`[${PLUGIN_ID}] cancel rate-limit banner`);
-      return {
-        cancel: true,
-        cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
-      };
+      if (key && lastUser) {
+        scheduleSilentRetry(api, key, lastUser, 'message_sending');
+        console.log(`[${PLUGIN_ID}] cancel rate-limit banner key=${key}`);
+        return {
+          cancel: true,
+          cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
+        };
+      }
     } catch (e) {
       console.warn(`[${PLUGIN_ID}] message_sending error:`, e && e.message);
     }
@@ -559,20 +975,26 @@ function register(api) {
       try {
         const text = extractText(event?.payload) || extractText(event);
         if (!isUserFacingSystemErrorText(text)) return;
-        const key = resolveSessionKeyWithFallback(event, ctx);
+        let key = resolveSessionKeyWithFallback(event, ctx);
+        if (!key) key = resolveFreshestInteractiveSessionKey();
         const lastUser = key ? pickLastUserText(key, event, ctx) : '';
         if (isOverflowRecoveryText(text)) {
-          if (key) scheduleRollover(api, key, lastUser, 'reply_payload_sending');
+          if (key) {
+            scheduleRollover(api, key, lastUser, 'reply_payload_sending');
+            return {
+              cancel: true,
+              cancelReason: 'session-overflow-rollover:auto-archive-and-resume',
+            };
+          }
+          return;
+        }
+        if (key && lastUser) {
+          scheduleSilentRetry(api, key, lastUser, 'reply_payload_sending');
           return {
             cancel: true,
-            cancelReason: 'session-overflow-rollover:auto-archive-and-resume',
+            cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
           };
         }
-        if (key && lastUser) scheduleSilentRetry(api, key, lastUser, 'reply_payload_sending');
-        return {
-          cancel: true,
-          cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
-        };
       } catch (_) {}
     });
   } catch (_) {}
@@ -582,11 +1004,21 @@ const pluginEntry = {
   id: PLUGIN_ID,
   name: 'Session Overflow Rollover',
   description:
-    'On context overflow / compaction failure: archive session, start fresh, and resume the last user question',
+    'On context overflow / ordering conflict: archive session, persist continuity into MEMORY.md, start fresh, and resume with context (deliver to channel)',
   register,
 };
 
 export default pluginEntry;
+export {
+  isOverflowRecoveryText,
+  looksLikeOverflowFailure,
+  buildContinuitySummary,
+  buildContinuePrompt,
+  upsertActiveSessionContext,
+  readSessionDeliveryRoute,
+  buildChatSendParams,
+  writeReadableSessionArchive,
+};
 export function activate(api) {
   return register(api);
 }

@@ -88,7 +88,11 @@
           <nav class="sidebar-nav">
             <div class="nav-item active" data-tab="console-view" id="tour-nav-console">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
-              <span data-i18n="nav.console">控制台</span>
+              <span data-i18n="nav.console">Agent</span>
+            </div>
+            <div class="nav-item" data-tab="acceleration-view" id="btn-nav-acceleration">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z"/></svg>
+              <span data-i18n="nav.acceleration_channel">Clash</span>
             </div>
             <div class="nav-item" data-tab="data-center-view" id="btn-nav-data-center">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -120,10 +124,6 @@
                 <circle cx="12" cy="7" r="4"/>
               </svg>
               <span data-i18n="nav.roles">模型角色</span>
-            </div>
-            <div class="nav-item" data-tab="acceleration-view" id="btn-nav-acceleration">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z"/></svg>
-              <span data-i18n="nav.acceleration_channel">加速通道</span>
             </div>
             <div class="nav-item" data-tab="openclaw-panel-view" id="btn-nav-openclaw-web">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -223,7 +223,7 @@
           <div class="view-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%; box-sizing: border-box;">
             <div style="flex: 1; display: flex; flex-direction: column; margin-right: 0;">
               <div style="display: flex; align-items: center; gap: 16px;">
-                <h2 style="margin: 0;" data-i18n="console.title">网关控制台</h2>
+                <h2 style="margin: 0;" data-i18n="console.title">Agent</h2>
               </div>
               <div style="margin-top: 6px; width: 100%;">
                 <p style="margin: 0; line-height: 1.2;" data-i18n="console.desc">实时监控本地 AI 助手的消息处理流与日志输出</p>
@@ -600,9 +600,14 @@
               <span style="font-size: 12px; color: var(--text-secondary);" data-i18n="chat.label.current_role">当前角色:</span>
               <span id="chat-active-role-badge" class="chat-active-role-badge" title="">--</span>
               <span style="font-size: 12px; color: var(--text-secondary);" data-i18n="chat.label.current_model">当前模型:</span>
-              <select id="chat-model-select" style="background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 8px; height: 32px; font-size: 12px; color: var(--text-primary) !important; padding: 0 8px; outline: none; min-width: 180px; transition: all 0.2s ease;">
-                <option value="">载入中...</option>
-              </select>
+              <div id="chat-model-picker" class="chat-model-picker">
+                <input id="chat-model-search" class="chat-model-search" type="text" autocomplete="off" spellcheck="false"
+                  data-i18n-placeholder="chat.model.search_placeholder"
+                  placeholder="搜索模型…"
+                  title="输入关键字筛选模型，例如 gemini / ollama / flash">
+                <svg class="chat-model-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <div id="chat-model-dropdown" class="chat-model-dropdown" role="listbox" hidden></div>
+              </div>
               <button id="btn-refresh-chat-models" title="重新获取可用模型" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               </button>
@@ -1497,7 +1502,7 @@
         <section class="tab-pane" id="acceleration-view">
           <div class="view-header acc-header">
             <div>
-              <h2 style="margin: 0;" data-i18n="acc.title">加速通道</h2>
+              <h2 style="margin: 0;" data-i18n="acc.title">Clash</h2>
               <p style="margin: 4px 0 0 0;" data-i18n="acc.desc">内置 mihomo（ClashMeta）核心，按步骤添加配置、选择节点并启用加速。</p>
             </div>
             <div class="acc-header-actions">
@@ -1844,6 +1849,9 @@
                 <button type="button" class="acc-country-pill" data-country="us" data-i18n="acc.proxy.country_us">🇺🇸 美国</button>
                 <button type="button" class="acc-country-pill" data-country="tw" data-i18n="acc.proxy.country_tw">🇹🇼 台湾</button>
                 <button type="button" class="acc-country-pill" data-country="other" data-i18n="acc.proxy.country_other">其他</button>
+                <span class="acc-filter-sep" aria-hidden="true"></span>
+                <button type="button" class="acc-country-pill acc-latency-pill" data-latency="available" data-i18n="acc.proxy.latency_available">可用节点</button>
+                <button type="button" class="acc-country-pill acc-latency-pill" data-latency="timeout" data-i18n="acc.proxy.latency_timeout">超时节点</button>
               </div>
               <div id="acc-node-toolbar" class="acc-node-toolbar" style="flex-shrink: 0;">
                 <input id="acc-node-search" class="acc-input acc-input-grow" type="search" placeholder="搜索节点名称、地区或协议" data-i18n-placeholder="acc.proxy.search_placeholder">
@@ -2201,6 +2209,9 @@
     </div>
     <button type="button" id="plugin-async-overlay-cancel" style="margin-top: 4px; padding: 8px 20px; font-size: 12px; font-weight: 600; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); cursor: pointer;">取消</button>
   </div>
+
+  <!-- 模型对话：逻辑存储用，绝对不要放进聊天顶栏，否则会被全局 select 样式画成第二个下拉框 -->
+  <select id="chat-model-select" class="chat-model-select-hidden" aria-hidden="true" tabindex="-1" hidden></select>
 
   <script src="node_modules/xterm/lib/xterm.js"></script>
   <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>

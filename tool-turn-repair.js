@@ -548,6 +548,12 @@ function looksLikeToolPairFormatError(errText) {
     if (/\(format\)/i.test(s) && /tool|function|schema|payload/i.test(s)) return true;
     if (/reason[=:\s]+format\b/i.test(s)) return true;
     if (/FailoverError/i.test(s) && /tool payload|schema|function response|\bformat\b|MALFORMED/i.test(s)) return true;
+    // 角色奇偶冲突（Gemini/Anthropic 严格交替）：与 tool 配对断裂同类，需立刻修 transcript
+    if (/roles must alternate/i.test(s)) return true;
+    if (/incorrect role information/i.test(s)) return true;
+    if (/Message ordering conflict/i.test(s)) return true;
+    if (/rejected the conversation state/i.test(s)) return true;
+    if (/invalid_replay_transcript/i.test(s)) return true;
     return false;
 }
 
