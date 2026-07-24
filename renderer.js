@@ -2688,6 +2688,17 @@ function formatLogForUser(text) {
         return `[⚙️ 系统核心] 🛑 Nexora Agent服务已成功停止！`;
     }
 
+    // 意外退出 / 自动拉起（主进程注入的 System 行）
+    if (cleanLine.includes('核心进程意外退出') && cleanLine.includes('自动重启')) {
+        return `[⚙️ 系统核心] ⚠️ 核心进程异常退出，正在自动重新拉起服务…`;
+    }
+    if (cleanLine.includes('核心进程意外退出') && cleanLine.includes('暂停自动重启')) {
+        return `[⚙️ 系统核心] 🛑 短时间内多次异常退出，已暂停自动重启，请手动启动`;
+    }
+    if (cleanLine.includes('核心进程意外退出')) {
+        return `[⚙️ 系统核心] ⚠️ 核心进程异常退出（正在处理）`;
+    }
+
     // 其余的噪音直接过滤
     return null;
 }
@@ -3145,8 +3156,8 @@ function setupIpcListeners() {
         } 
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
-            // 每次网关（重新）进入 running 都清掉活动流里的旧警报，避免修完插件后还看到旧 ParseError
-            if (oldStatus !== 'running' && logTerminal) {
+            // 仅从「已停止」冷启动时清空活动流；starting→running（含崩溃自动拉起）保留诊断信息
+            if (oldStatus === 'stopped' && logTerminal) {
                 logTerminal.innerHTML = '';
                 gatewayLogReadyTail = '';
             }
@@ -10324,8 +10335,11 @@ const OPENCLAW_TRANSPARENT_PANEL_CSS = [
     ':root, html, body, [data-theme], [class*="theme"] { --background: transparent !important; --foreground: #f8fafc !important; --card: transparent !important; --card-foreground: #f8fafc !important; --muted: transparent !important; --muted-foreground: #cbd5e1 !important; --border: rgba(255, 255, 255, 0.15) !important; --input: rgba(255, 255, 255, 0.1) !important; --sidebar-background: rgba(18, 24, 38, 0.85) !important; --sidebar-foreground: #f8fafc !important; --sidebar-primary: #38bdf8 !important; --sidebar-primary-foreground: #f8fafc !important; --sidebar-accent-foreground: #f8fafc !important; --sidebar-muted: #cbd5e1 !important; --sidebar-border: rgba(255, 255, 255, 0.1) !important; --tw-text-opacity: 1 !important; --color-bg-layout: transparent !important; --color-bg-container: transparent !important; --color-fill: transparent !important; --color-fill-secondary: transparent !important; --color-fill-tertiary: transparent !important; --color-fill-quaternary: transparent !important; --color-bg-text-hover: transparent !important; --color-bg-text-active: transparent !important; --color-text: #f8fafc !important; --color-text-secondary: #cbd5e1 !important; --color-text-tertiary: #94a3b8 !important; }',
     '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
     'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="backdrop"], [class*="overlay"], .ant-card-head, .ant-card-head-wrapper, .ant-list-header, .ant-table-thead > tr > th, [class*="header"], [class*="head"], [class*="toolbar"], [class*="title-bar"] { background: transparent !important; background-color: transparent !important; box-shadow: none !important; }',
-    'aside, nav, [class*="bg-sidebar"] { background: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.85)) !important; backdrop-filter: blur(16px) !important; -webkit-backdrop-filter: blur(16px) !important; border-right: 1px solid rgba(255,255,255,0.08) !important; }',
-    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
+    /* 侧栏勿用 backdrop-filter：会形成 containing block，把 position:fixed 的会话菜单困在 overflow:hidden 侧栏里，变成挡住「会话」列表的竖条图标 */
+    'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar { background: var(--bg-panel, rgba(18, 24, 38, 0.92)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.92)) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-right: 1px solid rgba(255,255,255,0.08) !important; }',
+    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
+    '.sidebar-session-menu, .sidebar-customize-menu, .sidebar-session-sort-menu { position: fixed !important; z-index: 5000 !important; background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 32px rgba(0,0,0,0.55) !important; opacity: 1 !important; overflow: visible !important; pointer-events: auto !important; }',
+    '.sidebar-session-menu__item, .sidebar-session-menu__text, .sidebar-customize-menu__item, .sidebar-session-sort-menu__item { color: #f8fafc !important; opacity: 1 !important; }',
     'body { color-scheme: dark !important; }',
     'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: #f8fafc !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
     '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: #cbd5e1 !important; opacity: 1 !important; }',
@@ -10354,7 +10368,7 @@ const OPENCLAW_TRANSPARENT_PANEL_CSS = [
     '.session-row-actions, .session-action { flex-shrink: 0 !important; }',
     '.sidebar-nav, .sidebar-sessions { scrollbar-width: thin !important; }',
     '.sidebar-nav::-webkit-scrollbar, .sidebar-sessions::-webkit-scrollbar { width: 6px !important; }',
-    'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"], body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: #121826 !important; background-color: #121826 !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
+    'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: #121826 !important; background-color: #121826 !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
 ].join('\n');
 
 function syncOpenclawThemeToWebview() {
@@ -10412,16 +10426,33 @@ function syncOpenclawThemeToWebview() {
                     'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar {',
                     '  background: var(--bg-panel, ${bgPanel}) !important;',
                     '  background-color: var(--bg-panel, ${bgPanel}) !important;',
-                    '  backdrop-filter: blur(20px) !important;',
-                    '  -webkit-backdrop-filter: blur(20px) !important;',
+                    '  backdrop-filter: none !important;',
+                    '  -webkit-backdrop-filter: none !important;',
                     '  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;',
                     '  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2) !important;',
                     '}',
-                    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"] {',
+                    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"] {',
                     '  background: var(--bg-panel, ${bgPanel}) !important;',
                     '  background-color: var(--bg-panel, ${bgPanel}) !important;',
                     '  border: 1px solid rgba(255, 255, 255, 0.15) !important;',
                     '  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6) !important;',
+                    '}',
+                    '.sidebar-session-menu, .sidebar-customize-menu, .sidebar-session-sort-menu {',
+                    '  position: fixed !important;',
+                    '  z-index: 5000 !important;',
+                    '  background: #121826 !important;',
+                    '  background-color: #121826 !important;',
+                    '  backdrop-filter: none !important;',
+                    '  -webkit-backdrop-filter: none !important;',
+                    '  border: 1px solid rgba(255, 255, 255, 0.15) !important;',
+                    '  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55) !important;',
+                    '  opacity: 1 !important;',
+                    '  overflow: visible !important;',
+                    '  pointer-events: auto !important;',
+                    '}',
+                    '.sidebar-session-menu__item, .sidebar-session-menu__text, .sidebar-customize-menu__item, .sidebar-session-sort-menu__item {',
+                    '  color: ${textPrimary} !important;',
+                    '  opacity: 1 !important;',
                     '}',
                     'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, [class*="text"], [class*="label"], [class*="title"], [class*="desc"] {',
                     '  color: ${textPrimary} !important;',

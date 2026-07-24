@@ -597,6 +597,11 @@ let gatewayStartInFlight = null;
 let channelBreakerOverrideTimer = null;
 let gatewayHttpReadyTimer = null;
 let gatewayHttpReadyNotified = false;
+/** 意外退出自动拉起：5 分钟内最多 3 次，避免微信发图等硬崩变成连环重启 */
+let gatewayCrashRestartTimer = null;
+let gatewayCrashRestartAt = [];
+const GATEWAY_CRASH_RESTART_WINDOW_MS = 5 * 60 * 1000;
+const GATEWAY_CRASH_RESTART_MAX = 3;
 let isQuitting = false;
 let isMaximizedState = false;
 let normalBounds = null;
@@ -608,6 +613,71 @@ function stopGatewayHttpReadyWatch() {
         clearInterval(gatewayHttpReadyTimer);
         gatewayHttpReadyTimer = null;
     }
+}
+
+function clearGatewayCrashRestartSchedule() {
+    if (gatewayCrashRestartTimer) {
+        clearTimeout(gatewayCrashRestartTimer);
+        gatewayCrashRestartTimer = null;
+    }
+}
+
+function resetGatewayCrashRestartBudget() {
+    clearGatewayCrashRestartSchedule();
+    gatewayCrashRestartAt = [];
+}
+
+/**
+ * 网关子进程意外退出后自动重拉（端口已空闲的情况）。
+ * 返回 true 表示已安排重启；false 表示放弃（超限或正在退出）。
+ */
+function scheduleGatewayCrashRestart(exitCode) {
+    if (isQuitting) return false;
+    clearGatewayCrashRestartSchedule();
+    const now = Date.now();
+    gatewayCrashRestartAt = gatewayCrashRestartAt.filter((t) => now - t < GATEWAY_CRASH_RESTART_WINDOW_MS);
+    if (gatewayCrashRestartAt.length >= GATEWAY_CRASH_RESTART_MAX) {
+        if (mainWindow) {
+            mainWindow.webContents.send(
+                'gateway-log',
+                `\n[System] 核心进程意外退出（码 ${exitCode}）。5 分钟内已自动拉起 ${GATEWAY_CRASH_RESTART_MAX} 次仍失败，已暂停自动重启。请点击左上角手动启动；若发微信图片后必现，请先改回纯文字回复再观察。\n`
+            );
+            mainWindow.webContents.send('gateway-status', 'stopped');
+            try {
+                showNotification(
+                    'Nexora Agent 已停止',
+                    '短时间内多次异常退出，已暂停自动重启，请手动启动。'
+                );
+            } catch (e) {}
+        }
+        return false;
+    }
+    gatewayCrashRestartAt.push(now);
+    const attempt = gatewayCrashRestartAt.length;
+    const delayMs = Math.min(8000, 1000 * attempt);
+    if (mainWindow) {
+        mainWindow.webContents.send(
+            'gateway-log',
+            `\n[System] 核心进程意外退出（码 ${exitCode}），${Math.round(delayMs / 1000)}s 后自动重启（${attempt}/${GATEWAY_CRASH_RESTART_MAX}）…\n`
+        );
+        mainWindow.webContents.send('gateway-status', 'starting');
+    }
+    gatewayCrashRestartTimer = setTimeout(() => {
+        gatewayCrashRestartTimer = null;
+        if (isQuitting || gatewayProcess || gatewayStartInFlight) return;
+        try {
+            startGatewayProcess();
+        } catch (e) {
+            if (mainWindow) {
+                mainWindow.webContents.send(
+                    'gateway-log',
+                    `[System] 自动重启失败: ${(e && e.message) || e}\n`
+                );
+                mainWindow.webContents.send('gateway-status', 'stopped');
+            }
+        }
+    }, delayMs);
+    return true;
 }
 
 function probeGatewayPort(port, timeoutMs = 500) {
@@ -3667,6 +3737,7 @@ function clearGatewayRuntimeLogsForFreshStart() {
 }
 
 async function stopGatewayProcess() {
+    resetGatewayCrashRestartBudget();
     if (gatewayProcess) {
         gatewayProcess.isIntentionallyStopped = true; // 标记为主动停止，避免触发意外退出警报
         const pid = gatewayProcess.pid;
@@ -3741,6 +3812,8 @@ async function startGatewayProcess() {
         }
         if (gatewayStartInFlight) return gatewayStartInFlight;
 
+        // 取消尚未触发的崩溃自动重启，避免与手动/回收启动叠车
+        clearGatewayCrashRestartSchedule();
         gatewayStartInFlight = (async () => {
         try {
         const preferredGatewayPort = resolveConfiguredGatewayPort();
@@ -4191,10 +4264,17 @@ async function startGatewayProcess() {
                     return;
                 }
                 global.__gatewayReclaimAttempts = 0;
-                if (mainWindow) {
-                    mainWindow.webContents.send('gateway-status', 'stopped');
-                    if (!wasIntentionallyStopped) {
-                        console.error(`[System] Nexora Agent核心进程意外退出，退出码: ${code}`);
+                if (wasIntentionallyStopped || isQuitting) {
+                    if (mainWindow) {
+                        mainWindow.webContents.send('gateway-status', 'stopped');
+                    }
+                    return;
+                }
+                console.error(`[System] Nexora Agent核心进程意外退出，退出码: ${code}`);
+                // 端口已空闲：自动拉起（覆盖微信发图等硬崩场景，避免界面干等「已停止」）
+                if (!scheduleGatewayCrashRestart(code)) {
+                    if (mainWindow) {
+                        mainWindow.webContents.send('gateway-status', 'stopped');
                     }
                 }
             });
