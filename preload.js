@@ -158,6 +158,7 @@ contextBridge.exposeInMainWorld('api', {
         setListenStatus: (status) => ipcRenderer.invoke('voice-set-listen-status', status),
         getAsrState: () => ipcRenderer.invoke('voice-get-asr-state'),
         downloadAsrModel: () => ipcRenderer.invoke('voice-download-asr-model'),
+        importAsrModel: () => ipcRenderer.invoke('voice-import-asr-model'),
         recognizeOffline: (samples) => ipcRenderer.invoke('voice-recognize-offline', samples),
         onStatus: (callback) => {
             const listener = (event, data) => callback(data);

@@ -32,8 +32,11 @@
     "probe": "openclaw mcp probe",
     "logs": "type logs\\openclaw-%date%.log",
     "app:start": "electron .",
-    "preapp:dist": "node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
+    "preapp:dist": "node scripts/ensure-asr-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "app:dist": "electron-builder --windows nsis",
+    "postapp:dist": "node scripts/copy-asr-to-dist.js",
+    "asr:ensure": "node scripts/ensure-asr-release-asset.js",
+    "asr:copy-dist": "node scripts/copy-asr-to-dist.js",
     "app:pack": "electron-packager . \"Nexora Agent\" --platform=win32 --arch=x64 --out=dist --overwrite",
     "pack:runtime": "node scripts/pack-gateway-runtime.js",
     "data-center:install": "npm --prefix data-center install --omit=dev"

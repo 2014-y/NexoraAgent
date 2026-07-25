@@ -1052,10 +1052,20 @@
                 <option value="6">极快</option>
               </select>
             </div>
+
+            <div class="voice-asr-row" id="asr-model-row">
+              <span class="asr-model-label">离线语音识别（约 220MB）</span>
+              <span class="asr-model-status" id="asr-model-status">检测中…</span>
+              <button type="button" class="btn-primary" id="btn-asr-download" style="height: 32px; padding: 0 14px; font-size: 12px;">在线下载</button>
+              <button type="button" class="btn-secondary" id="btn-asr-import" style="height: 32px; padding: 0 14px; font-size: 12px;">本地导入</button>
+              <div class="asr-progress-container" id="asr-progress-container" style="display: none;">
+                <div id="asr-progress-bar"></div>
+              </div>
+            </div>
             </div>
 
           <div class="voice-notice" data-i18n="voice.notice">
-            说明：开源仓库没有官方 Jarvis 版权音色。最接近的是英式男声（如 Piper Alan）。未下载 Piper 模型时，使用 Windows 本地语音引擎离线朗读。关闭总开关即释放麦克风与播放队列。
+            说明：语音对话/唤醒需「离线语音识别」模型（国内网络下在线识别常失败）。朗读音色可单独下载；关闭总开关即释放麦克风与播放队列。
           </div>
 
           <div class="voice-section-header">

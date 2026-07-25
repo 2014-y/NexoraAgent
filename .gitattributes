@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Optional: enable when GitHub LFS quota is available
+# release-assets/asr-models/*.tar.bz2 filter=lfs diff=lfs merge=lfs -text

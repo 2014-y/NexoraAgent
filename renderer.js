@@ -17117,6 +17117,31 @@ function mergeAudioChunks(chunks) {
     return result;
 }
 
+/** Electron/Chrome 常忽略 AudioContext({sampleRate:16000})，必须按实际采样率重采样到 16k */
+function downsamplePcmTo16k(float32, inputSampleRate) {
+    if (!float32 || !float32.length) return float32;
+    const inRate = Number(inputSampleRate) || 16000;
+    if (Math.abs(inRate - 16000) < 1) return float32;
+    const ratio = inRate / 16000;
+    const newLen = Math.max(1, Math.floor(float32.length / ratio));
+    const out = new Float32Array(newLen);
+    for (let i = 0; i < newLen; i++) {
+        const src = i * ratio;
+        const i0 = Math.floor(src);
+        const i1 = Math.min(i0 + 1, float32.length - 1);
+        const t = src - i0;
+        out[i] = float32[i0] * (1 - t) + float32[i1] * t;
+    }
+    return out;
+}
+
+function pcmForLocalAsr(chunks) {
+    const merged = mergeAudioChunks(chunks);
+    if (!merged) return null;
+    const sr = (__localAudioContext && __localAudioContext.sampleRate) || 16000;
+    return downsamplePcmTo16k(merged, sr);
+}
+
 function stopLocalVoiceRecognition() {
     __voiceRecMode = 'off';
     if (__localAudioProcessor) {
@@ -17159,6 +17184,7 @@ function startLocalVoiceRecognition(mode) {
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         __localAudioStream = stream;
+        // 尽量请求 16k；若被浏览器忽略，后面会 downsamplePcmTo16k
         __localAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const source = __localAudioContext.createMediaStreamSource(stream);
         __localAudioProcessor = __localAudioContext.createScriptProcessor(4096, 1, 1);
@@ -17193,7 +17219,7 @@ function startLocalVoiceRecognition(mode) {
                         } else if (Date.now() - __localSilenceStart > 1500) {
                             __localSpeaking = false;
                             __localSilenceStart = null;
-                            const pcmData = mergeAudioChunks(__localAudioChunks);
+                            const pcmData = pcmForLocalAsr(__localAudioChunks);
                             __localAudioChunks = [];
                             if (pcmData && pcmData.length > 3200) {
                                 triggerLocalAsr(pcmData);
@@ -17225,7 +17251,7 @@ function startLocalVoiceRecognition(mode) {
                         } else if (Date.now() - __localSilenceStart > 1200) {
                             __localSpeaking = false;
                             __localSilenceStart = null;
-                            const pcmData = mergeAudioChunks(__localAudioChunks);
+                            const pcmData = pcmForLocalAsr(__localAudioChunks);
                             __localAudioChunks = [];
                             if (pcmData && pcmData.length > 3200) {
                                 triggerLocalWakeAsr(pcmData);
@@ -17244,8 +17270,12 @@ function startLocalVoiceRecognition(mode) {
             }
         };
 
+        // 静音接到 destination，仅驱动 ScriptProcessor 回调，避免喇叭回灌
+        const muteGain = __localAudioContext.createGain();
+        muteGain.gain.value = 0;
         source.connect(__localAudioProcessor);
-        __localAudioProcessor.connect(__localAudioContext.destination);
+        __localAudioProcessor.connect(muteGain);
+        muteGain.connect(__localAudioContext.destination);
 
         if (window.api && window.api.voice) {
             window.api.voice.setListenStatus(mode === 'wake' ? 'listening_wake' : 'listening');
@@ -17348,6 +17378,10 @@ function startVoiceRecognition(mode) {
         startLocalVoiceRecognition(mode);
         return;
     }
+    // 未装离线模型：在线识别在国内常失败，先提示下载，仍尝试在线兜底
+    if (mode === 'chat' || mode === 'wake') {
+        showToast('尚未安装离线识别模型，语音对话可能识别不到。请点击「下载离线识别模型」');
+    }
     stopLocalVoiceRecognition();
     stopVoiceRecognition();
     const rec = createSpeechRecognition();
@@ -17402,7 +17436,11 @@ function startVoiceRecognition(mode) {
         if (err === 'not-allowed' || err === 'service-not-allowed') {
             showToast(voiceT('voice.toast.mic_denied', '无法访问麦克风，请在系统设置中允许'));
         } else if (err === 'network') {
-            showToast(voiceT('voice.toast.speech_network_error', '语音识别网络连接失败，请确保代理或全局加速已开启'));
+            showToast('在线语音识别不可用。请先下载「离线语音识别」模型（约 220MB），下载后即可本地听懂说话');
+            try {
+                const btn = document.getElementById('btn-asr-download');
+                if (btn && btn.style.display !== 'none') btn.focus();
+            } catch (e) {}
         } else {
             showToast(voiceT('voice.toast.speech_error', `语音识别出现异常: ${err}`));
         }
@@ -17479,7 +17517,10 @@ function syncVoiceListeningFromSettings(settings) {
     __voiceDesiredListenMode = desired;
 
     if (desired === 'off') {
-        if (__voiceRecMode !== 'off') stopVoiceRecognition();
+        if (__voiceRecMode !== 'off') {
+            stopVoiceRecognition();
+            stopLocalVoiceRecognition();
+        }
         if (window.api && window.api.voice) window.api.voice.setListenStatus('idle');
         return;
     }
@@ -17613,25 +17654,29 @@ let __asrModelState = { installed: false, downloading: false, percent: 0 };
 function updateAsrUi() {
     const statusText = document.getElementById('asr-model-status');
     const downloadBtn = document.getElementById('btn-asr-download');
+    const importBtn = document.getElementById('btn-asr-import');
     const progressContainer = document.getElementById('asr-progress-container');
     const progressBar = document.getElementById('asr-progress-bar');
     if (!statusText || !downloadBtn || !progressContainer || !progressBar) return;
 
     if (__asrModelState.installed) {
-        statusText.textContent = '已下载 (离线识别就绪)';
+        statusText.textContent = '已就绪 (离线识别可用)';
         statusText.style.color = '#52c41a';
         downloadBtn.style.display = 'none';
+        if (importBtn) importBtn.style.display = 'inline-block';
         progressContainer.style.display = 'none';
     } else if (__asrModelState.downloading) {
         statusText.textContent = `下载中... ${__asrModelState.percent}%`;
         statusText.style.color = 'var(--accent-color)';
         downloadBtn.style.display = 'none';
+        if (importBtn) importBtn.style.display = 'none';
         progressContainer.style.display = 'block';
         progressBar.style.width = `${__asrModelState.percent}%`;
     } else {
-        statusText.textContent = '未下载 (离线识别不可用，采用在线识别)';
+        statusText.textContent = '未安装 (语音对话需先下载或导入)';
         statusText.style.color = 'var(--text-secondary)';
         downloadBtn.style.display = 'inline-block';
+        if (importBtn) importBtn.style.display = 'inline-block';
         progressContainer.style.display = 'none';
     }
 }
@@ -17657,13 +17702,49 @@ async function initVoiceModule() {
             updateAsrUi();
         });
         const downloadBtn = document.getElementById('btn-asr-download');
+        const importBtn = document.getElementById('btn-asr-import');
+        const afterAsrReady = async () => {
+            __asrModelState = { installed: true, downloading: false, percent: 100 };
+            updateAsrUi();
+            __voiceDesiredListenMode = null;
+            try {
+                syncVoiceListeningFromSettings((__voiceState && __voiceState.settings) || {});
+            } catch (e) {}
+        };
         if (downloadBtn) {
             downloadBtn.onclick = async () => {
-                const res = await window.api.voice.downloadAsrModel();
-                if (!res || !res.success) {
-                    showToast('下载离线语音识别模型失败: ' + (res ? res.error : '未知错误'));
-                } else {
-                    showToast('离线语音识别模型下载成功！已自动切换为本地离线语音识别');
+                downloadBtn.disabled = true;
+                if (importBtn) importBtn.disabled = true;
+                try {
+                    const res = await window.api.voice.downloadAsrModel();
+                    if (!res || !res.success) {
+                        showToast('在线下载失败: ' + ((res && res.error) || '未知错误'));
+                    } else {
+                        showToast('离线识别模型下载成功');
+                        await afterAsrReady();
+                    }
+                } finally {
+                    downloadBtn.disabled = false;
+                    if (importBtn) importBtn.disabled = false;
+                }
+            };
+        }
+        if (importBtn) {
+            importBtn.onclick = async () => {
+                importBtn.disabled = true;
+                if (downloadBtn) downloadBtn.disabled = true;
+                try {
+                    const res = await window.api.voice.importAsrModel();
+                    if (res && res.canceled) return;
+                    if (!res || !res.success) {
+                        showToast('本地导入失败: ' + ((res && res.error) || '未知错误'));
+                    } else {
+                        showToast('离线识别模型已导入，可开始语音对话');
+                        await afterAsrReady();
+                    }
+                } finally {
+                    importBtn.disabled = false;
+                    if (downloadBtn) downloadBtn.disabled = false;
                 }
             };
         }

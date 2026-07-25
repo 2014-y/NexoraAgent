@@ -5866,6 +5866,43 @@ ipcMain.handle('voice-download-asr-model', async () => {
     }
 });
 
+ipcMain.handle('voice-import-asr-model', async () => {
+    try {
+        const choice = await dialog.showMessageBox({
+            type: 'question',
+            buttons: ['选择压缩包', '选择文件夹', '取消'],
+            defaultId: 0,
+            cancelId: 2,
+            title: '导入离线语音识别',
+            message: '如何导入离线语音识别模型？',
+            detail: '推荐文件：sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2\n也可选择已解压目录（需包含 .onnx 与 tokens.txt）。'
+        });
+        if (choice.response === 2) return { success: false, canceled: true };
+        if (choice.response === 1) {
+            const dirPick = await dialog.showOpenDialog({
+                title: '选择 ASR 模型文件夹',
+                properties: ['openDirectory']
+            });
+            if (dirPick.canceled || !dirPick.filePaths || !dirPick.filePaths.length) {
+                return { success: false, canceled: true };
+            }
+            return await voiceRuntime.importAsrModel(dirPick.filePaths[0]);
+        }
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            title: '选择 ASR 模型压缩包',
+            properties: ['openFile'],
+            filters: [
+                { name: 'Sherpa-ONNX ASR Pack', extensions: ['bz2', 'zip', 'gz', 'tgz', 'tar'] },
+                { name: 'All Files', extensions: ['*'] }
+            ]
+        });
+        if (canceled || !filePaths || !filePaths.length) return { success: false, canceled: true };
+        return await voiceRuntime.importAsrModel(filePaths[0]);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('voice-recognize-offline', async (event, samples) => {
     try {
         return await voiceRuntime.recognizeOffline(samples);

@@ -77,7 +77,10 @@ function downloadFile(url, destPath, onProgress) {
     return new Promise((resolve, reject) => {
         const file = fs.createWriteStream(destPath);
         const getter = url.startsWith('https') ? https : http;
-        const req = getter.get(url, { headers: { 'User-Agent': 'NexoraAgent/voice' } }, (res) => {
+        const req = getter.get(url, {
+            headers: { 'User-Agent': 'NexoraAgent/voice' },
+            timeout: 120000
+        }, (res) => {
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                 file.close();
                 try { fs.unlinkSync(destPath); } catch (e) {}
@@ -99,10 +102,41 @@ function downloadFile(url, destPath, onProgress) {
             res.pipe(file);
             file.on('finish', () => file.close(() => resolve({ received, total })));
         });
+        req.on('timeout', () => {
+            try { req.destroy(); } catch (e) {}
+            try { file.close(); } catch (e) {}
+            try { fs.unlinkSync(destPath); } catch (e) {}
+            reject(new Error('download timeout'));
+        });
         req.on('error', (err) => {
             try { file.close(); } catch (e) {}
             try { fs.unlinkSync(destPath); } catch (e) {}
             reject(err);
+        });
+    });
+}
+
+const ASR_MODEL_URLS = Object.freeze([
+    'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2',
+    // 国内直连 GitHub 失败时的镜像兜底（可随网络环境变化）
+    'https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2',
+    'https://mirror.ghproxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2'
+]);
+
+function extractArchiveToDir(archivePath, destDir) {
+    return new Promise((resolve, reject) => {
+        fs.mkdirSync(destDir, { recursive: true });
+        const lower = String(archivePath || '').toLowerCase();
+        let args;
+        if (lower.endsWith('.zip') || lower.endsWith('.tar') || lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+            args = ['-xf', archivePath, '-C', destDir];
+        } else {
+            // .tar.bz2 / .bz2
+            args = ['-xjf', archivePath, '-C', destDir];
+        }
+        execFile('tar', args, { windowsHide: true }, (err, stdout, stderr) => {
+            if (err) return reject(new Error(stderr || err.message || 'tar extract failed'));
+            resolve(true);
         });
     });
 }
@@ -232,19 +266,40 @@ class VoiceRuntime extends EventEmitter {
         this._asrDownloadingPercent = 0;
         this._broadcast('voice-asr-state-updated', this.getAsrState());
 
-        const url = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2';
         const archive = path.join(this.tmpDir, 'asr-paraformer-zh.tar.bz2');
         const destDir = this.asrModelDir;
+        let lastError = null;
 
         try {
             fs.mkdirSync(this.tmpDir, { recursive: true });
-            await downloadFile(url, archive, (percent) => {
-                this._asrDownloadingPercent = percent;
-                this._broadcast('voice-asr-state-updated', this.getAsrState());
-            });
+            for (let i = 0; i < ASR_MODEL_URLS.length; i++) {
+                const url = ASR_MODEL_URLS[i];
+                try {
+                    try { fs.unlinkSync(archive); } catch (e) {}
+                    await downloadFile(url, archive, (percent) => {
+                        this._asrDownloadingPercent = percent;
+                        this._broadcast('voice-asr-state-updated', this.getAsrState());
+                    });
+                    lastError = null;
+                    break;
+                } catch (e) {
+                    lastError = e;
+                    console.warn('[VoiceRuntime] ASR download failed via', url, e && e.message);
+                }
+            }
+            if (lastError) throw lastError;
+
+            try {
+                if (fs.existsSync(destDir)) fs.rmSync(destDir, { recursive: true, force: true });
+            } catch (e) {}
             fs.mkdirSync(destDir, { recursive: true });
-            await extractTarBz2(archive, destDir);
+            await extractArchiveToDir(archive, destDir);
             try { fs.unlinkSync(archive); } catch (e) {}
+
+            if (!this._findAsrModelFilesInDir(destDir)) {
+                return { success: false, error: '下载完成但未找到有效模型（需含 .onnx 与 tokens.txt）' };
+            }
+            this._asrRecognizer = null;
             this._asrDownloadingPercent = null;
             this._broadcast('voice-asr-state-updated', this.getAsrState());
             return { success: true };
@@ -252,6 +307,54 @@ class VoiceRuntime extends EventEmitter {
             this._asrDownloadingPercent = null;
             try { fs.unlinkSync(archive); } catch (ex) {}
             this._broadcast('voice-asr-state-updated', this.getAsrState());
+            return {
+                success: false,
+                error: (e.message || String(e)) + '。可改用「本地导入」选择已下载的 tar.bz2 / zip。'
+            };
+        }
+    }
+
+    /**
+     * 本地导入离线 ASR：支持 tar.bz2 / zip / tar.gz，或已解压目录（含 .onnx + tokens.txt）
+     */
+    async importAsrModel(selectedPath) {
+        try {
+            if (!selectedPath || !fs.existsSync(selectedPath)) {
+                return { success: false, error: '未选择有效文件或目录' };
+            }
+            const destDir = this.asrModelDir;
+            const st = fs.statSync(selectedPath);
+            const staging = path.join(this.tmpDir, 'asr-import-' + Date.now());
+            try {
+                if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+            } catch (e) {}
+            fs.mkdirSync(staging, { recursive: true });
+
+            if (st.isDirectory()) {
+                fs.cpSync(selectedPath, staging, { recursive: true });
+            } else {
+                await extractArchiveToDir(selectedPath, staging);
+            }
+
+            const found = this._findAsrModelFilesInDir(staging);
+            if (!found) {
+                try { fs.rmSync(staging, { recursive: true, force: true }); } catch (e) {}
+                return {
+                    success: false,
+                    error: '未找到有效 ASR 模型。请导入 sherpa-onnx-paraformer-zh 压缩包，或包含 .onnx 与 tokens.txt 的目录。'
+                };
+            }
+
+            try {
+                if (fs.existsSync(destDir)) fs.rmSync(destDir, { recursive: true, force: true });
+            } catch (e) {}
+            fs.mkdirSync(path.dirname(destDir), { recursive: true });
+            fs.renameSync(staging, destDir);
+
+            this._asrRecognizer = null;
+            this._broadcast('voice-asr-state-updated', this.getAsrState());
+            return { success: true };
+        } catch (e) {
             return { success: false, error: e.message || String(e) };
         }
     }

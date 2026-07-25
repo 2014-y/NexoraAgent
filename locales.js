@@ -78,7 +78,7 @@ window.LOCALES = {
 
     'voice.title': '语音管理',
     'voice.desc': '本地离线语音：渠道 AI 回复朗读、唤醒倾听、语音对话；全部可开关，默认关闭以节省性能',
-    'voice.notice': '专属语音模式：当前系统已配置为专属 Nexora Agent 音色，支持中英双语混合无缝朗读。',
+    'voice.notice': '语音对话/唤醒需要先下载「离线语音识别」模型（约 220MB）；国内网络下在线识别常失败。朗读音色可单独下载。关闭总开关即释放麦克风与播放队列。',
     'voice.section.jarvis': '接近贾维斯风格（英文）',
     'voice.section.zh': '中文离线音色（推荐给内置角色）',
     'voice.section.role_bind': '角色音色绑定',
@@ -1021,7 +1021,7 @@ window.LOCALES = {
 
     'voice.title': 'Voice Management',
     'voice.desc': 'Offline local voice: channel reply readout, wake listening, voice chat. All toggles default off for performance.',
-    'voice.notice': 'Male-only mode: Chaowen is the default Chinese voice; Alan, Northern and Joe are available for English. Undownloaded voices will not fall back to Windows female speech.',
+    'voice.notice': 'Voice chat/wake needs the offline ASR model (~220MB) first; online recognition often fails without a proxy. TTS voice packs download separately. Turn off the master switch to release the mic.',
     'voice.section.jarvis': 'Jarvis-like (English)',
     'voice.section.zh': 'Chinese offline voices (for built-in roles)',
     'voice.section.role_bind': 'Role voice binding',
@@ -1963,7 +1963,7 @@ window.LOCALES = {
 
     'voice.title': '語音管理',
     'voice.desc': '本地離線語音：渠道 AI 回覆朗讀、喚醒傾聽、語音對話；全部可開關，預設關閉以節省效能',
-    'voice.notice': '純男聲模式：中文預設使用超文，英文可選 Alan、Northern 或 Joe。未下載的音色不會回退到 Windows 女聲，請先下載後試聽。',
+    'voice.notice': '語音對話/喚醒需先下載「離線語音識別」模型（約 220MB）；國內網路下線上識別常失敗。朗讀音色可單獨下載。關閉總開關即釋放麥克風與播放佇列。',
     'voice.section.jarvis': '接近賈維斯風格（英文）',
     'voice.section.zh': '中文離線音色（推薦給內建角色）',
     'voice.section.role_bind': '角色音色綁定',
