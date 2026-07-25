@@ -14,7 +14,7 @@
 
 ### 🌌 Autonomous, Self-Healing & Distributed Local AI Intelligence Matrix
 
-**连接大模型与全渠道社交应用（微信/飞书/QQ）的本地离线 AI 自动化中枢**
+**贯通大模型生态与全渠道社交终端的零信任本地主权 AI 自动化中枢**
 
 *Engineered for Absolute Privacy. Powered by Local Intelligence. Driven by Zero-Trust Architecture.*
 
