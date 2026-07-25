@@ -44,6 +44,20 @@ contextBridge.exposeInMainWorld('api', {
     probePlugin: (pluginId) => ipcRenderer.invoke('plugin-probe', pluginId),
     savePluginCredentials: (payload) => ipcRenderer.invoke('plugin-save-credentials', payload),
     promptPluginCredentials: (pluginId) => ipcRenderer.invoke('plugin-prompt-credentials', pluginId),
+
+    // 技能中心
+    skillsList: () => ipcRenderer.invoke('skills-list'),
+    skillsRead: (name) => ipcRenderer.invoke('skills-read', name),
+    skillsSetEnabled: (payload) => ipcRenderer.invoke('skills-set-enabled', payload),
+    skillsDelete: (name) => ipcRenderer.invoke('skills-delete', name),
+    skillsOpenFolder: (name) => ipcRenderer.invoke('skills-open-folder', name),
+    skillsProposalsList: (payload) => ipcRenderer.invoke('skills-proposals-list', payload || {}),
+    skillsProposalsInspect: (id) => ipcRenderer.invoke('skills-proposals-inspect', id),
+    skillsProposalsApply: (id) => ipcRenderer.invoke('skills-proposals-apply', id),
+    skillsProposalsReject: (payload) => ipcRenderer.invoke('skills-proposals-reject', payload || {}),
+    skillsProposalsQuarantine: (payload) => ipcRenderer.invoke('skills-proposals-quarantine', payload || {}),
+    skillsClawhubSearch: (payload) => ipcRenderer.invoke('skills-clawhub-search', payload || {}),
+    skillsClawhubInstall: (payload) => ipcRenderer.invoke('skills-clawhub-install', payload || {}),
     
     // 开机自启 / 静默启动
     getAutoStart: () => ipcRenderer.invoke('autostart-get'),

@@ -142,6 +142,8 @@
       "role-config.js",
       "vision-model-config.js",
       "voice-runtime.js",
+      "skill-center.js",
+      "overflow-rollover-trigger.js",
       "tts-worker.js",
       "runtime-pack-manifest.js",
       "patch_gateway.js",

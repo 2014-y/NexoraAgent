@@ -1,0 +1,27 @@
+{
+  "id": "image-generator",
+  "name": "Image Generator",
+  "description": "Generate images via agnes-ai image API with key rotation.",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "draw_picture"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否启用该扩展插件"
+      }
+    }
+  }
+}

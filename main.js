@@ -51,6 +51,33 @@ const {
 const acceleration = require('./acceleration');
 const roleConfig = require('./role-config');
 const { voiceRuntime } = require('./voice-runtime');
+const { createSkillCenter } = require('./skill-center');
+
+/** 技能中心（延迟绑定 CONFIG_DIR，避免启动期 TDZ） */
+let skillCenterApi = null;
+function getSkillCenter() {
+    if (skillCenterApi) return skillCenterApi;
+    skillCenterApi = createSkillCenter({
+        getConfigDir: () => CONFIG_DIR,
+        getConfigPath: () => CONFIG_PATH,
+        resolveNode: () => getAvailableNodePath() || 'node',
+        resolveOpenClawCli: () => {
+            const roots = [
+                getGatewayRuntimeRoot(app),
+                __dirname,
+                process.env.LOCALAPPDATA
+                    ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent', 'gateway-runtime')
+                    : null
+            ].filter(Boolean);
+            for (const root of roots) {
+                const p = path.join(root, 'node_modules', 'openclaw', 'openclaw.mjs');
+                if (fs.existsSync(p)) return p;
+            }
+            return null;
+        }
+    });
+    return skillCenterApi;
+}
 
 let hardenGatewayBootAgainstPluginNpm = () => ({ notes: ['harden-unavailable'], configChanged: false });
 let softenOpenClawStartupMigrationGuard = () => ({ ok: false, reason: 'harden-unavailable' });
@@ -766,7 +793,123 @@ function normalizeWebToolsConfig(config) {
     return changed;
 }
 
-function stripNonSchemaOpenClawConfig(config) {
+function readProviderUiMetaFile() {
+    let meta = {};
+    try {
+        const p = path.join(CONFIG_DIR, PROVIDER_UI_META_FILE);
+        if (fs.existsSync(p)) {
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
+            if (raw && typeof raw === 'object') meta = { ...raw };
+        }
+    } catch (e) {}
+    try {
+        const legacyPath = path.join(CONFIG_DIR, 'provider-labels.json');
+        if (fs.existsSync(legacyPath)) {
+            const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8').replace(/^\uFEFF/, ''));
+            if (legacy && typeof legacy === 'object') {
+                for (const [k, v] of Object.entries(legacy)) {
+                    const label = typeof v === 'string' ? v.trim() : String((v && v.label) || '').trim();
+                    if (!label) continue;
+                    meta[k] = { ...(meta[k] || {}), label };
+                }
+            }
+        }
+    } catch (e) {}
+    return meta;
+}
+
+function persistProviderUiMeta(meta) {
+    try {
+        fs.mkdirSync(CONFIG_DIR, { recursive: true });
+        const out = meta && typeof meta === 'object' ? meta : {};
+        fs.writeFileSync(
+            path.join(CONFIG_DIR, PROVIDER_UI_META_FILE),
+            JSON.stringify(out, null, 2),
+            'utf8'
+        );
+    } catch (e) {
+        console.warn('[ProviderUiMeta] persist failed:', e.message);
+    }
+}
+
+/**
+ * 抽出并移除 models.providers.* 上的 UI 字段（label/displayName/remark），
+ * 写入侧车 provider-ui-meta.json，避免 Gateway Schema 报 Unrecognized key。
+ */
+function extractAndStripProviderUiFields(config, options = {}) {
+    const replaceMeta = options.replaceMeta === true;
+    let changed = false;
+    const providers = config && config.models && config.models.providers;
+    if (!providers || typeof providers !== 'object') {
+        return { changed: false, meta: readProviderUiMetaFile() };
+    }
+
+    let nextMeta = replaceMeta ? {} : { ...readProviderUiMetaFile() };
+
+    // 兼容旧侧车 provider-labels.json（仅 label 字符串映射）
+    try {
+        const legacyPath = path.join(CONFIG_DIR, 'provider-labels.json');
+        if (fs.existsSync(legacyPath)) {
+            const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8').replace(/^\uFEFF/, ''));
+            if (legacy && typeof legacy === 'object') {
+                for (const [k, v] of Object.entries(legacy)) {
+                    const label = typeof v === 'string' ? v.trim() : String((v && v.label) || '').trim();
+                    if (!label) continue;
+                    if (replaceMeta) {
+                        // replace 模式下仅在该 provider 仍存在时由下方循环写入
+                    } else {
+                        nextMeta[k] = { ...(nextMeta[k] || {}), label };
+                    }
+                }
+            }
+        }
+    } catch (e) {}
+
+    for (const [key, provider] of Object.entries(providers)) {
+        if (!provider || typeof provider !== 'object') continue;
+        const label = String(provider.label || provider.displayName || '').trim();
+        const remark = String(provider.remark || '').trim();
+        if (replaceMeta) {
+            if (label || remark) {
+                nextMeta[key] = {};
+                if (label) nextMeta[key].label = label;
+                if (remark) nextMeta[key].remark = remark;
+            }
+        } else if (label || remark) {
+            nextMeta[key] = { ...(nextMeta[key] || {}) };
+            if (label) nextMeta[key].label = label;
+            if (remark) nextMeta[key].remark = remark;
+        }
+        for (const uk of PROVIDER_UI_ONLY_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(provider, uk)) {
+                delete provider[uk];
+                changed = true;
+            }
+        }
+    }
+
+    if (replaceMeta || changed) {
+        persistProviderUiMeta(nextMeta);
+    }
+    return { changed, meta: nextMeta };
+}
+
+/** 读配置时把侧车显示名/备注合回 providers，供面板展示（不写回 openclaw.json） */
+function applyProviderUiMetaToConfig(config) {
+    if (!config || typeof config !== 'object') return config;
+    const meta = readProviderUiMetaFile();
+    const providers = config.models && config.models.providers;
+    if (!providers || typeof providers !== 'object') return config;
+    for (const [key, m] of Object.entries(meta)) {
+        if (!m || typeof m !== 'object') continue;
+        if (!providers[key] || typeof providers[key] !== 'object') continue;
+        if (m.label) providers[key].label = String(m.label);
+        if (m.remark) providers[key].remark = String(m.remark);
+    }
+    return config;
+}
+
+function stripNonSchemaOpenClawConfig(config, options = {}) {
     let changed = false;
     if (!config || typeof config !== 'object') return false;
     if (config.imageGenerator) { delete config.imageGenerator; changed = true; }
@@ -781,6 +924,11 @@ function stripNonSchemaOpenClawConfig(config) {
             changed = true;
         }
     }
+    try {
+        if (extractAndStripProviderUiFields(config, {
+            replaceMeta: options.replaceProviderUiMeta === true
+        }).changed) changed = true;
+    } catch (e) {}
     if (normalizeWebToolsConfig(config)) changed = true;
     return changed;
 }
@@ -1204,6 +1352,9 @@ const MEDIA_AGENTS_MARKER_LEGACY = '<!-- nexora-media-agents-v1 -->';
 const REPLY_DEDUPE_AGENTS_MARKER = '<!-- nexora-reply-dedupe-v1 -->';
 const MEDIA_IMAGE_PREFS_FILE = 'media-generator.json';
 const MEDIA_VIDEO_PREFS_FILE = 'video-generator.json';
+/** UI-only provider 显示名/备注；OpenClaw Schema 不接受 models.providers.*.label|remark */
+const PROVIDER_UI_META_FILE = 'provider-ui-meta.json';
+const PROVIDER_UI_ONLY_KEYS = ['label', 'displayName', 'remark'];
 const DEFAULT_MEDIA_IMAGE_PREFS = {
     apiBase: 'https://apihub.agnes-ai.com/v1/images/generations',
     apiKey: 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
@@ -2906,6 +3057,7 @@ function seedMediaRuntimeArtifacts(appVersion) {
         ensureMediaAgentsGuidance(wsDir);
         ensureReplyDedupeAgentsGuidance(wsDir);
         ensureStartupRulesOnceGuidance(wsDir);
+        try { getSkillCenter().ensureSkillWorkshopGuidance(wsDir); } catch (e) {}
         ensureMediaMemoryGuidance(path.join(wsDir, 'MEMORY.md'));
     } catch (e) {
         console.warn('[PluginSeed] seedMediaRuntimeArtifacts failed:', e.message);
@@ -5157,6 +5309,27 @@ function ensureOpenClawConfigInitialized() {
             }
         } catch (e) {}
 
+        // 剥离 providers 上的 label/remark（UI 侧车），防止 Gateway Unrecognized key 无法启动
+        try {
+            if (stripNonSchemaOpenClawConfig(config)) {
+                needsSave = true;
+                console.log('[ConfigSanitize] Stripped non-schema fields (incl. provider label/remark)');
+            }
+        } catch (e) {}
+
+        // 技能中心：提案须人工审核；保证 skill_workshop 工具可用
+        try {
+            const sc = getSkillCenter().ensureWorkshopConfig(config);
+            config = sc.config;
+            if (sc.changed) {
+                needsSave = true;
+                console.log('[SkillCenter] Ensured skills.workshop.approvalPolicy=pending + skill_workshop allow');
+            }
+            try {
+                getSkillCenter().ensureSkillWorkshopGuidance(path.join(CONFIG_DIR, 'workspace'));
+            } catch (e2) {}
+        } catch (e) {}
+
         if (needsSave) {
             try {
                 fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
@@ -5302,15 +5475,128 @@ function watchRoleConfigFile() {
 ipcMain.handle('config-read', async () => {
     try {
         const config = ensureOpenClawConfigInitialized();
-        if (config) return config;
+        if (config) return applyProviderUiMetaToConfig(config);
         
         if (!fs.existsSync(CONFIG_PATH)) return null;
         let content = fs.readFileSync(CONFIG_PATH, 'utf8');
         content = content.replace(/^\uFEFF/, '');
-        return JSON.parse(content);
+        return applyProviderUiMetaToConfig(JSON.parse(content));
     } catch (e) {
         console.error('Failed to read config:', e);
         return null;
+    }
+});
+
+// ─── 技能中心（Skill Workshop + 本地 skills）───
+ipcMain.handle('skills-list', async () => {
+    try {
+        return { success: true, skills: getSkillCenter().listInstalledSkills() };
+    } catch (e) {
+        return { success: false, error: e.message, skills: [] };
+    }
+});
+
+ipcMain.handle('skills-read', async (_e, name) => {
+    try {
+        return getSkillCenter().readSkill(name);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-set-enabled', async (_e, payload) => {
+    try {
+        const name = payload && payload.name;
+        const enabled = !!(payload && payload.enabled);
+        return getSkillCenter().setSkillEnabled(name, enabled);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-delete', async (_e, name) => {
+    try {
+        return getSkillCenter().deleteSkill(name);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-open-folder', async (_e, name) => {
+    try {
+        const r = getSkillCenter().openSkillFolder(name);
+        if (r.success && r.path) {
+            const { shell } = require('electron');
+            shell.openPath(r.path).catch(() => {});
+        }
+        return r;
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-proposals-list', async (_e, payload) => {
+    try {
+        const status = payload && payload.status;
+        return { success: true, proposals: getSkillCenter().listProposalsFromFs(status || 'pending') };
+    } catch (e) {
+        return { success: false, error: e.message, proposals: [] };
+    }
+});
+
+ipcMain.handle('skills-proposals-inspect', async (_e, proposalId) => {
+    try {
+        return getSkillCenter().inspectProposalFromFs(proposalId);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-proposals-apply', async (_e, proposalId) => {
+    try {
+        return await getSkillCenter().applyProposal(proposalId);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-proposals-reject', async (_e, payload) => {
+    try {
+        const id = payload && (payload.proposalId || payload.id);
+        return await getSkillCenter().rejectProposal(id, payload && payload.reason);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-proposals-quarantine', async (_e, payload) => {
+    try {
+        const id = payload && (payload.proposalId || payload.id);
+        return await getSkillCenter().quarantineProposal(id, payload && payload.reason);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('skills-clawhub-search', async (_e, payload) => {
+    try {
+        const q = payload && payload.query;
+        const limit = payload && payload.limit;
+        return await getSkillCenter().searchClawHub(q, limit);
+    } catch (e) {
+        return { success: false, error: e.message, results: [] };
+    }
+});
+
+ipcMain.handle('skills-clawhub-install', async (_e, payload) => {
+    try {
+        const ref = payload && (payload.ref || payload.skillRef || payload.slug);
+        return await getSkillCenter().installFromClawHub(ref, {
+            force: !!(payload && payload.force),
+            version: payload && payload.version
+        });
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 });
 
@@ -5539,7 +5825,8 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         // 关键防护：移除不在 OpenClaw 网关根 Schema 中的扩展字段，防止网关启动抛出 Unrecognized keys
         delete cleanConfig.videoGenerator;
         delete cleanConfig.imageGenerator;
-        stripNonSchemaOpenClawConfig(cleanConfig);
+        // replaceMeta：按本次保存的显示名/备注全量重写侧车（支持随意改、清空、删厂家）
+        stripNonSchemaOpenClawConfig(cleanConfig, { replaceProviderUiMeta: true });
 
         // 启用插件必须进 allow，保证别人电脑上开关真能加载
         try {
@@ -5609,7 +5896,8 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             console.warn('[ModelSync] Session/model sync skipped:', e.message);
         }
 
-        return { success: true, config: cleanConfig };
+        // 返回给面板时合回显示名/备注（侧车），避免保存后 UI 立刻丢 label
+        return { success: true, config: applyProviderUiMetaToConfig(JSON.parse(JSON.stringify(cleanConfig))) };
     } catch (e) {
         console.error('Failed to save config:', e);
         return { success: false, error: e.message };

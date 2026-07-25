@@ -316,11 +316,76 @@ function clearSaveBtnDirtyState(btn, label) {
     btn.removeAttribute('disabled');
 }
 
-// 自定义精美弹窗重写
+// 自定义精美弹窗重写（长文可滚动；Esc / 点遮罩可关；正文必须转义防破 DOM）
+function __nexoraEscapeDialogHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function __nexoraCloseDialogOverlay(overlay, after) {
+    if (!overlay || !overlay.parentNode) {
+        if (typeof after === 'function') after();
+        return;
+    }
+    overlay.style.opacity = '0';
+    overlay.style.pointerEvents = 'none';
+    const modal = overlay.firstElementChild;
+    if (modal) modal.style.transform = 'scale(0.9)';
+    setTimeout(() => {
+        try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (_) {}
+        if (typeof after === 'function') after();
+    }, 200);
+}
+
+function __nexoraBindDialogDismiss(overlay, onDismiss) {
+    const onKey = (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            cleanup();
+            onDismiss();
+        }
+    };
+    const onBackdrop = (e) => {
+        if (e.target === overlay) {
+            cleanup();
+            onDismiss();
+        }
+    };
+    const cleanup = () => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.removeEventListener('click', onBackdrop);
+    };
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('click', onBackdrop);
+    return cleanup;
+}
+
+/** 强制关掉卡住的自定义弹层（Esc 也可） */
+function dismissStuckNexoraDialogs() {
+    document.querySelectorAll('#custom-alert-overlay, #skills-preview-overlay').forEach((el) => {
+        try { el.remove(); } catch (_) {}
+    });
+    document.querySelectorAll('body > div').forEach((el) => {
+        try {
+            const z = String(el.style && el.style.zIndex || '');
+            if (z === '99999' || Number(z) >= 99999) el.remove();
+        } catch (_) {}
+    });
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') dismissStuckNexoraDialogs();
+}, true);
+
 window.alert = function (message, title = null) {
     const finalTitle = title || t('系统提示', 'System Notification', '系統提示');
+    const safeMsg = __nexoraEscapeDialogHtml(message);
+    const safeTitle = __nexoraEscapeDialogHtml(finalTitle);
     return new Promise(resolve => {
-        // 创建 DOM 元素
         const overlay = document.createElement('div');
         overlay.id = 'custom-alert-overlay';
         overlay.style.cssText = `
@@ -333,6 +398,8 @@ window.alert = function (message, title = null) {
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.2s ease;
+            padding: 24px;
+            box-sizing: border-box;
         `;
 
         const modal = document.createElement('div');
@@ -341,53 +408,63 @@ window.alert = function (message, title = null) {
             backdrop-filter: blur(15px);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            width: 380px;
+            width: min(560px, 92vw);
+            max-height: min(80vh, 720px);
             padding: 24px;
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), var(--accent-glow);
             transform: scale(0.9);
             transition: transform 0.2s ease;
             color: var(--text-primary);
             font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            box-sizing: border-box;
         `;
 
         modal.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
-                <span style="font-size: 20px; line-height: 1;">🔔</span>
-                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${finalTitle}</h3>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; flex-shrink: 0;">
+                <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                    <span style="font-size: 20px; line-height: 1;">🔔</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeTitle}</h3>
+                </div>
+                <button type="button" id="custom-alert-x" aria-label="close" style="background:transparent;border:none;color:var(--text-secondary);font-size:22px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
             </div>
-            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap; word-break: break-all;">${message}</div>
-            <div style="display: flex; justify-content: flex-end;">
-                <button id="custom-alert-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">${t('确定', 'Confirm', '確定')}</button>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; word-break: break-word; overflow-y: auto; flex: 1 1 auto; min-height: 0;">${safeMsg}</div>
+            <div style="display: flex; justify-content: flex-end; flex-shrink: 0;">
+                <button id="custom-alert-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none;">${t('确定', 'Confirm', '確定')}</button>
             </div>
         `;
 
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
 
-        // 动画浮现
         setTimeout(() => {
             overlay.style.opacity = '1';
             overlay.style.pointerEvents = 'auto';
             modal.style.transform = 'scale(1)';
         }, 10);
 
+        let cleaned = false;
+        const finish = () => {
+            if (cleaned) return;
+            cleaned = true;
+            cleanupDismiss();
+            __nexoraCloseDialogOverlay(overlay, () => resolve());
+        };
+        const cleanupDismiss = __nexoraBindDialogDismiss(overlay, finish);
+
         const btnOk = modal.querySelector('#custom-alert-ok');
-        btnOk.addEventListener('mouseenter', () => btnOk.style.opacity = '0.9');
-        btnOk.addEventListener('mouseleave', () => btnOk.style.opacity = '1');
-        btnOk.addEventListener('click', () => {
-            overlay.style.opacity = '0';
-            overlay.style.pointerEvents = 'none';
-            modal.style.transform = 'scale(0.9)';
-            setTimeout(() => {
-                document.body.removeChild(overlay);
-                resolve();
-            }, 200);
-        });
+        const btnX = modal.querySelector('#custom-alert-x');
+        btnOk.addEventListener('click', finish);
+        if (btnX) btnX.addEventListener('click', finish);
     });
 };
 
 window.confirm = function (message, title = null) {
     const finalTitle = title || t('操作确认', 'Operation Confirmation', '操作確認');
+    const safeMsg = __nexoraEscapeDialogHtml(message);
+    const safeTitle = __nexoraEscapeDialogHtml(finalTitle);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = `
@@ -400,6 +477,8 @@ window.confirm = function (message, title = null) {
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.2s ease;
+            padding: 24px;
+            box-sizing: border-box;
         `;
 
         const modal = document.createElement('div');
@@ -408,24 +487,32 @@ window.confirm = function (message, title = null) {
             backdrop-filter: blur(15px);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            width: 400px;
+            width: min(480px, 92vw);
+            max-height: min(80vh, 720px);
             padding: 24px;
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), var(--accent-glow);
             transform: scale(0.9);
             transition: transform 0.2s ease;
             color: var(--text-primary);
             font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            box-sizing: border-box;
         `;
 
         modal.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
-                <span style="font-size: 20px; line-height: 1;">❓</span>
-                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${finalTitle}</h3>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; flex-shrink: 0;">
+                <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                    <span style="font-size: 20px; line-height: 1;">❓</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--accent-color);">${safeTitle}</h3>
+                </div>
+                <button type="button" id="custom-confirm-x" aria-label="close" style="background:transparent;border:none;color:var(--text-secondary);font-size:22px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
             </div>
-            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap; word-break: break-all;">${message}</div>
-            <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                <button id="custom-confirm-cancel" style="background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 20px; font-size: 13px; border-radius: 8px; cursor: pointer; outline: none; transition: background 0.1s;">${t('取消', 'Cancel', '取消')}</button>
-                <button id="custom-confirm-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none; transition: opacity 0.1s;">${t('确定', 'Confirm', '確定')}</button>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; word-break: break-word; overflow-y: auto; flex: 1 1 auto; min-height: 0;">${safeMsg}</div>
+            <div style="display: flex; justify-content: flex-end; gap: 12px; flex-shrink: 0;">
+                <button id="custom-confirm-cancel" style="background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 8px 20px; font-size: 13px; border-radius: 8px; cursor: pointer; outline: none;">${t('取消', 'Cancel', '取消')}</button>
+                <button id="custom-confirm-ok" style="background: linear-gradient(135deg, var(--accent-color) 0%, rgba(var(--accent-rgb), 0.7) 100%); border: none; color: white; padding: 8px 24px; font-size: 13px; font-weight: 600; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(var(--accent-rgb), 0.25); outline: none;">${t('确定', 'Confirm', '確定')}</button>
             </div>
         `;
 
@@ -438,34 +525,19 @@ window.confirm = function (message, title = null) {
             modal.style.transform = 'scale(1)';
         }, 10);
 
-        const btnCancel = modal.querySelector('#custom-confirm-cancel');
-        const btnOk = modal.querySelector('#custom-confirm-ok');
+        let cleaned = false;
+        const finish = (val) => {
+            if (cleaned) return;
+            cleaned = true;
+            cleanupDismiss();
+            __nexoraCloseDialogOverlay(overlay, () => resolve(val));
+        };
+        const cleanupDismiss = __nexoraBindDialogDismiss(overlay, () => finish(false));
 
-        btnCancel.addEventListener('mouseenter', () => btnCancel.style.background = 'rgba(255,255,255,0.1)');
-        btnCancel.addEventListener('mouseleave', () => btnCancel.style.background = 'rgba(255,255,255,0.05)');
-        
-        btnOk.addEventListener('mouseenter', () => btnOk.style.opacity = '0.9');
-        btnOk.addEventListener('mouseleave', () => btnOk.style.opacity = '1');
-
-        btnCancel.addEventListener('click', () => {
-            overlay.style.opacity = '0';
-            overlay.style.pointerEvents = 'none';
-            modal.style.transform = 'scale(0.9)';
-            setTimeout(() => {
-                document.body.removeChild(overlay);
-                resolve(false);
-            }, 200);
-        });
-
-        btnOk.addEventListener('click', () => {
-            overlay.style.opacity = '0';
-            overlay.style.pointerEvents = 'none';
-            modal.style.transform = 'scale(0.9)';
-            setTimeout(() => {
-                document.body.removeChild(overlay);
-                resolve(true);
-            }, 200);
-        });
+        modal.querySelector('#custom-confirm-cancel').addEventListener('click', () => finish(false));
+        modal.querySelector('#custom-confirm-ok').addEventListener('click', () => finish(true));
+        const btnX = modal.querySelector('#custom-confirm-x');
+        if (btnX) btnX.addEventListener('click', () => finish(false));
     });
 };
 
@@ -4268,17 +4340,17 @@ function renderProvidersList() {
         const customMetaHtml = isCustom
             ? `<div class="form-row" style="margin-bottom: 4px;">
                     <div class="form-field">
-                        <label>${t('显示名称', 'Display Name', '顯示名稱')}</label>
+                        <label>${t('显示名称', 'Display Name', '顯示名稱')} <span style="font-weight:normal;opacity:.65;">${t('（仅界面，可随便改）', '(UI only)', '（僅界面，可隨便改）')}</span></label>
                         <input type="text" class="provider-label-input" data-provider="${key}" value="${esc(provider.label || provider.displayName || '')}" placeholder="${esc(t('例如: 公司 Gemini 中转', 'e.g. Company Gemini Relay', '例如: 公司 Gemini 中轉'))}">
                     </div>
                     <div class="form-field">
-                        <label>${t('备注', 'Remark', '備註')}</label>
+                        <label>${t('备注', 'Remark', '備註')} <span style="font-weight:normal;opacity:.65;">${t('（仅界面）', '(UI only)', '（僅界面）')}</span></label>
                         <input type="text" class="provider-remark-input" data-provider="${key}" value="${esc(provider.remark || '')}" placeholder="${esc(t('例如: 测试账号 / 生产环境', 'e.g. Test account / Production', '例如: 測試帳號 / 生產環境'))}">
                     </div>
                </div>
                <div class="form-row" style="margin-bottom: 8px;">
                     <div class="form-field">
-                        <label>${t('厂商标识', 'Provider ID', '廠商標識')}</label>
+                        <label>${t('厂商标识', 'Provider ID', '廠商標識')} <span style="font-weight:normal;opacity:.65;">${t('（真正供应商名，网关用）', '(Real provider ID for gateway)', '（真正供應商名，網關用）')}</span></label>
                         <input type="text" class="provider-id-input" data-provider="${key}" value="${esc(key)}" placeholder="${esc(t('例如: deepseek, openai', 'e.g. deepseek, openai', '例如: deepseek, openai'))}" spellcheck="false" autocomplete="off">
                     </div>
                </div>`
@@ -6171,6 +6243,301 @@ function updateRightPluginsCountUI() {
     rightPluginsCountEl.innerText = formatPluginCount(0);
 }
 
+// ─── 技能中心 ───
+let __skillsCenterTab = 'clawhub';
+let __skillsCenterBound = false;
+
+function skillsT(key, fallback) {
+    try {
+        if (typeof t === 'function') {
+            const v = t(key);
+            if (v && v !== key) return v;
+        }
+    } catch (_) {}
+    return fallback || key;
+}
+
+function setSkillsCenterTab(tab) {
+    __skillsCenterTab = tab || 'clawhub';
+    document.querySelectorAll('.skills-tab').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-skills-tab') === __skillsCenterTab);
+    });
+    const inst = document.getElementById('skills-panel-installed');
+    const pend = document.getElementById('skills-panel-pending');
+    const hub = document.getElementById('skills-panel-clawhub');
+    const hintDef = document.getElementById('skills-hint-default');
+    const hintHub = document.getElementById('skills-hint-clawhub');
+    if (inst) inst.style.display = __skillsCenterTab === 'installed' ? '' : 'none';
+    if (pend) pend.style.display = __skillsCenterTab === 'pending' ? '' : 'none';
+    if (hub) hub.style.display = __skillsCenterTab === 'clawhub' ? '' : 'none';
+    if (hintDef) hintDef.style.display = __skillsCenterTab === 'clawhub' ? 'none' : '';
+    if (hintHub) hintHub.style.display = __skillsCenterTab === 'clawhub' ? '' : 'none';
+}
+
+function bindSkillsCenterOnce() {
+    if (__skillsCenterBound) return;
+    __skillsCenterBound = true;
+
+    document.querySelectorAll('.skills-tab').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            setSkillsCenterTab(btn.getAttribute('data-skills-tab') || 'clawhub');
+            await refreshSkillsCenter();
+        });
+    });
+
+    const refreshBtn = document.getElementById('btn-skills-refresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => refreshSkillsCenter());
+
+    const searchBtn = document.getElementById('btn-skills-clawhub-search');
+    const queryInput = document.getElementById('skills-clawhub-query');
+    const hotBtn = document.getElementById('btn-skills-clawhub-hot');
+    if (searchBtn) searchBtn.addEventListener('click', () => renderSkillsClawhub());
+    if (hotBtn) {
+        hotBtn.addEventListener('click', () => {
+            if (queryInput) queryInput.value = '';
+            renderSkillsClawhub({ forcePopular: true });
+        });
+    }
+    if (queryInput) {
+        queryInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') renderSkillsClawhub();
+        });
+    }
+    const openSiteBtn = document.getElementById('btn-skills-clawhub-open');
+    if (openSiteBtn) {
+        openSiteBtn.addEventListener('click', () => {
+            if (window.api && window.api.openExternal) window.api.openExternal('https://clawhub.ai');
+        });
+    }
+}
+
+async function refreshSkillsCenter() {
+    bindSkillsCenterOnce();
+    if (__skillsCenterTab === 'pending') await renderSkillsPending();
+    else if (__skillsCenterTab === 'clawhub') await renderSkillsClawhub();
+    else await renderSkillsInstalled();
+}
+
+async function renderSkillsClawhub(opts = {}) {
+    const grid = document.getElementById('skills-clawhub-grid');
+    if (!grid) return;
+    if (!window.api || !window.api.skillsClawhubSearch) {
+        grid.innerHTML = `<div class="skill-card-empty">技能商店接口未就绪，请完全退出后重新打开 Nexora Agent</div>`;
+        return;
+    }
+    const queryInput = document.getElementById('skills-clawhub-query');
+    let q = ((queryInput || {}).value || '').trim();
+    if (opts.forcePopular) q = '';
+    const isPopular = !q;
+    grid.innerHTML = `<div class="skill-card-empty">${isPopular ? skillsT('skills.clawhub.loading_hot', '加载热门推荐…') : skillsT('skills.clawhub.searching', '搜索中…')}</div>`;
+    let res;
+    try {
+        res = await window.api.skillsClawhubSearch({ query: isPopular ? '' : q, limit: 24 });
+    } catch (e) {
+        grid.innerHTML = `<div class="skill-card-empty">${escapeHtml((e && e.message) || 'request failed')}</div>`;
+        return;
+    }
+    let results = (res && res.results) || [];
+    results = results.filter((item) => String(item.summary || item.description || '').trim().length >= 8);
+    grid.innerHTML = '';
+    if (!res || !res.success) {
+        grid.innerHTML = `<div class="skill-card-empty">${escapeHtml((res && res.error) || '加载失败，请检查网络后点「热门推荐」')}</div>`;
+        return;
+    }
+    if (!results.length) {
+        grid.innerHTML = `<div class="skill-card-empty">${skillsT('skills.clawhub.empty', '没有找到技能')} · ${skillsT('skills.clawhub.try_hot', '可点「热门推荐」')}</div>`;
+        return;
+    }
+    const showHot = isPopular || res.mode === 'popular';
+    if (showHot) {
+        const banner = document.createElement('div');
+        banner.className = 'skills-clawhub-banner';
+        banner.textContent = skillsT('skills.clawhub.hot_title', '热门推荐 · 按下载量排序');
+        grid.appendChild(banner);
+    }
+    for (const item of results) {
+        const card = document.createElement('div');
+        card.className = 'skill-card';
+        const meta = [
+            item.version ? `v${item.version}` : '',
+            item.downloads ? `${item.downloads}↓` : '',
+            item.stars ? `${item.stars}★` : ''
+        ].filter(Boolean).join(' · ');
+        card.innerHTML = `
+          <div class="skill-card-head">
+            <div class="skill-card-icon store">🔥</div>
+            <div class="skill-card-titles">
+              <h4 class="skill-card-title">${escapeHtml(item.displayName || item.slug || '')}</h4>
+              <div class="skill-card-sub">${escapeHtml(item.ref || item.slug || '')}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
+            </div>
+          </div>
+          <p class="skill-card-desc">${escapeHtml(item.summary || '')}</p>
+          <div class="skill-card-foot">
+            <span class="skill-card-status">${showHot ? skillsT('skills.clawhub.hot_badge', '热门') : 'ClawHub'}</span>
+            <div class="skills-card-actions">
+              <button type="button" data-act="web">${skillsT('skills.clawhub.detail', '详情')}</button>
+              <button type="button" data-act="install" class="primary">${skillsT('skills.clawhub.install', '安装（默认禁用）')}</button>
+            </div>
+          </div>`;
+        card.querySelectorAll('button[data-act]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const act = btn.getAttribute('data-act');
+                if (act === 'web') {
+                    const meta = [
+                        item.version ? `版本：v${item.version}` : '',
+                        item.downloads ? `下载：${item.downloads}` : '',
+                        item.stars ? `星标：${item.stars}` : '',
+                        item.ref ? `标识：${item.ref}` : ''
+                    ].filter(Boolean).join('\n');
+                    const body = [
+                        String(item.description || item.summary || '').trim() || skillsT('skills.detail.no_desc', '暂无详细说明'),
+                        meta ? `\n——\n${meta}` : ''
+                    ].join('\n').trim();
+                    await alert(body, item.displayName || item.slug || skillsT('skills.clawhub.detail', '详情'));
+                    return;
+                }
+                if (act === 'install') {
+                    const ok = await confirm(skillsT('skills.clawhub.confirm_install', '确认安装该技能？安装后默认禁用，需在「已安装」中手动启用。'));
+                    if (!ok) return;
+                    btn.disabled = true;
+                    btn.textContent = skillsT('skills.clawhub.installing', '安装中…');
+                    const r = await window.api.skillsClawhubInstall({ ref: item.ref || item.slug, version: item.version || undefined });
+                    btn.disabled = false;
+                    btn.textContent = skillsT('skills.clawhub.install', '安装（默认禁用）');
+                    if (!r || !r.success) {
+                        showToast((r && r.error) || 'install failed');
+                        return;
+                    }
+                    showToast(skillsT('skills.clawhub.installed', '已安装（默认禁用），请到「已安装」启用'));
+                }
+            });
+        });
+        grid.appendChild(card);
+    }
+}
+
+async function renderSkillsInstalled() {
+    const grid = document.getElementById('skills-installed-grid');
+    if (!grid || !window.api || !window.api.skillsList) return;
+    grid.innerHTML = '';
+    const res = await window.api.skillsList();
+    const skills = (res && res.skills) || [];
+    if (!skills.length) {
+        grid.innerHTML = `<div class="skill-card-empty">${skillsT('skills.empty.installed', '暂无技能')}</div>`;
+        return;
+    }
+    for (const sk of skills) {
+        const card = document.createElement('div');
+        card.className = 'skill-card';
+        const badge = sk.protected
+            ? `<span class="skills-badge">${skillsT('skills.protected', '内置')}</span>`
+            : '';
+        const status = sk.enabled
+            ? skillsT('skills.status.enabled', '已启用')
+            : skillsT('skills.status.disabled', '已禁用');
+        card.innerHTML = `
+          <div class="skill-card-head">
+            <div class="skill-card-icon">⭐</div>
+            <div class="skill-card-titles">
+              <h4 class="skill-card-title">${escapeHtml(sk.name || '')}${badge}</h4>
+              <div class="skill-card-sub">${escapeHtml(sk.relativePath || sk.name || '')}</div>
+            </div>
+          </div>
+          <p class="skill-card-desc" title="${escapeHtml(sk.description || '')}">${escapeHtml(sk.description || '')}</p>
+          <div class="skill-card-foot">
+            <span class="skill-card-status ${sk.enabled ? 'on' : ''}">${escapeHtml(status)}</span>
+            <div class="skills-card-actions">
+              <button type="button" data-act="detail">${skillsT('skills.btn.detail', '详情')}</button>
+              <button type="button" data-act="toggle" class="primary">${sk.enabled ? skillsT('skills.btn.disable', '禁用') : skillsT('skills.btn.enable', '启用')}</button>
+              <button type="button" data-act="open">${skillsT('skills.btn.open', '打开目录')}</button>
+              ${sk.protected ? '' : `<button type="button" data-act="delete" class="danger">${skillsT('skills.btn.delete', '删除')}</button>`}
+            </div>
+          </div>`;
+        card.querySelectorAll('button[data-act]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const act = btn.getAttribute('data-act');
+                if (act === 'detail') {
+                    const parts = [String(sk.description || '').trim() || skillsT('skills.detail.no_desc', '暂无详细说明')];
+                    if (sk.relativePath) parts.push(`\n${skillsT('skills.detail.path', '路径')}：${sk.relativePath}`);
+                    await alert(parts.join('\n'), sk.name || skillsT('skills.btn.detail', '详情'));
+                } else if (act === 'toggle') {
+                    await window.api.skillsSetEnabled({ name: sk.name, enabled: !sk.enabled });
+                    await refreshSkillsCenter();
+                } else if (act === 'open') {
+                    await window.api.skillsOpenFolder(sk.name);
+                } else if (act === 'delete') {
+                    const ok = await confirm(skillsT('skills.confirm.delete', '确定删除？'));
+                    if (!ok) return;
+                    const r = await window.api.skillsDelete(sk.name);
+                    if (!r || !r.success) showToast((r && r.error) || 'failed');
+                    else showToast(skillsT('skills.toast.deleted', '已删除'));
+                    await refreshSkillsCenter();
+                }
+            });
+        });
+        grid.appendChild(card);
+    }
+}
+
+async function renderSkillsPending() {
+    const grid = document.getElementById('skills-pending-grid');
+    if (!grid || !window.api || !window.api.skillsProposalsList) return;
+    grid.innerHTML = '';
+    const res = await window.api.skillsProposalsList({ status: 'pending' });
+    const proposals = (res && res.proposals) || [];
+    if (!proposals.length) {
+        grid.innerHTML = `<div class="skill-card-empty">${skillsT('skills.empty.pending', '暂无待审核')}</div>`;
+        return;
+    }
+    for (const p of proposals) {
+        const card = document.createElement('div');
+        card.className = 'skill-card';
+        const desc = String(p.description || p.preview || '').trim();
+        card.innerHTML = `
+          <div class="skill-card-head">
+            <div class="skill-card-icon pending">📝</div>
+            <div class="skill-card-titles">
+              <h4 class="skill-card-title">${escapeHtml(p.name || p.id || '')}</h4>
+              <div class="skill-card-sub">${escapeHtml(p.id || '')}</div>
+            </div>
+          </div>
+          <p class="skill-card-desc">${escapeHtml(desc)}</p>
+          <div class="skill-card-foot">
+            <span class="skill-card-status wait">${escapeHtml(p.status || 'pending')}</span>
+            <div class="skills-card-actions">
+              <button type="button" data-act="inspect">${skillsT('skills.btn.inspect', '查看正文')}</button>
+              <button type="button" data-act="apply" class="primary">${skillsT('skills.btn.apply', '通过并启用')}</button>
+              <button type="button" data-act="reject" class="danger">${skillsT('skills.btn.reject', '驳回')}</button>
+            </div>
+          </div>`;
+        card.querySelectorAll('button[data-act]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const act = btn.getAttribute('data-act');
+                if (act === 'inspect') {
+                    const r = await window.api.skillsProposalsInspect(p.id);
+                    const content = (r && r.proposal && r.proposal.content) || '';
+                    await alert(content || (r && r.error) || 'empty', p.name || p.id || 'Skill');
+                } else if (act === 'apply') {
+                    const ok = await confirm(skillsT('skills.confirm.apply', '确认启用？'));
+                    if (!ok) return;
+                    const r = await window.api.skillsProposalsApply(p.id);
+                    if (!r || !r.success) showToast((r && r.error) || 'failed');
+                    else showToast(skillsT('skills.toast.applied', '已通过并启用'));
+                    await refreshSkillsCenter();
+                } else if (act === 'reject') {
+                    const ok = await confirm(skillsT('skills.confirm.reject', '确定驳回？'));
+                    if (!ok) return;
+                    const r = await window.api.skillsProposalsReject({ proposalId: p.id, reason: 'rejected by operator' });
+                    if (!r || !r.success) showToast((r && r.error) || 'failed');
+                    else showToast(skillsT('skills.toast.rejected', '已驳回'));
+                    await refreshSkillsCenter();
+                }
+            });
+        });
+        grid.appendChild(card);
+    }
+}
+
 // 渲染插件卡片网格
 async function renderPluginsGrid() {
     const grid = document.getElementById('cfg-plugins-grid');
@@ -7022,6 +7389,7 @@ const SIDEBAR_NAV_DEFAULT_ORDER = [
     'openclaw-panel-view',
     'dashboard-view',
     'plugins-view',
+    'skills-view',
     'voice-view',
     'terminal-view',
     'syslogs-view',
@@ -7039,6 +7407,7 @@ const SIDEBAR_NAV_I18N_BY_TAB = {
     'openclaw-panel-view': 'nav.openclaw_panel',
     'dashboard-view': 'nav.stats',
     'plugins-view': 'nav.plugins',
+    'skills-view': 'nav.skills',
     'voice-view': 'nav.voice',
     'terminal-view': 'nav.terminal',
     'syslogs-view': 'nav.syslogs',
@@ -7332,6 +7701,10 @@ function setupTabSwitching() {
             await Promise.resolve().then(() => renderPluginsGrid());
             return;
         }
+        if (tabId === 'skills-view') {
+            try { await refreshSkillsCenter(); } catch (err) { console.error(err); }
+            return;
+        }
         if (tabId === 'roles-view') {
             if (typeof loadRoleConfigState === 'function') {
                 await loadRoleConfigState({ preferActive: true });
@@ -7361,7 +7734,22 @@ function setupTabSwitching() {
             return;
         }
         if (tabId === 'openclaw-panel-view') {
-            await loadOpenclawControlUi(true, { clearSession: false });
+            await waitForOpenclawPanelLayout();
+            const wv = document.getElementById('openclaw-iframe');
+            const hasSrc = !!(wv && String(wv.getAttribute('src') || '').trim());
+            try {
+                // 进入前先把 webview 底色换成主题色，避免先闪 OpenClaw 纯黑
+                if (wv) {
+                    try { wv.style.background = getOpenclawHostThemePaint().bgBase; } catch (_) {}
+                }
+                await loadOpenclawControlUi(!hasSrc, { clearSession: false });
+                if (wv) {
+                    if (!hasSrc) await waitForOpenclawWebviewSettled(wv);
+                    scheduleOpenclawThemeSync(wv, { delays: [0, 800] });
+                }
+            } finally {
+                hideOpenclawThemeCover();
+            }
             return;
         }
         if (tabId === 'data-center-view') {
@@ -7642,13 +8030,28 @@ function setupThemeSwitching() {
         if (typeof drawSidebarChart === 'function') drawSidebarChart();
         if (typeof syncBuiltinTerminalTheme === 'function') syncBuiltinTerminalTheme();
         if (typeof pushDataCenterTheme === 'function') pushDataCenterTheme();
+        if (typeof syncOpenclawThemeToWebview === 'function') syncOpenclawThemeToWebview();
     };
 
     const applyPresetTheme = (themeName) => {
         clearInlineCustomThemeVars();
         document.body.className = themeName;
         localStorage.setItem('user-theme', themeName);
+        try {
+            const wv = document.getElementById('openclaw-iframe');
+            if (wv) {
+                wv.__nexoraInsertedThemeCss = '';
+                wv.__nexoraInsertedPanelCss = '';
+                wv.style.background = getOpenclawHostThemePaint().bgBase;
+            }
+        } catch (_) {}
         updateActiveDot(themeName);
+        try {
+            const wv = document.getElementById('openclaw-iframe');
+            if (wv && currentTab === 'openclaw-panel-view') {
+                scheduleOpenclawThemeSync(wv, { delays: [0, 400] });
+            }
+        } catch (_) {}
     };
 
     const applyCustomTheme = async (opts = {}) => {
@@ -11829,244 +12232,188 @@ function finishGatewayUpdateProgress(success, message) {
 let __openclawPanelLastUrl = '';
 let __openclawPanelLoading = false;
 
-const OPENCLAW_TRANSPARENT_PANEL_CSS = [
-    ':root, html, body, [data-theme], [class*="theme"] { --background: transparent !important; --foreground: #f8fafc !important; --card: transparent !important; --card-foreground: #f8fafc !important; --muted: transparent !important; --muted-foreground: #cbd5e1 !important; --border: rgba(255, 255, 255, 0.15) !important; --input: rgba(255, 255, 255, 0.1) !important; --sidebar-background: rgba(18, 24, 38, 0.85) !important; --sidebar-foreground: #f8fafc !important; --sidebar-primary: #38bdf8 !important; --sidebar-primary-foreground: #f8fafc !important; --sidebar-accent-foreground: #f8fafc !important; --sidebar-muted: #cbd5e1 !important; --sidebar-border: rgba(255, 255, 255, 0.1) !important; --tw-text-opacity: 1 !important; --color-bg-layout: transparent !important; --color-bg-container: transparent !important; --color-fill: transparent !important; --color-fill-secondary: transparent !important; --color-fill-tertiary: transparent !important; --color-fill-quaternary: transparent !important; --color-bg-text-hover: transparent !important; --color-bg-text-active: transparent !important; --color-text: #f8fafc !important; --color-text-secondary: #cbd5e1 !important; --color-text-tertiary: #94a3b8 !important; }',
-    '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
-    'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="backdrop"], [class*="overlay"], .ant-card-head, .ant-card-head-wrapper, .ant-list-header, .ant-table-thead > tr > th, [class*="header"], [class*="head"], [class*="toolbar"], [class*="title-bar"] { background: transparent !important; background-color: transparent !important; box-shadow: none !important; }',
-    /* 侧栏勿用 backdrop-filter：会形成 containing block，把 position:fixed 的会话菜单困在 overflow:hidden 侧栏里，变成挡住「会话」列表的竖条图标 */
-    'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar { background: var(--bg-panel, rgba(18, 24, 38, 0.92)) !important; background-color: var(--bg-panel, rgba(18, 24, 38, 0.92)) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-right: 1px solid rgba(255,255,255,0.08) !important; }',
-    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
-    '.sidebar-session-menu, .sidebar-customize-menu, .sidebar-session-sort-menu { position: fixed !important; z-index: 5000 !important; background: #121826 !important; background-color: #121826 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 32px rgba(0,0,0,0.55) !important; opacity: 1 !important; overflow: visible !important; pointer-events: auto !important; }',
-    '.sidebar-session-menu__item, .sidebar-session-menu__text, .sidebar-customize-menu__item, .sidebar-session-sort-menu__item { color: #f8fafc !important; opacity: 1 !important; }',
-    'body { color-scheme: dark !important; }',
-    'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: #f8fafc !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
-    '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: #cbd5e1 !important; opacity: 1 !important; }',
-    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: #cbd5e1 !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
-    '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; color: #ffffff !important; opacity: 1 !important; box-shadow: none !important; }',
-    '[class*="bg-white"], [style*="background: white"], [style*="background-color: white"], [style*="background: #fff"], [style*="background-color: #fff"], [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"] { background: transparent !important; background-color: transparent !important; }',
-    '.ant-segmented-thumb, [class*="indicator"], [class*="slider"] { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; box-shadow: none !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 6px !important; }',
-    'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
-    '.session-action { border: none !important; box-shadow: none !important; }',
-    '.ant-segmented { background: transparent !important; background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }',
-    'button:not([data-state="active"]):not([data-state="checked"]):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
-    'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: #38bdf8 !important; }',
-    'textarea::placeholder, input::placeholder, [class*="placeholder"] { color: #cbd5e1 !important; opacity: 0.85 !important; }',
-    'svg { color: #38bdf8 !important; opacity: 1 !important; }',
-    'pre, code { background-color: rgba(0, 0, 0, 0.3) !important; color: #e0f2fe !important; }',
-    '::-webkit-scrollbar { width: 14px !important; height: 14px !important; }',
-    '::-webkit-scrollbar-track { background: transparent !important; }',
-    '::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.4) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
-    '::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
-    '::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; -webkit-appearance: none !important; }',
-    '::-webkit-scrollbar-corner { background: transparent !important; }',
-    '.simplebar-scrollbar::before, .ms-thumb, .os-scrollbar-handle { background-color: rgba(148, 163, 184, 0.4) !important; border-radius: 9999px !important; }',
-    '.sidebar-recent-sessions { margin-right: 0 !important; }',
-    '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
-    '.sidebar-recent-session__aside, .session-row-aside { padding-right: 8px !important; flex-shrink: 0 !important; }',
-    '.session-row-actions, .session-action { flex-shrink: 0 !important; }',
-    '.sidebar-nav, .sidebar-sessions { scrollbar-width: thin !important; }',
-    '.sidebar-nav::-webkit-scrollbar, .sidebar-sessions::-webkit-scrollbar { width: 6px !important; }',
-    'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: #121826 !important; background-color: #121826 !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
-].join('\n');
+/** 从 --bg-base 渐变里取出最深实色（webview 透不出父级渐变） */
+function extractSolidBgFromCssValue(raw, fallback = '#0d0b18') {
+    const s = String(raw || '').trim();
+    if (!s) return fallback;
+    const hexes = s.match(/#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g);
+    if (hexes && hexes.length) return hexes[hexes.length - 1];
+    const rgbs = s.match(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*[\d.]+)?\s*\)/g);
+    if (rgbs && rgbs.length) return rgbs[rgbs.length - 1];
+    if (/^#|^rgb/i.test(s)) return s;
+    return fallback;
+}
+
+function buildOpenclawPanelCss(paint) {
+    const p = paint || getOpenclawHostThemePaint();
+    const bg = p.bgBase;
+    const panel = p.bgPanel;
+    const text = p.textPrimary;
+    const muted = p.textSecondary;
+    const accent = p.accentColor;
+    const accentRgb = p.accentRgb;
+    const border = p.borderColor;
+    return [
+        /* 注意：Electron webview 透不出父级渐变，禁止用 transparent 否则会露出纯黑 */
+        ':root, html, body, [data-theme], [class*="theme"] { --background: ' + bg + ' !important; --foreground: ' + text + ' !important; --card: ' + panel + ' !important; --card-foreground: ' + text + ' !important; --muted: ' + panel + ' !important; --muted-foreground: ' + muted + ' !important; --border: ' + border + ' !important; --input: rgba(255, 255, 255, 0.1) !important; --sidebar-background: ' + panel + ' !important; --sidebar-foreground: ' + text + ' !important; --sidebar-primary: ' + accent + ' !important; --sidebar-primary-foreground: ' + text + ' !important; --sidebar-accent-foreground: ' + text + ' !important; --sidebar-muted: ' + muted + ' !important; --sidebar-border: rgba(255, 255, 255, 0.1) !important; --tw-text-opacity: 1 !important; --color-bg-layout: ' + bg + ' !important; --color-bg-container: ' + panel + ' !important; --color-fill: ' + panel + ' !important; --color-fill-secondary: ' + panel + ' !important; --color-fill-tertiary: ' + panel + ' !important; --color-fill-quaternary: ' + panel + ' !important; --color-bg-text-hover: rgba(255,255,255,0.06) !important; --color-bg-text-active: rgba(255,255,255,0.1) !important; --color-text: ' + text + ' !important; --color-text-secondary: ' + muted + ' !important; --color-text-tertiary: ' + muted + ' !important; }',
+        '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
+        'html, body { background: ' + bg + ' !important; background-color: ' + bg + ' !important; background-image: radial-gradient(ellipse at 50% 35%, rgba(' + accentRgb + ', 0.16) 0%, transparent 55%) !important; }',
+        '#root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="backdrop"], [class*="overlay"], .ant-card-head, .ant-card-head-wrapper, .ant-list-header, .ant-table-thead > tr > th, [class*="header"], [class*="head"], [class*="toolbar"], [class*="title-bar"] { background-color: transparent !important; box-shadow: none !important; }',
+        /* 侧栏勿用 backdrop-filter：会形成 containing block，把 position:fixed 的会话菜单困在 overflow:hidden 侧栏里 */
+        'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar { background: ' + panel + ' !important; background-color: ' + panel + ' !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-right: 1px solid rgba(255,255,255,0.08) !important; }',
+        '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"], [data-radix-popper-content-wrapper] > div, [class*="Popover"], [class*="popover"] { background: ' + panel + ' !important; background-color: ' + panel + ' !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; }',
+        '.sidebar-session-menu, .sidebar-customize-menu, .sidebar-session-sort-menu { position: fixed !important; z-index: 5000 !important; background: ' + panel + ' !important; background-color: ' + panel + ' !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 32px rgba(0,0,0,0.55) !important; opacity: 1 !important; overflow: visible !important; pointer-events: auto !important; }',
+        '.sidebar-session-menu__item, .sidebar-session-menu__text, .sidebar-customize-menu__item, .sidebar-session-sort-menu__item { color: ' + text + ' !important; opacity: 1 !important; }',
+        'body { color-scheme: dark !important; }',
+        'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: ' + text + ' !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
+        '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: ' + muted + ' !important; opacity: 1 !important; }',
+        '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: ' + muted + ' !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
+        '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; color: #ffffff !important; opacity: 1 !important; box-shadow: none !important; }',
+        '[class*="bg-white"], [style*="background: white"], [style*="background-color: white"], [style*="background: #fff"], [style*="background-color: #fff"], [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"] { background: transparent !important; background-color: transparent !important; }',
+        '.ant-segmented-thumb, [class*="indicator"], [class*="slider"] { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; box-shadow: none !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 6px !important; }',
+        'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
+        '.session-action { border: none !important; box-shadow: none !important; }',
+        '.ant-segmented { background: transparent !important; background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }',
+        'button:not([data-state="active"]):not([data-state="checked"]):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
+        'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: ' + accent + ' !important; }',
+        'textarea::placeholder, input::placeholder, [class*="placeholder"] { color: ' + muted + ' !important; opacity: 0.85 !important; }',
+        'svg { color: ' + accent + ' !important; opacity: 1 !important; }',
+        'pre, code { background-color: rgba(0, 0, 0, 0.3) !important; color: #e0f2fe !important; }',
+        '::-webkit-scrollbar { width: 14px !important; height: 14px !important; }',
+        '::-webkit-scrollbar-track { background: transparent !important; }',
+        '::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.4) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+        '::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+        '::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; -webkit-appearance: none !important; }',
+        '::-webkit-scrollbar-corner { background: transparent !important; }',
+        '.simplebar-scrollbar::before, .ms-thumb, .os-scrollbar-handle { background-color: rgba(148, 163, 184, 0.4) !important; border-radius: 9999px !important; }',
+        '.sidebar-recent-sessions { margin-right: 0 !important; }',
+        '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
+        '.sidebar-recent-session__aside, .session-row-aside { padding-right: 8px !important; flex-shrink: 0 !important; }',
+        '.session-row-actions, .session-action { flex-shrink: 0 !important; }',
+        '.sidebar-nav, .sidebar-sessions { scrollbar-width: thin !important; }',
+        '.sidebar-nav::-webkit-scrollbar, .sidebar-sessions::-webkit-scrollbar { width: 6px !important; }',
+        'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: ' + panel + ' !important; background-color: ' + panel + ' !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
+    ].join('\n');
+}
+
+/** @deprecated 兼容旧引用：静态兜底，实际注入走 buildOpenclawPanelCss */
+const OPENCLAW_TRANSPARENT_PANEL_CSS = buildOpenclawPanelCss({
+    bgBase: '#0d0b18',
+    bgPanel: 'rgba(22, 19, 38, 0.96)',
+    textPrimary: '#f8fafc',
+    textSecondary: '#cbd5e1',
+    accentColor: '#38bdf8',
+    accentRgb: '56, 189, 248',
+    borderColor: 'rgba(255, 255, 255, 0.15)'
+});
+
+function getOpenclawHostThemePaint() {
+    const bodyStyle = getComputedStyle(document.body);
+    const textPrimary = (bodyStyle.getPropertyValue('--text-primary') || '#f0f6ff').trim();
+    const textSecondary = (bodyStyle.getPropertyValue('--text-secondary') || '#cbd5e1').trim();
+    const accentColor = (bodyStyle.getPropertyValue('--accent-color') || '#38bdf8').trim();
+    const accentRgb = (bodyStyle.getPropertyValue('--accent-rgb') || '56, 189, 248').trim();
+    const borderColor = (bodyStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)').trim();
+    const bgPanelRaw = (bodyStyle.getPropertyValue('--bg-panel') || 'rgba(18, 24, 38, 0.92)').trim();
+    const bgBaseVar = (bodyStyle.getPropertyValue('--bg-base') || '').trim();
+    // 优先用主题渐变末色；body.backgroundColor 在渐变主题下常是 transparent/错色
+    let bgBase = extractSolidBgFromCssValue(bgBaseVar, '');
+    if (!bgBase) {
+        bgBase = bodyStyle.backgroundColor || '';
+        if (!bgBase || bgBase === 'transparent' || bgBase === 'rgba(0, 0, 0, 0)') bgBase = '#0d0b18';
+    }
+    const bgPanel = bgPanelRaw.includes('rgba')
+        ? bgPanelRaw.replace(/rgba?\(([^)]+)\)/, (m, inner) => {
+            const parts = inner.split(',').map((x) => x.trim());
+            if (parts.length >= 3) return 'rgba(' + parts[0] + ', ' + parts[1] + ', ' + parts[2] + ', 0.96)';
+            return m;
+        })
+        : bgPanelRaw;
+    return { textPrimary, textSecondary, accentColor, accentRgb, borderColor, bgBase, bgPanel };
+}
+
+function buildOpenclawDynamicThemeCss(paint) {
+    const { textPrimary, textSecondary, accentColor, accentRgb, borderColor, bgBase, bgPanel } = paint;
+    return [
+        ':root, html, body, [data-theme] {',
+        '  --bg-panel: ' + bgPanel + ' !important;',
+        '  --background: ' + bgBase + ' !important;',
+        '  --foreground: ' + textPrimary + ' !important;',
+        '  --card: ' + bgPanel + ' !important;',
+        '  --muted-foreground: ' + textSecondary + ' !important;',
+        '  --accent: ' + accentColor + ' !important;',
+        '  --sidebar-background: ' + bgPanel + ' !important;',
+        '  --sidebar-primary: ' + accentColor + ' !important;',
+        '  --border: ' + borderColor + ' !important;',
+        '  --color-bg-layout: ' + bgBase + ' !important;',
+        '}',
+        /* html/body 必须实色+主题光晕；绝不能 transparent（webview 会透出纯黑） */
+        'html, body {',
+        '  background: ' + bgBase + ' !important;',
+        '  background-color: ' + bgBase + ' !important;',
+        '  background-image: radial-gradient(ellipse at 50% 35%, rgba(' + accentRgb + ', 0.18) 0%, transparent 58%) !important;',
+        '  color-scheme: dark !important;',
+        '}',
+        /* 仅子层透明，露出 body 主题底 */
+        '#root, #__next, [id="root"], main, section, article, header, footer, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"] {',
+        '  background-color: transparent !important;',
+        '  box-shadow: none !important;',
+        '}',
+        'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar {',
+        '  background: ' + bgPanel + ' !important;',
+        '  background-color: ' + bgPanel + ' !important;',
+        '  background-image: none !important;',
+        '  border-right: 1px solid rgba(255,255,255,0.08) !important;',
+        '}',
+        'svg { color: ' + accentColor + ' !important; }',
+        'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"] { border-color: ' + borderColor + ' !important; }'
+    ].join('\n');
+}
 
 function syncOpenclawThemeToWebview() {
     const webview = document.getElementById('openclaw-iframe');
     if (!webview) return;
     try {
-        const bodyStyle = getComputedStyle(document.body);
-        const textPrimary = (bodyStyle.getPropertyValue('--text-primary') || '#f0f6ff').trim();
-        const textSecondary = (bodyStyle.getPropertyValue('--text-secondary') || '#cbd5e1').trim();
-        const accentColor = (bodyStyle.getPropertyValue('--accent-color') || '#38bdf8').trim();
-        const borderColor = (bodyStyle.getPropertyValue('--border-color') || 'rgba(255, 255, 255, 0.15)').trim();
-        const bgPanel = (bodyStyle.getPropertyValue('--bg-panel') || 'rgba(18, 24, 38, 0.85)').trim();
-
-        const js = `
-            (function() {
-                var style = document.getElementById('nexora-openclaw-dynamic-theme');
-                if (!style) {
-                    style = document.createElement('style');
-                    style.id = 'nexora-openclaw-dynamic-theme';
-                    document.head.appendChild(style);
-                }
-                var css = [
-                    ':root, html, body, [data-theme] {',
-                    '  --bg-panel: ${bgPanel} !important;',
-                    '  --background: transparent !important;',
-                    '  --foreground: ${textPrimary} !important;',
-                    '  --card: transparent !important;',
-                    '  --card-foreground: ${textPrimary} !important;',
-                    '  --popover: transparent !important;',
-                    '  --popover-foreground: ${textPrimary} !important;',
-                    '  --muted: transparent !important;',
-                    '  --muted-foreground: ${textSecondary} !important;',
-                    '  --border: ${borderColor} !important;',
-                    '  --input: rgba(255, 255, 255, 0.1) !important;',
-                    '  --accent: ${accentColor} !important;',
-                    '  --accent-foreground: ${textPrimary} !important;',
-                    '  --sidebar-background: ${bgPanel} !important;',
-                    '  --sidebar-foreground: ${textPrimary} !important;',
-                    '  --sidebar-primary: ${accentColor} !important;',
-                    '  --sidebar-primary-foreground: ${textPrimary} !important;',
-                    '  --sidebar-accent-foreground: ${textPrimary} !important;',
-                    '  --sidebar-muted: ${textSecondary} !important;',
-                    '  --sidebar-border: ${borderColor} !important;',
-                    '  --tw-text-opacity: 1 !important;',
-                    '}',
-                    '*, *::before, *::after {',
-                    '  backdrop-filter: none !important;',
-                    '  -webkit-backdrop-filter: none !important;',
-                    '}',
-                    'html, body, #root, #__next, [id="root"], [data-radix-scroll-area-viewport], main, section, article, header, footer, body > div, [class*="page"], [class*="layout"], [class*="container"], [class*="workspace"], [class*="chat"], [class*="screen"], [class*="h-screen"], [class*="min-h"], [class*="inset-0"], [class*="bg-background"], [class*="bg-black"], [class*="bg-zinc"], [class*="bg-neutral"], [class*="bg-slate"], [class*="bg-panel"], [class*="bg-surface"], [class*="bg-base"], [class*="backdrop"], [class*="overlay"] {',
-                    '  background: transparent !important;',
-                    '  background-color: transparent !important;',
-                    '  box-shadow: none !important;',
-                    '}',
-                    'aside, nav, [class*="bg-sidebar"], .nexora-solid-sidebar {',
-                    '  background: var(--bg-panel, ${bgPanel}) !important;',
-                    '  background-color: var(--bg-panel, ${bgPanel}) !important;',
-                    '  backdrop-filter: none !important;',
-                    '  -webkit-backdrop-filter: none !important;',
-                    '  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;',
-                    '  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2) !important;',
-                    '}',
-                    '.ant-modal-content, .ant-drawer-content, .ant-popover-inner, .ant-tooltip-inner, .ant-dropdown-menu, .ant-select-dropdown, [role="dialog"], [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), [role="listbox"], [role="tooltip"], [class*="modal"], [class*="drawer"], [class*="custom-sidebar"], [class*="sidebar-custom"], [class*="sidebar-config"], [class*="SidebarCustom"] {',
-                    '  background: var(--bg-panel, ${bgPanel}) !important;',
-                    '  background-color: var(--bg-panel, ${bgPanel}) !important;',
-                    '  border: 1px solid rgba(255, 255, 255, 0.15) !important;',
-                    '  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6) !important;',
-                    '}',
-                    '.sidebar-session-menu, .sidebar-customize-menu, .sidebar-session-sort-menu {',
-                    '  position: fixed !important;',
-                    '  z-index: 5000 !important;',
-                    '  background: #121826 !important;',
-                    '  background-color: #121826 !important;',
-                    '  backdrop-filter: none !important;',
-                    '  -webkit-backdrop-filter: none !important;',
-                    '  border: 1px solid rgba(255, 255, 255, 0.15) !important;',
-                    '  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55) !important;',
-                    '  opacity: 1 !important;',
-                    '  overflow: visible !important;',
-                    '  pointer-events: auto !important;',
-                    '}',
-                    '.sidebar-session-menu__item, .sidebar-session-menu__text, .sidebar-customize-menu__item, .sidebar-session-sort-menu__item {',
-                    '  color: ${textPrimary} !important;',
-                    '  opacity: 1 !important;',
-                    '}',
-                    'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, [class*="text"], [class*="label"], [class*="title"], [class*="desc"] {',
-                    '  color: ${textPrimary} !important;',
-                    '  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);',
-                    '}',
-                    '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time {',
-                    '  color: ${textSecondary} !important;',
-                    '  opacity: 1 !important;',
-                    '}',
-                    '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) {',
-                    '  color: ${textSecondary} !important;',
-                    '  opacity: 0.95 !important;',
-                    '  background: transparent !important;',
-                    '  background-color: transparent !important;',
-                    '}',
-                    '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected {',
-                    '  background: rgba(255, 255, 255, 0.1) !important;',
-                    '  background-color: rgba(255, 255, 255, 0.1) !important;',
-                    '  color: ${textPrimary} !important;',
-                    '  opacity: 1 !important;',
-                    '  box-shadow: none !important;',
-                    '}',
-                    '.ant-segmented-thumb, .ant-segmented [class*="indicator"], .ant-segmented [class*="slider"] {',
-                    '  background: rgba(255, 255, 255, 0.1) !important;',
-                    '  background-color: rgba(255, 255, 255, 0.1) !important;',
-                    '  box-shadow: none !important;',
-                    '  border: 1px solid rgba(255, 255, 255, 0.2) !important;',
-                    '}',
-                    '.ant-segmented {',
-                    '  background: rgba(0, 0, 0, 0.2) !important;',
-                    '  background-color: rgba(0, 0, 0, 0.2) !important;',
-                    '  border: 1px solid rgba(255, 255, 255, 0.1) !important;',
-                    '}',
-                    'button:not(.session-action):not(.sidebar-brand__new-thread):not(.nav-collapse-toggle):not(.topbar-icon-btn), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item {',
-                    '  border: 1px solid ${borderColor} !important;',
-                    '  box-shadow: none !important;',
-                    '}',
-                    '.session-action, .session-action:hover, .session-action:focus, .session-action:disabled {',
-                    '  border: none !important;',
-                    '  box-shadow: none !important;',
-                    '  background: transparent !important;',
-                    '}',
-                    'textarea, input, [contenteditable="true"] {',
-                    '  background-color: rgba(0, 0, 0, 0.2) !important;',
-                    '  color: ${textPrimary} !important;',
-                    '  border-color: ${borderColor} !important;',
-                    '  caret-color: ${accentColor} !important;',
-                    '}',
-                    'textarea::placeholder, input::placeholder, [class*="placeholder"] {',
-                    '  color: ${textSecondary} !important;',
-                    '  opacity: 0.85 !important;',
-                    '}',
-                    'svg {',
-                    '  color: ${accentColor} !important;',
-                    '  opacity: 1 !important;',
-                    '}',
-                    '.session-action svg, .session-row-badge svg, .session-row-trail svg {',
-                    '  color: currentColor !important;',
-                    '}',
-                    '.sidebar-recent-sessions { margin-right: 0 !important; }',
-                    '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
-                    '.sidebar-recent-session__aside, .session-row-aside {',
-                    '  padding-right: 8px !important;',
-                    '  margin-right: 0 !important;',
-                    '  flex-shrink: 0 !important;',
-                    '}',
-                    '.session-row-actions, .session-action {',
-                    '  flex-shrink: 0 !important;',
-                    '  position: relative !important;',
-                    '  z-index: 3 !important;',
-                    '}'
-                ].join('\\n');
-                if (style.textContent !== css) style.textContent = css;
-
-                // 动态探测侧边栏并赋予不透明背景类
-                if (!window.__nexora_sidebar_observer) {
-                    window.__nexora_sidebar_observer = setInterval(function() {
-                        var elements = document.querySelectorAll('.shell-nav, .sidebar, aside, nav, div, section');
-                        for (var i = 0; i < elements.length; i++) {
-                            var el = elements[i];
-                            var rect = el.getBoundingClientRect();
-                            if (rect.left === 0 && rect.top <= 0 && rect.height >= window.innerHeight * 0.9 && rect.width >= 180 && rect.width <= 280) {
-                                if (el.id === 'root' || el.id === '__next' || el.tagName === 'BODY' || el.tagName === 'HTML') continue;
-                                if (!el.classList.contains('nexora-solid-sidebar')) {
-                                    el.classList.add('nexora-solid-sidebar');
-                                }
-                            }
-                        }
-                    }, 1000);
-                }
-
-                // 强制锁定全局暗黑模式，彻底粉碎所有的 Light Mode 白底闪烁
-                if (!window.__nexora_theme_locker) {
-                    var lockTheme = function() {
-                        var html = document.documentElement;
-                        var body = document.body;
-                        if (html.classList.contains('light')) { html.classList.remove('light'); html.classList.add('dark'); }
-                        if (html.getAttribute('data-theme') !== 'dark') { html.setAttribute('data-theme', 'dark'); }
-                        if (html.style.colorScheme === 'light') { html.style.colorScheme = 'dark'; }
-                        if (body.classList.contains('light')) { body.classList.remove('light'); body.classList.add('dark'); }
-                        if (body.getAttribute('data-theme') === 'light' || body.getAttribute('data-theme') === 'auto') { body.setAttribute('data-theme', 'dark'); }
-                        try {
-                            localStorage.setItem('lobe-chat-theme', 'dark');
-                            localStorage.setItem('theme-mode', 'dark');
-                            localStorage.setItem('theme', 'dark');
-                        } catch(e) {}
-                    };
-                    window.__nexora_theme_locker = new MutationObserver(lockTheme);
-                    var opts = { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] };
-                    window.__nexora_theme_locker.observe(document.documentElement, opts);
-                    window.__nexora_theme_locker.observe(document.body, opts);
-                    lockTheme(); // run once immediately
-                }
-            })();
-        `;
-        webview.executeJavaScript(js).catch(() => {});
+        const paint = getOpenclawHostThemePaint();
+        // 宿主侧先铺主题实色，首屏不会先黑一下
+        try { webview.style.background = paint.bgBase; } catch (_) {}
+        const css = buildOpenclawDynamicThemeCss(paint);
+        // 同一份 CSS 只 insert 一次，反复 insertCSS 会叠多层导致闪烁
+        if (webview.__nexoraInsertedThemeCss !== css) {
+            webview.__nexoraInsertedThemeCss = css;
+            try {
+                if (typeof webview.insertCSS === 'function') webview.insertCSS(css).catch(function () {});
+            } catch (_) {}
+        }
+        if (typeof webview.executeJavaScript !== 'function') return;
+        const payload = JSON.stringify({
+            css: css,
+            bgBase: paint.bgBase,
+            accentRgb: paint.accentRgb
+        });
+        webview.executeJavaScript(
+            '(function(payload){\n' +
+            '  if(!payload) return;\n' +
+            '  window.__NEXORA_THEME_CSS = payload.css;\n' +
+            '  window.__NEXORA_THEME_BG = payload.bgBase;\n' +
+            '  try {\n' +
+            '    var cssText = window.__NEXORA_THEME_CSS || "";\n' +
+            '    var style = document.getElementById("nexora-openclaw-dynamic-theme");\n' +
+            '    if(!style){\n' +
+            '      style = document.createElement("style");\n' +
+            '      style.id = "nexora-openclaw-dynamic-theme";\n' +
+            '      (document.head || document.documentElement).appendChild(style);\n' +
+            '    }\n' +
+            '    if(style.textContent !== cssText) style.textContent = cssText;\n' +
+            '    var bg = window.__NEXORA_THEME_BG || "#0d0b18";\n' +
+            '    document.documentElement.style.setProperty("background-color", bg, "important");\n' +
+            '    if(document.body){\n' +
+            '      document.body.style.setProperty("background-color", bg, "important");\n' +
+            '      document.body.style.setProperty("background-image", "radial-gradient(ellipse at 50% 35%, rgba("+(payload.accentRgb||"220,38,38")+", 0.16) 0%, transparent 58%)", "important");\n' +
+            '    }\n' +
+            '  } catch(e) {}\n' +
+            '})(' + payload + ');'
+        ).catch(function () {});
     } catch (e) {}
 }
 
@@ -12162,22 +12509,163 @@ async function loadDataCenterUi(forceReload = false) {
     }
 }
 
+async function waitForOpenclawPanelLayout(timeoutMs = 2500) {
+    const pane = document.getElementById('openclaw-panel-view');
+    const webview = document.getElementById('openclaw-iframe');
+    if (!pane) return;
+    const ready = () => {
+        // tab 未激活时 display:none，宽高为 0；必须等面板真正铺开再加载，否则 Control UI 会按窄屏渲染丢掉会话侧栏
+        if (!pane.classList.contains('active')) return false;
+        const w = pane.clientWidth || (webview && webview.clientWidth) || 0;
+        const h = pane.clientHeight || (webview && webview.clientHeight) || 0;
+        return w >= 320 && h >= 240;
+    };
+    if (ready()) {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        return;
+    }
+    const t0 = Date.now();
+    await new Promise((resolve) => {
+        const tick = () => {
+            if (ready() || Date.now() - t0 >= timeoutMs) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    });
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
+function showOpenclawThemeCover() {
+    const cover = document.getElementById('openclaw-theme-cover');
+    if (!cover) return;
+    cover.style.display = 'block';
+    cover.style.opacity = '1';
+    cover.setAttribute('aria-hidden', 'false');
+}
+
+function hideOpenclawThemeCover() {
+    const cover = document.getElementById('openclaw-theme-cover');
+    if (!cover) return;
+    cover.style.transition = 'opacity 160ms ease';
+    cover.style.opacity = '0';
+    setTimeout(() => {
+        cover.style.display = 'none';
+        cover.setAttribute('aria-hidden', 'true');
+    }, 180);
+}
+
+/** 等 OpenClaw 自带主题被我们的 CSS/内联样式真正盖住，再揭开遮罩 */
+async function waitUntilOpenclawThemeOverridden(webview, timeoutMs = 5000) {
+    if (!webview || typeof webview.executeJavaScript !== 'function') {
+        await new Promise((r) => setTimeout(r, 600));
+        return false;
+    }
+    const t0 = Date.now();
+    let ok = false;
+    while (Date.now() - t0 < timeoutMs) {
+        syncOpenclawThemeToWebview();
+        try {
+            ok = !!(await webview.executeJavaScript(`
+                (function(){
+                    var s = document.getElementById('nexora-openclaw-dynamic-theme');
+                    if (!s || !s.textContent) return false;
+                    var bg = (document.body && document.body.style && document.body.style.backgroundColor) || '';
+                    return !!(window.__nexoraThemeGuard && (bg || s.textContent.indexOf('--background') >= 0));
+                })();
+            `));
+        } catch (_) {
+            ok = false;
+        }
+        if (ok) break;
+        await new Promise((r) => setTimeout(r, 180));
+    }
+    // 再补两枪，挡住 SPA 末尾回写
+    syncOpenclawThemeToWebview();
+    await new Promise((r) => setTimeout(r, 120));
+    syncOpenclawThemeToWebview();
+    return ok;
+}
+
+function pokeOpenclawWebviewLayout(webview) {
+    // 不再自动连点侧栏按钮：会触发布局抖动/面板闪烁
+    if (!webview || typeof webview.executeJavaScript !== 'function') return;
+    if (webview.__nexoraLayoutPoked) return;
+    webview.__nexoraLayoutPoked = true;
+    webview.executeJavaScript(`
+        (function () {
+            try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+        })();
+    `).catch(() => {});
+}
+
+/** 温和补主题：少次数、不叠 CSS、不点按钮，避免闪烁 */
+function scheduleOpenclawThemeSync(webview, opts = {}) {
+    if (!webview) return;
+    const delays = Array.isArray(opts.delays) ? opts.delays : [0, 800];
+    const token = (webview.__nexoraThemeSyncToken = (webview.__nexoraThemeSyncToken || 0) + 1);
+    delays.forEach((ms) => {
+        setTimeout(() => {
+            if (webview.__nexoraThemeSyncToken !== token) return;
+            try {
+                injectOpenclawPanelCss(webview);
+                syncOpenclawThemeToWebview();
+            } catch (_) {}
+        }, ms);
+    });
+}
+
+function waitForOpenclawWebviewSettled(webview, timeoutMs = 8000) {
+    if (!webview) return Promise.resolve();
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            try { webview.removeEventListener('did-finish-load', onReady); } catch (_) {}
+            try { webview.removeEventListener('did-stop-loading', onReady); } catch (_) {}
+            try { webview.removeEventListener('dom-ready', onReady); } catch (_) {}
+            resolve();
+        };
+        const onReady = () => finish();
+        try {
+            const u = typeof webview.getURL === 'function' ? webview.getURL() : '';
+            if (u && u !== 'about:blank' && !String(u).startsWith('data:')) {
+                // 已有文档时也等一帧，方便 SPA hydrate
+                setTimeout(finish, 80);
+            }
+        } catch (_) {}
+        try { webview.addEventListener('did-finish-load', onReady); } catch (_) {}
+        try { webview.addEventListener('did-stop-loading', onReady); } catch (_) {}
+        try { webview.addEventListener('dom-ready', onReady); } catch (_) {}
+        setTimeout(finish, timeoutMs);
+    });
+}
+
 async function loadOpenclawControlUi(forceReload = false, opts = {}) {
     const webview = document.getElementById('openclaw-iframe');
     if (!webview || __openclawPanelLoading) return;
     __openclawPanelLoading = true;
     const options = (opts && typeof opts === 'object') ? opts : {};
     try {
+        // 先等面板有真实尺寸，再导航——避免首次点进时按 0 宽渲染成「无会话侧栏的大黑聊天页」
+        await waitForOpenclawPanelLayout();
+        try {
+            const paint = getOpenclawHostThemePaint();
+            webview.style.background = paint.bgBase;
+            webview.style.opacity = '1';
+            webview.style.visibility = 'visible';
+            webview.style.width = '100%';
+            webview.style.height = '100%';
+        } catch (_) {}
+
         const url = await window.api.getDashboardUrl();
         const currentSrc = (webview.getAttribute('src') || '').trim();
         injectWebviewUpdateInterceptor(webview);
-        try {
-            webview.style.background = 'transparent';
-            webview.style.opacity = currentSrc ? '1' : '0';
-        } catch (_) {}
         if (!forceReload && currentSrc && (currentSrc === url || __openclawPanelLastUrl === url)) {
-            injectWebviewUpdateInterceptor(webview);
-            syncOpenclawThemeToWebview();
+            scheduleOpenclawThemeSync(webview, { delays: [0, 700] });
             return;
         }
         const isFirstLoad = !currentSrc;
@@ -12209,13 +12697,14 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
         }
 
         injectWebviewUpdateInterceptor(webview);
-        syncOpenclawThemeToWebview();
+        // 导航后只温和补 1～2 次，避免叠 CSS 闪烁
+        scheduleOpenclawThemeSync(webview, { delays: [80, 900] });
     } catch (err) {
         const fallback = 'http://127.0.0.1:18789/acp/#token=' + encodeURIComponent('openclaw-dev-token-998877');
         __openclawPanelLastUrl = fallback;
         webview.src = fallback;
         injectWebviewUpdateInterceptor(webview);
-        syncOpenclawThemeToWebview();
+        scheduleOpenclawThemeSync(webview, { delays: [80, 900] });
     } finally {
         __openclawPanelLoading = false;
     }
@@ -12223,14 +12712,17 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
 
 function injectOpenclawPanelCss(webview) {
     if (!webview) return;
-    // insertCSS 最稳：保证透出 Nexora 星空底；style 标签用于可覆盖更新
+    const paint = getOpenclawHostThemePaint();
+    const cssText = buildOpenclawPanelCss(paint);
+    // 同一份面板 CSS 只 insert 一次，反复 insertCSS 会叠层导致闪烁
     try {
-        if (typeof webview.insertCSS === 'function') {
-            webview.insertCSS(OPENCLAW_TRANSPARENT_PANEL_CSS).catch(() => {});
+        if (typeof webview.insertCSS === 'function' && webview.__nexoraInsertedPanelCss !== cssText) {
+            webview.__nexoraInsertedPanelCss = cssText;
+            webview.insertCSS(cssText).catch(() => {});
         }
     } catch (e) {}
     if (typeof webview.executeJavaScript !== 'function') return;
-    const css = JSON.stringify(OPENCLAW_TRANSPARENT_PANEL_CSS);
+    const css = JSON.stringify(cssText);
     webview.executeJavaScript(`
         (function() {
             var css = ${css};
@@ -12241,6 +12733,7 @@ function injectOpenclawPanelCss(webview) {
                 (document.head || document.documentElement).appendChild(style);
             }
             if (style.textContent !== css) style.textContent = css;
+            window.__nexoraThemeGuard = true;
         })();
     `).catch(() => {});
 }
@@ -12312,42 +12805,61 @@ function buildOpenclawMediaEnhanceScript(magicPrefix) {
 
         window.__nexoraEnhanceMedia = function () { enhanceMediaIn(document); };
 
+        var processing = false;
+        var processTimer = null;
         function processNodes() {
-            document.querySelectorAll('div, p, span, section, aside, [class*="alert"], [class*="notification"], [class*="banner"]').forEach(function (el) {
-                var text = el.textContent || '';
-                if ((text.includes('Update skipped') || text.includes('not-git-install') || text.includes('openclaw update'))
-                    && el.offsetHeight > 0 && el.offsetHeight < 200) {
-                    el.style.display = 'none';
-                }
-            });
+            if (processing) return;
+            processing = true;
+            try {
+                document.querySelectorAll('[class*="alert"], [class*="notification"], [class*="banner"]').forEach(function (el) {
+                    var text = el.textContent || '';
+                    if ((text.includes('Update skipped') || text.includes('not-git-install') || text.includes('openclaw update'))
+                        && el.offsetHeight > 0 && el.offsetHeight < 200) {
+                        el.style.display = 'none';
+                    }
+                });
 
-            document.querySelectorAll('button, a, [role="button"], span').forEach(function (el) {
-                var text = (el.textContent || '').trim();
-                if ((text === '立即更新' || text === 'Update Now' || text === 'update now') && !el.__nexora_agent_intercepted) {
-                    el.__nexora_agent_intercepted = true;
-                    el.addEventListener('click', function (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        var ver = '';
-                        var parent = el.parentElement;
-                        for (var i = 0; i < 5 && parent; i++) {
-                            var m = parent.textContent.match(/v?(20\d{2}\.\d+\.\d+)/);
-                            if (m) { ver = m[1]; break; }
-                            parent = parent.parentElement;
-                        }
-                        console.log(MAGIC + JSON.stringify({ action: 'update', version: ver }));
-                    }, true);
-                }
-            });
+                document.querySelectorAll('button, a, [role="button"]').forEach(function (el) {
+                    var text = (el.textContent || '').trim();
+                    if ((text === '立即更新' || text === 'Update Now' || text === 'update now') && !el.__nexora_agent_intercepted) {
+                        el.__nexora_agent_intercepted = true;
+                        el.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            var ver = '';
+                            var parent = el.parentElement;
+                            for (var i = 0; i < 5 && parent; i++) {
+                                var m = parent.textContent.match(/v?(20\d{2}\.\d+\.\d+)/);
+                                if (m) { ver = m[1]; break; }
+                                parent = parent.parentElement;
+                            }
+                            console.log(MAGIC + JSON.stringify({ action: 'update', version: ver }));
+                        }, true);
+                    }
+                });
 
-            enhanceMediaIn(document);
+                enhanceMediaIn(document);
+            } finally {
+                processing = false;
+            }
         }
 
-        var observer = new MutationObserver(function () { processNodes(); });
-        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        function scheduleProcess() {
+            if (processTimer) return;
+            processTimer = setTimeout(function () {
+                processTimer = null;
+                processNodes();
+            }, 250);
+        }
+
+        // 勿观察 characterData：会话「加载中」文案会连触发 → 改 DOM → 再触发 → 面板狂闪
+        var observer = new MutationObserver(function () { scheduleProcess(); });
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
         processNodes();
-        setInterval(function () { try { enhanceMediaIn(document); } catch (e) {} }, 1200);
+        setInterval(function () { try { enhanceMediaIn(document); } catch (e) {} }, 2500);
     };
 
     return '(' + fn.toString() + ')(' + JSON.stringify(magicPrefix) + ');';
@@ -12357,45 +12869,63 @@ function injectWebviewUpdateInterceptor(webview) {
     if (!webview) return;
 
     const MAGIC_PREFIX = '__NEXORA_AGENT_UPDATE__:';
-    injectOpenclawPanelCss(webview);
 
     const revealAfterTheme = () => {
         try {
-            webview.style.background = 'transparent';
-            webview.style.transition = 'opacity 120ms ease';
+            const paint = getOpenclawHostThemePaint();
+            webview.style.background = paint.bgBase;
             webview.style.opacity = '1';
+            webview.style.visibility = 'visible';
         } catch (_) {}
+        pokeOpenclawWebviewLayout(webview);
     };
 
-    const injectThemeNow = () => {
+    // 一次导航只注入一轮：dom-ready 抢首屏，finish 再盖 SPA 回写
+    const injectThemeNow = (phase) => {
+        const nav = webview.__nexoraThemeNavId || 0;
+        if (phase === 'early') {
+            if (webview.__nexoraThemeEarlyNav === nav) return;
+            webview.__nexoraThemeEarlyNav = nav;
+        } else {
+            if (webview.__nexoraThemeLateNav === nav) return;
+            webview.__nexoraThemeLateNav = nav;
+        }
         injectOpenclawPanelCss(webview);
         syncOpenclawThemeToWebview();
         try { webview.executeJavaScript(buildOpenclawMediaEnhanceScript(MAGIC_PREFIX)).catch(() => {}); } catch (_) {}
-        setTimeout(() => {
-            injectOpenclawPanelCss(webview);
-            syncOpenclawThemeToWebview();
-            revealAfterTheme();
-        }, 80);
+        revealAfterTheme();
+        if (phase === 'late') {
+            scheduleOpenclawThemeSync(webview, { delays: [700] });
+        }
     };
 
     if (!webview.__nexoraOpenclawThemeBound) {
         webview.__nexoraOpenclawThemeBound = true;
         webview.addEventListener('did-start-loading', () => {
             try {
-                webview.style.background = 'transparent';
-                webview.style.opacity = '0';
+                webview.__nexoraThemeNavId = (webview.__nexoraThemeNavId || 0) + 1;
+                webview.__nexoraInsertedThemeCss = '';
+                webview.__nexoraInsertedPanelCss = '';
+                webview.__nexoraLayoutPoked = false;
+                const paint = getOpenclawHostThemePaint();
+                webview.style.background = paint.bgBase;
+                webview.style.opacity = '1';
             } catch (_) {}
         });
-        webview.addEventListener('dom-ready', injectThemeNow);
-        webview.addEventListener('did-finish-load', injectThemeNow);
-        webview.addEventListener('did-stop-loading', injectThemeNow);
+        // dom-ready：尽早盖住 OpenClaw 自带纯黑，减少首屏黑底
+        webview.addEventListener('dom-ready', () => injectThemeNow('early'));
+        webview.addEventListener('did-finish-load', () => injectThemeNow('late'));
     }
 
-    // 若 webview 已加载，立即注入一次；首次导航前也已预先绑定，避免首屏灰底闪一下。
+    // 已有文档时补一次（切回面板），不重复导航注入
     try {
         if (typeof webview.getURL === 'function') {
             const u = webview.getURL();
-            if (u && u !== 'about:blank' && !u.startsWith('data:')) injectThemeNow();
+            if (u && u !== 'about:blank' && !u.startsWith('data:')) {
+                injectOpenclawPanelCss(webview);
+                syncOpenclawThemeToWebview();
+                revealAfterTheme();
+            }
         }
     } catch (_) {}
 

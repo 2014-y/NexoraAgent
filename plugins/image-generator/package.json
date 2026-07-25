@@ -1,0 +1,13 @@
+{
+  "name": "image-generator",
+  "version": "1.0.0",
+  "description": "Generate images via agnes-ai image API with key rotation",
+  "main": "index.js",
+  "type": "module",
+  "license": "MIT",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}

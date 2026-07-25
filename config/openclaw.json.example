@@ -362,9 +362,19 @@
   "skills": {
     "limits": {
       "maxSkillsPromptChars": 3000
-    }
+    },
+    "workshop": {
+      "approvalPolicy": "pending",
+      "autonomous": {
+        "enabled": false
+      }
+    },
+    "entries": {}
   },
   "tools": {
+    "alsoAllow": [
+      "skill_workshop"
+    ],
     "deny": [
       "tts",
       "browser"
@@ -386,7 +396,8 @@
           "memory_get",
           "image",
           "draw_picture",
-          "draw_video"
+          "draw_video",
+          "skill_workshop"
         ],
         "deny": [
           "sessions_history",
