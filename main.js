@@ -3481,17 +3481,8 @@ function prepareChannelPluginsBeforeGateway() {
     if (needsSave) {
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
         console.log('[PluginSeed] Pre-gateway channel trust records synced');
-        
-        // 关键安全重置：如果发生了配置保存（通常意味着清除了跨机错乱的 installPath，或者初次写 installs），
-        // 那么缓存的 SQLite 插件状态可能也是脏的。我们直接清除 sqlite 数据库，逼迫 OpenClaw 下次启动
-        // 从干净的 config 中重新读取 installs 并重建 plugin index。
-        const dbPath = path.join(CONFIG_DIR, 'openclaw.sqlite');
-        const dbWal = path.join(CONFIG_DIR, 'openclaw.sqlite-wal');
-        const dbShm = path.join(CONFIG_DIR, 'openclaw.sqlite-shm');
-        try { if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath); } catch (e) {}
-        try { if (fs.existsSync(dbWal)) fs.unlinkSync(dbWal); } catch (e) {}
-        try { if (fs.existsSync(dbShm)) fs.unlinkSync(dbShm); } catch (e) {}
-        console.log('[PluginSeed] Cleared stale SQLite database cache due to config update');
+        // 切勿删除 openclaw.sqlite：该库含审计事件 / Token / 工具调用等数据中心指标。
+        // 插件索引脏数据由 Gateway 下次启动按 config 重建即可。
     }
 }
 
@@ -5333,13 +5324,7 @@ function ensureOpenClawConfigInitialized() {
         if (needsSave) {
             try {
                 fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
-                const dbPath = path.join(CONFIG_DIR, 'openclaw.sqlite');
-                const dbWal = path.join(CONFIG_DIR, 'openclaw.sqlite-wal');
-                const dbShm = path.join(CONFIG_DIR, 'openclaw.sqlite-shm');
-                try { if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath); } catch (e) {}
-                try { if (fs.existsSync(dbWal)) fs.unlinkSync(dbWal); } catch (e) {}
-                try { if (fs.existsSync(dbShm)) fs.unlinkSync(dbShm); } catch (e) {}
-                console.log('[PluginSeed] Cleared stale SQLite database cache due to config initialization/update');
+                // 切勿因「写了一点 config」就删 openclaw.sqlite（会清空数据中心统计）
             } catch(e) {}
         }
         
