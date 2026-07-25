@@ -1201,6 +1201,7 @@ const MEDIA_MEMORY_MARKER = '<!-- nexora-media-memory-v1 -->';
 const MEDIA_AGENTS_MARKER = '<!-- nexora-media-agents-v2 -->';
 const MEDIA_TOOLS_MARKER_LEGACY = '<!-- nexora-media-tools-v1 -->';
 const MEDIA_AGENTS_MARKER_LEGACY = '<!-- nexora-media-agents-v1 -->';
+const REPLY_DEDUPE_AGENTS_MARKER = '<!-- nexora-reply-dedupe-v1 -->';
 const MEDIA_IMAGE_PREFS_FILE = 'media-generator.json';
 const MEDIA_VIDEO_PREFS_FILE = 'video-generator.json';
 const DEFAULT_MEDIA_IMAGE_PREFS = {
@@ -2052,23 +2053,38 @@ function syncBundledPluginFiles(pluginId) {
                 fs.rmSync(nestedJunk, { recursive: true, force: true });
             }
         } catch (e) {}
-        for (const name of fs.readdirSync(pluginSrc)) {
-            if (name === 'node_modules' || name === '.bundle-version') continue;
-            // 防止源目录里残留同名嵌套文件夹
-            if (name === pluginId) continue;
-            const from = path.join(pluginSrc, name);
-            const to = path.join(destDir, name);
-            try {
-                const st = fs.statSync(from);
-                if (st.isDirectory()) {
-                    fs.cpSync(from, to, { recursive: true, force: true });
-                } else {
-                    fs.copyFileSync(from, to);
+        const copyPluginTree = (toDir) => {
+            fs.mkdirSync(toDir, { recursive: true });
+            for (const name of fs.readdirSync(pluginSrc)) {
+                if (name === 'node_modules' || name === '.bundle-version') continue;
+                if (name === pluginId) continue;
+                const from = path.join(pluginSrc, name);
+                const to = path.join(toDir, name);
+                try {
+                    const st = fs.statSync(from);
+                    if (st.isDirectory()) {
+                        fs.cpSync(from, to, { recursive: true, force: true });
+                    } else {
+                        fs.copyFileSync(from, to);
+                    }
+                } catch (e) {
+                    console.warn(`[PluginSeed] Failed syncing ${pluginId}/${name}:`, e.message);
                 }
-            } catch (e) {
-                console.warn(`[PluginSeed] Failed syncing ${pluginId}/${name}:`, e.message);
             }
-        }
+        };
+        copyPluginTree(destDir);
+        // 运行时目录偶发也被 gateway 解析到：一并覆盖，避免旧版 JSON.stringify(event) 双回复
+        try {
+            const rtRoot = getGatewayRuntimeRoot(require('electron').app);
+            if (rtRoot) {
+                const rtPluginDir = path.join(rtRoot, 'plugins', pluginId);
+                if (fs.existsSync(path.join(rtRoot, 'plugins')) || pluginId === 'error-filter' || pluginId === 'session-overflow-rollover') {
+                    copyPluginTree(rtPluginDir);
+                    ensurePluginPackageJson(rtPluginDir, pluginId);
+                    ensurePluginManifestJson(rtPluginDir, pluginId);
+                }
+            }
+        } catch (e) {}
         ensurePluginPackageJson(destDir, pluginId);
         ensurePluginManifestJson(destDir, pluginId);
         syncMediaHttpHelper(destDir);
@@ -2215,6 +2231,12 @@ ${MEDIA_AGENTS_MARKER}
 - 用户要画图/视频：**优先** \`draw_picture\` / \`draw_video\`；否则 \`exec\` 运行 \`node <用户目录>/.openclaw/media-cli/agnes-media-cli.js image|video --prompt "描述"\`
 - **禁止** \`image_generate\` / \`video_generate\`；完成后回复首行加 \`MEDIA:绝对文件路径\`
 - **禁止**输出 \`[[video_media]]\` / \`[[image_media]]\` / \`[[image]]\` / \`[[video]]\` 等占位符（通道不会渲染）
+
+## 防双发
+${REPLY_DEDUPE_AGENTS_MARKER}
+- 普通对话只输出助手正文，**不要**用 \`message\` 工具再发一遍纯文本
+- 若本轮必须用 \`message\`/\`sendMedia\`，结尾只能是 \`NO_REPLY\`
+- 一轮只允许用户看到一条回复
 `;
 
 function seedDefaultMemoryFile(memFile) {
@@ -2642,6 +2664,41 @@ function ensureStartupRulesOnceGuidance(wsDir) {
     }
 }
 
+function buildReplyDedupeAgentsSection() {
+    return `
+## 防双发
+${REPLY_DEDUPE_AGENTS_MARKER}
+- 普通对话只输出助手正文，**不要**用 \`message\` 工具再发一遍纯文本
+- 若本轮必须用 \`message\`/\`sendMedia\`，结尾只能是精确的 \`NO_REPLY\`
+- 禁止「工具推送一条 + 口述再一条」；一轮只允许用户看到一条回复
+`;
+}
+
+function ensureReplyDedupeAgentsGuidance(wsDir) {
+    try {
+        fs.mkdirSync(wsDir, { recursive: true });
+        const agentsPath = path.join(wsDir, 'AGENTS.md');
+        if (!fs.existsSync(agentsPath)) return;
+        let cur = fs.readFileSync(agentsPath, 'utf8');
+        if (cur.includes(REPLY_DEDUPE_AGENTS_MARKER)) return;
+        const section = buildReplyDedupeAgentsSection().trim() + '\n';
+        if (/##\s*防双发|##\s*Reply Delivery/i.test(cur)) {
+            cur = cur
+                .replace(/##\s*防双发[\s\S]*?(?=\n##\s|\n<!--|\s*$)/m, '')
+                .replace(/##\s*Reply Delivery[\s\S]*?(?=\n##\s|\n<!--|\s*$)/mi, '')
+                .trim();
+            cur = cur + (cur ? '\n\n' : '') + section;
+            fs.writeFileSync(agentsPath, cur, 'utf8');
+            console.log('[PluginSeed] Upgraded workspace AGENTS.md reply-dedupe guidance');
+            return;
+        }
+        fs.appendFileSync(agentsPath, '\n' + section, 'utf8');
+        console.log('[PluginSeed] Appended reply-dedupe guidance to workspace AGENTS.md');
+    } catch (e) {
+        console.warn('[PluginSeed] ensureReplyDedupeAgentsGuidance:', e.message);
+    }
+}
+
 function buildMediaToolsSection() {
     const cliPath = resolveMediaCliScriptPath();
     return `${MEDIA_TOOLS_MARKER}
@@ -2847,6 +2904,7 @@ function seedMediaRuntimeArtifacts(appVersion) {
         const wsDir = path.join(CONFIG_DIR, 'workspace');
         ensureMediaWorkspaceGuidance(wsDir);
         ensureMediaAgentsGuidance(wsDir);
+        ensureReplyDedupeAgentsGuidance(wsDir);
         ensureStartupRulesOnceGuidance(wsDir);
         ensureMediaMemoryGuidance(path.join(wsDir, 'MEMORY.md'));
     } catch (e) {
@@ -3745,7 +3803,13 @@ function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
 
 // 停止后台Nexora Agent子进程
 function clearGatewayRuntimeLogsForFreshStart() {
-    const names = ['gateway_stdout.log', 'gateway_stderr.log', 'gateway-output.log', 'gateway-error.log'];
+    const names = [
+        'gateway_stdout.log',
+        'gateway_stderr.log',
+        'gateway-output.log',
+        'gateway-error.log',
+        'main_error.log',
+    ];
     for (const name of names) {
         try {
             const target = path.join(CONFIG_DIR, name);
@@ -3905,8 +3969,10 @@ async function startGatewayProcess() {
             }
         }
 
+        // 每次启动前先清空磁盘日志，避免 UI / 诊断读到上一轮残留
+        clearGatewayRuntimeLogsForFreshStart();
+
         if (mainWindow) {
-            clearGatewayRuntimeLogsForFreshStart();
             mainWindow.webContents.send('gateway-status', 'starting');
             mainWindow.webContents.send('gateway-clear-logs');
             mainWindow.webContents.send('gateway-log', '[System] 正在拉起内置 OpenClaw Gateway 核心...\n');
@@ -5804,13 +5870,10 @@ ipcMain.handle('read-system-logs', async () => {
     }
 });
 
-// 清空本地持久化系统日志 gateway_stdout.log
+// 清空本地持久化系统日志（stdout/stderr 等）
 ipcMain.handle('clear-system-logs', async () => {
     try {
-        const logPath = path.join(CONFIG_DIR, 'gateway_stdout.log');
-        if (fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, '', 'utf8');
-        }
+        clearGatewayRuntimeLogsForFreshStart();
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message };

@@ -22,7 +22,18 @@ const BLOCK_SUBSTRINGS = [
   'openclaw-screenshot-latest',
   'Message:',
   'Model Fallback',
+  'LLM request failed',
+  'Connection failed, please check your network or proxy settings',
 ];
+
+/** 同一 run 内第二次纯文本投递去重（message 工具 + 最终口述双发） */
+const RUN_OUTBOUND_TTL_MS = 180_000;
+/** @type {Map<string, { at: number, preview: string }>} */
+const recentTextOutboundByRun = new Map();
+/** 同会话近重复正文去重（跨 runId，防 silent-retry/rollover 第二轮） */
+const SESSION_TEXT_DEDUP_TTL_MS = 90_000;
+/** @type {Map<string, { at: number, fp: string, prefix: string }>} */
+const recentTextOutboundBySession = new Map();
 
 /** 系统诊断硬特征：仅短消息或警告气泡拦截，避免误伤正常长回复 */
 const DIAGNOSTIC_HARD_SUBSTRINGS = [
@@ -156,9 +167,131 @@ function isSystemDiagnosticBannerOnly(text) {
   return true;
 }
 
+/** 仅真实 runId/deliveryId；禁止退化成 peer（否则微信同联系人后续回复会被误杀） */
+function resolveOutboundRunKey(event) {
+  if (!event || typeof event !== 'object') return '';
+  const meta = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+  const cands = [
+    meta.runId,
+    event.runId,
+    event.run_id,
+    meta.deliveryId,
+    event.deliveryId,
+  ];
+  for (const k of cands) {
+    if (typeof k === 'string' && k.trim()) return `run:${k.trim()}`;
+  }
+  return '';
+}
+
+function outboundHasMedia(event) {
+  if (!event || typeof event !== 'object') return false;
+  const meta = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+  if (typeof event.mediaUrl === 'string' && event.mediaUrl.trim()) return true;
+  if (Array.isArray(event.mediaUrls) && event.mediaUrls.length > 0) return true;
+  if (Array.isArray(meta.mediaUrls) && meta.mediaUrls.length > 0) return true;
+  if (typeof meta.mediaUrl === 'string' && meta.mediaUrl.trim()) return true;
+  return false;
+}
+
+function pruneRecentOutbound(now = Date.now()) {
+  for (const [k, v] of recentTextOutboundByRun) {
+    if (!v || now - v.at > RUN_OUTBOUND_TTL_MS) recentTextOutboundByRun.delete(k);
+  }
+  for (const [k, v] of recentTextOutboundBySession) {
+    if (!v || now - v.at > SESSION_TEXT_DEDUP_TTL_MS) recentTextOutboundBySession.delete(k);
+  }
+}
+
+function textFingerprint(text) {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .slice(0, 600);
+}
+
+function resolveSessionDedupeKey(event) {
+  const sk = resolveSessionKeyFromEvent(event);
+  if (sk) return `sess:${sk}`;
+  const to = typeof event?.to === 'string' ? event.to.trim() : '';
+  if (to) return `to:${to}`;
+  return '';
+}
+
+/**
+ * 同一轮已成功发出过纯文本后，再发一条纯文本 → 取消（防「问一句回两句」）。
+ * 带媒体的投递放行；极短 ACK / NO_REPLY 不参与。
+ * 注意：无 runId 时不做「整 peer 封禁」，只按正文指纹去重近似复读。
+ */
+function shouldCancelDuplicateRunOutbound(event, text) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.length < 8) return false;
+  if (/^NO_REPLY$/i.test(raw)) return false;
+  if (outboundHasMedia(event)) return false;
+  if (extractMediaDirectiveUrls(raw).length > 0) return false;
+  const now = Date.now();
+  pruneRecentOutbound(now);
+
+  const runKey = resolveOutboundRunKey(event);
+  if (runKey) {
+    const prev = recentTextOutboundByRun.get(runKey);
+    if (prev && now - prev.at < RUN_OUTBOUND_TTL_MS) return true;
+  }
+
+  // 跨 run：仅取消「正文几乎完全相同」的复读，避免误伤正常连续对话
+  const sessKey = resolveSessionDedupeKey(event);
+  if (sessKey && raw.length >= 24) {
+    const fp = textFingerprint(raw);
+    const prev = recentTextOutboundBySession.get(sessKey);
+    if (prev && now - prev.at < SESSION_TEXT_DEDUP_TTL_MS) {
+      if (prev.fp === fp) return true;
+      // 要求前 160 字相同且长度接近，才视为复读（防双回复），短问候/不同回答不拦
+      if (
+        prev.fp
+        && fp.length >= 160
+        && prev.fp.length >= 160
+        && fp.slice(0, 160) === prev.fp.slice(0, 160)
+        && Math.abs(fp.length - prev.fp.length) <= Math.max(40, prev.fp.length * 0.2)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function rememberRunOutbound(event, text) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.length < 8) return;
+  if (/^NO_REPLY$/i.test(raw)) return;
+  if (outboundHasMedia(event)) return;
+  if (extractMediaDirectiveUrls(raw).length > 0) return;
+  const now = Date.now();
+  pruneRecentOutbound(now);
+  const runKey = resolveOutboundRunKey(event);
+  if (runKey) {
+    recentTextOutboundByRun.set(runKey, {
+      at: now,
+      preview: raw.replace(/\s+/g, ' ').slice(0, 80),
+    });
+  }
+  const sessKey = resolveSessionDedupeKey(event);
+  if (sessKey && raw.length >= 24) {
+    const fp = textFingerprint(raw);
+    recentTextOutboundBySession.set(sessKey, {
+      at: now,
+      fp,
+      prefix: fp.slice(0, 120),
+    });
+  }
+}
+
 function shouldBlockOutbound(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
+  if (/^LLM request failed\.?$/i.test(raw)) return true;
+  if (/Connection failed.*network or proxy/i.test(raw)) return true;
   if (isModelFallbackNoticeOnly(raw)) return true;
   if (isLeakedToolJsonOnly(raw)) return true;
   if (isSystemDiagnosticBannerOnly(raw)) return true;
@@ -433,13 +566,29 @@ function looksLikeScreenshotRefusal(text) {
   return refuse && aboutShot;
 }
 
-/** 双 hook 可能对同一段伪指令各跑一次；短 TTL 缓存 + 进行中锁避免重复截图/生图 */
+/** 双 hook 可能对同一段伪指令各跑一次；按 prompt 指纹缓存，避免重复截图/生图 */
 const _pseudoMediaSideEffectCache = new Map();
 const _pseudoMediaInflight = new Map();
-const PSEUDO_MEDIA_CACHE_TTL_MS = 12000;
+const PSEUDO_MEDIA_CACHE_TTL_MS = 5 * 60_000;
+/** @type {Map<string, { at: number, paths: Set<string> }>} */
+const recentMediaOutboundByRun = new Map();
+
+function normalizePromptFingerprint(prompt) {
+  return String(prompt || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .slice(0, 400);
+}
 
 function pseudoMediaCacheKey(text) {
-  return String(text || '').trim().slice(0, 800);
+  const raw = String(text || '').trim();
+  const prompt = extractDrawPicturePrompt(raw);
+  if (prompt) return `draw:${normalizePromptFingerprint(prompt)}`;
+  if (looksLikePseudoScreenshot(raw) || looksLikeScreenshotRefusal(raw)) {
+    return `shot:${raw.slice(0, 200)}`;
+  }
+  return `text:${raw.slice(0, 800)}`;
 }
 
 function getCachedPseudoMedia(text) {
@@ -454,12 +603,214 @@ function getCachedPseudoMedia(text) {
 }
 
 function setCachedPseudoMedia(text, kind, mediaUrls, replyText) {
-  _pseudoMediaSideEffectCache.set(pseudoMediaCacheKey(text), {
+  const entry = {
     at: Date.now(),
     kind,
     mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : [],
     replyText: String(replyText || ''),
-  });
+  };
+  _pseudoMediaSideEffectCache.set(pseudoMediaCacheKey(text), entry);
+  // 同时按 prompt 指纹再存一份，覆盖「同一 prompt、不同外层文案」
+  const prompt = extractDrawPicturePrompt(text);
+  if (prompt) {
+    _pseudoMediaSideEffectCache.set(`draw:${normalizePromptFingerprint(prompt)}`, entry);
+  }
+}
+
+function pruneRecentMediaOutbound(now = Date.now()) {
+  for (const [k, v] of recentMediaOutboundByRun) {
+    if (!v || now - v.at > RUN_OUTBOUND_TTL_MS) recentMediaOutboundByRun.delete(k);
+  }
+}
+
+function collectOutboundMediaPaths(event, text) {
+  const paths = [];
+  const push = (p) => {
+    const v = unixPath(String(p || '').trim());
+    if (v) paths.push(v.toLowerCase());
+  };
+  if (event && typeof event === 'object') {
+    const meta = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    if (typeof event.mediaUrl === 'string') push(event.mediaUrl);
+    if (Array.isArray(event.mediaUrls)) event.mediaUrls.forEach(push);
+    if (typeof meta.mediaUrl === 'string') push(meta.mediaUrl);
+    if (Array.isArray(meta.mediaUrls)) meta.mediaUrls.forEach(push);
+    if (event.payload && typeof event.payload === 'object') {
+      if (typeof event.payload.mediaUrl === 'string') push(event.payload.mediaUrl);
+      if (Array.isArray(event.payload.mediaUrls)) event.payload.mediaUrls.forEach(push);
+    }
+  }
+  for (const u of extractMediaDirectiveUrls(text)) push(u);
+  return Array.from(new Set(paths));
+}
+
+/** 同 prompt 已投递过媒体后，短窗内禁止再发（防双 run / 双 hook） */
+const recentPromptMediaDelivery = new Map();
+const recentPathMediaDelivery = new Map();
+/** 同会话短窗内只允许一次生图类媒体（覆盖 prompt 略有改写的二次 run） */
+const recentSessionDrawDelivery = new Map();
+/** 生图 API 进行中（与最终投递 claim 分离） */
+const _drawInflightBySession = new Map();
+const PROMPT_MEDIA_DELIVERY_TTL_MS = 120_000;
+const SESSION_DRAW_COOLDOWN_MS = 75_000;
+
+function prunePromptMediaDelivery(now = Date.now()) {
+  for (const [k, v] of recentPromptMediaDelivery) {
+    if (!v || now - v.at > PROMPT_MEDIA_DELIVERY_TTL_MS) recentPromptMediaDelivery.delete(k);
+  }
+  for (const [k, at] of recentPathMediaDelivery) {
+    if (!at || now - at > PROMPT_MEDIA_DELIVERY_TTL_MS) recentPathMediaDelivery.delete(k);
+  }
+  for (const [k, at] of recentSessionDrawDelivery) {
+    if (!at || now - at > SESSION_DRAW_COOLDOWN_MS) recentSessionDrawDelivery.delete(k);
+  }
+}
+
+function looksLikeMediaStatusOnly(text) {
+  const raw = String(text || '').trim();
+  return /^Image generated\.?$/i.test(raw) || /^Screenshot captured\.?$/i.test(raw);
+}
+
+function isDrawLikeOutbound(text, promptHint = '', paths = []) {
+  if (promptHint) return true;
+  if (extractDrawPicturePrompt(text)) return true;
+  if (looksLikeMediaStatusOnly(text) && /image generated/i.test(String(text || ''))) return true;
+  return (paths || []).some((p) => /image-output|[/\\]img[_-]|draw/i.test(String(p || '')));
+}
+
+function sessionScopeFromEvent(event) {
+  const sk = resolveSessionKeyFromEvent(event);
+  if (sk) return sk;
+  const to = typeof event?.to === 'string' ? event.to.trim() : '';
+  if (to) return `to:${to}`;
+  const meta = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+  const channel = typeof meta.channel === 'string' ? meta.channel.trim() : '';
+  if (channel) return `ch:${channel}`;
+  return 'global';
+}
+
+function promptDeliveryKey(event, prompt) {
+  const fp = normalizePromptFingerprint(prompt);
+  if (!fp) return '';
+  return `${sessionScopeFromEvent(event)}|draw:${fp}`;
+}
+
+/** 是否已占坑：同 run / 同 prompt / 同路径 / 生图进行中 */
+function isMediaDeliveryClaimed(event, text, extraPaths = [], promptHint = '', opts = {}) {
+  const ignoreInflight = Boolean(opts && opts.ignoreInflight);
+  const now = Date.now();
+  pruneRecentMediaOutbound(now);
+  prunePromptMediaDelivery(now);
+  const paths = [
+    ...collectOutboundMediaPaths(event, text),
+    ...(Array.isArray(extraPaths) ? extraPaths : []),
+  ].map((p) => unixPath(String(p || '').trim()).toLowerCase()).filter(Boolean);
+
+  const runKey = resolveOutboundRunKey(event);
+  if (runKey) {
+    const prev = recentMediaOutboundByRun.get(runKey);
+    if (prev && prev.paths.size > 0) {
+      if (paths.length > 0 || looksLikeMediaStatusOnly(text) || extractDrawPicturePrompt(text) || promptHint) {
+        return true;
+      }
+    }
+  }
+
+  const prompt = String(promptHint || extractDrawPicturePrompt(text) || '').trim();
+  if (prompt) {
+    const pk = promptDeliveryKey(event, prompt);
+    const hit = pk && recentPromptMediaDelivery.get(pk);
+    if (hit && now - hit.at < PROMPT_MEDIA_DELIVERY_TTL_MS) return true;
+  }
+
+  if (isDrawLikeOutbound(text, prompt, paths)) {
+    const sk = sessionScopeFromEvent(event);
+    const at = sk && recentSessionDrawDelivery.get(sk);
+    if (at && now - at < SESSION_DRAW_COOLDOWN_MS) return true;
+    if (!ignoreInflight) {
+      const inflight = sk && _drawInflightBySession.get(sk);
+      if (inflight && now - inflight.at < SESSION_DRAW_COOLDOWN_MS) return true;
+    }
+  }
+
+  for (const p of paths) {
+    const at = recentPathMediaDelivery.get(p);
+    if (at && now - at < PROMPT_MEDIA_DELIVERY_TTL_MS) return true;
+  }
+  return false;
+}
+
+function releaseSessionDrawReservation(event) {
+  const sk = sessionScopeFromEvent(event);
+  if (sk) _drawInflightBySession.delete(sk);
+}
+
+/**
+ * 生图开始前占用「进行中」槽（与最终 claim 分离），避免双 hook 各跑一遍 API。
+ * @returns {{ ok: true, reserved: boolean } | { ok: false, reason: string }}
+ */
+function reserveSessionDrawSlot(event, text, promptHint = '') {
+  const prompt = String(promptHint || extractDrawPicturePrompt(text) || '').trim();
+  if (!isDrawLikeOutbound(text, prompt, [])) return { ok: true, reserved: false };
+  if (isMediaDeliveryClaimed(event, text, [], prompt)) {
+    return { ok: false, reason: 'error-filter:suppress-duplicate-media' };
+  }
+  const sk = sessionScopeFromEvent(event);
+  const now = Date.now();
+  const inflight = sk && _drawInflightBySession.get(sk);
+  if (inflight && now - inflight.at < SESSION_DRAW_COOLDOWN_MS) {
+    return { ok: false, reason: 'error-filter:suppress-duplicate-media' };
+  }
+  if (sk) _drawInflightBySession.set(sk, { at: now, prompt });
+  return { ok: true, reserved: true };
+}
+
+/**
+ * 先占坐：同一时刻只有第一个 hook/run 能投递该媒体。
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+function claimMediaDelivery(event, text, extraPaths = [], promptHint = '') {
+  // ignoreInflight：本 hook 已 reserve，允许 finalize claim
+  if (isMediaDeliveryClaimed(event, text, extraPaths, promptHint, { ignoreInflight: true })) {
+    return { ok: false, reason: 'error-filter:suppress-duplicate-media' };
+  }
+  const now = Date.now();
+  pruneRecentMediaOutbound(now);
+  prunePromptMediaDelivery(now);
+  const paths = Array.from(new Set([
+    ...collectOutboundMediaPaths(event, text),
+    ...(Array.isArray(extraPaths) ? extraPaths : []),
+  ].map((p) => unixPath(String(p || '').trim()).toLowerCase()).filter(Boolean)));
+
+  const runKey = resolveOutboundRunKey(event);
+  if (runKey) {
+    const entry = recentMediaOutboundByRun.get(runKey) || { at: now, paths: new Set() };
+    for (const p of paths) entry.paths.add(p);
+    if (entry.paths.size === 0) entry.paths.add('__media_slot__');
+    entry.at = now;
+    recentMediaOutboundByRun.set(runKey, entry);
+  }
+
+  const prompt = String(promptHint || extractDrawPicturePrompt(text) || '').trim();
+  if (prompt) {
+    const pk = promptDeliveryKey(event, prompt);
+    if (pk) recentPromptMediaDelivery.set(pk, { at: now, paths });
+  }
+  if (isDrawLikeOutbound(text, prompt, paths)) {
+    const sk = sessionScopeFromEvent(event);
+    if (sk) {
+      recentSessionDrawDelivery.set(sk, now);
+      _drawInflightBySession.delete(sk);
+    }
+  }
+  for (const p of paths) recentPathMediaDelivery.set(p, now);
+  return { ok: true };
+}
+
+function payloadText(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  if (typeof payload.text === 'string') return payload.text;
+  return extractText({ content: payload.content });
 }
 
 async function withPseudoMediaLock(text, worker) {
@@ -590,10 +941,75 @@ function register(api) {
 
   api.on('reply_payload_sending', async (event) => {
     try {
-      const payload = await maybeBuildPseudoMediaPayload(event?.payload);
-      if (!payload) return;
-      try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote pseudo media payload to mediaUrls`); } catch (_) {}
-      return { payload, metadata: { nexoraPseudoMediaFixed: true } };
+      const incoming = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+      const rawText = payloadText(incoming);
+      const promptHint = extractDrawPicturePrompt(rawText);
+      const incomingPaths = collectOutboundMediaPaths(
+        { ...event, mediaUrl: incoming.mediaUrl, mediaUrls: incoming.mediaUrls },
+        rawText
+      );
+
+      // 已投递过同 run / 同 prompt 媒体：直接取消，避免第二张图
+      if (
+        (promptHint || incomingPaths.length > 0 || outboundHasMedia(incoming) || outboundHasMedia(event))
+        && isMediaDeliveryClaimed(event, rawText, incomingPaths, promptHint)
+      ) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media payload`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate media payload`);
+        return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-media' };
+      }
+
+      const reserve = reserveSessionDrawSlot(event, rawText, promptHint);
+      if (!reserve.ok) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media reserve`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate media reserve`);
+        return { cancel: true, cancelReason: reserve.reason };
+      }
+
+      let payload = null;
+      try {
+        payload = await maybeBuildPseudoMediaPayload(incoming);
+      } catch (err) {
+        if (reserve.reserved) releaseSessionDrawReservation(event);
+        throw err;
+      }
+
+      if (payload) {
+        const paths = Array.isArray(payload.mediaUrls) ? payload.mediaUrls : [];
+        const claim = claimMediaDelivery(event, payloadText(payload) || rawText, paths, promptHint);
+        if (!claim.ok) {
+          if (reserve.reserved) releaseSessionDrawReservation(event);
+          try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media after rewrite`); } catch (_) {}
+          console.log(`[${PLUGIN_ID}] cancelled duplicate media after rewrite`);
+          return { cancel: true, cancelReason: claim.reason };
+        }
+        try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote pseudo media payload to mediaUrls`); } catch (_) {}
+        return { payload, metadata: { nexoraPseudoMediaFixed: true } };
+      }
+
+      if (reserve.reserved) releaseSessionDrawReservation(event);
+
+      // 原生已带媒体的 payload：占坑，后续 hook/run 不再发
+      if (incomingPaths.length > 0 || outboundHasMedia(incoming) || outboundHasMedia(event)) {
+        const claim = claimMediaDelivery(event, rawText, incomingPaths, promptHint);
+        if (!claim.ok) {
+          return { cancel: true, cancelReason: claim.reason };
+        }
+        return;
+      }
+
+      // 纯文本 payload：同会话近重复取消
+      if (shouldCancelDuplicateRunOutbound(event, rawText)) {
+        const preview = String(rawText || '').replace(/\s+/g, ' ').slice(0, 100);
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate reply payload: ${preview}`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate reply payload: ${preview}`);
+        return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-run-outbound' };
+      }
+      if (rawText && !shouldBlockOutbound(rawText)) {
+        rememberRunOutbound(event, rawText);
+      } else if (shouldBlockOutbound(rawText)) {
+        return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
+      }
     } catch (e) {
       console.warn(`[${PLUGIN_ID}] reply_payload_sending hook error:`, e && e.message);
     }
@@ -601,23 +1017,87 @@ function register(api) {
 
   api.on('message_sending', async (event) => {
     try {
-      if (event?.metadata?.nexoraPseudoMediaFixed) return;
+      if (event?.metadata?.nexoraPseudoMediaFixed) {
+        // reply_payload 已修好：若本通道仍带 MEDIA，只占坑不改写
+        const fixedText = extractText(event);
+        const paths = collectOutboundMediaPaths(event, fixedText);
+        if (paths.length > 0 || outboundHasMedia(event) || looksLikeMediaStatusOnly(fixedText)) {
+          claimMediaDelivery(event, fixedText, paths, extractDrawPicturePrompt(fixedText));
+        }
+        return;
+      }
+
       const text = extractText(event);
-      const mediaRewrite = await maybeRewritePseudoMedia(text);
+      const promptHint = extractDrawPicturePrompt(text);
+      const existingPaths = collectOutboundMediaPaths(event, text);
+
+      // 伪生图 / 已有媒体：若已占坑则整段取消（禁止再跑 runDrawPicture）
+      if (
+        (promptHint || existingPaths.length > 0 || outboundHasMedia(event) || looksLikeMediaStatusOnly(text))
+        && isMediaDeliveryClaimed(event, text, existingPaths, promptHint)
+      ) {
+        const preview = String(text || '').replace(/\s+/g, ' ').slice(0, 100);
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media outbound: ${preview}`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate media outbound: ${preview}`);
+        return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-media' };
+      }
+
+      const reserve = reserveSessionDrawSlot(event, text, promptHint);
+      if (!reserve.ok) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media reserve`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate media reserve`);
+        return { cancel: true, cancelReason: reserve.reason };
+      }
+
+      let mediaRewrite = null;
+      try {
+        mediaRewrite = await maybeRewritePseudoMedia(text);
+      } catch (err) {
+        if (reserve.reserved) releaseSessionDrawReservation(event);
+        throw err;
+      }
+
       if (mediaRewrite) {
+        const paths = extractMediaDirectiveUrls(mediaRewrite);
+        const claim = claimMediaDelivery(event, mediaRewrite, paths, promptHint);
+        if (!claim.ok) {
+          if (reserve.reserved) releaseSessionDrawReservation(event);
+          try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate MEDIA rewrite`); } catch (_) {}
+          console.log(`[${PLUGIN_ID}] cancelled duplicate MEDIA rewrite`);
+          return { cancel: true, cancelReason: claim.reason };
+        }
         try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote pseudo media command to MEDIA reply`); } catch (_) {}
         return { content: mediaRewrite, metadata: { nexoraPseudoMediaFixed: true } };
       }
 
-      if (!shouldBlockOutbound(text)) return;
-      const preview = text.replace(/\s+/g, ' ').slice(0, 100);
-      try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled outbound: ${preview}`); } catch (_) {}
-      console.log(`[${PLUGIN_ID}] cancelled outbound: ${preview}`);
-      // 关键：拦 /new 类恢复文案时必须通知 rollover，否则通讯渠道只见静默不见续答
-      if (needsSessionRollover(text)) {
-        queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+      if (reserve.reserved) releaseSessionDrawReservation(event);
+
+      if (existingPaths.length > 0 || outboundHasMedia(event)) {
+        const claim = claimMediaDelivery(event, text, existingPaths, promptHint);
+        if (!claim.ok) {
+          return { cancel: true, cancelReason: claim.reason };
+        }
       }
-      return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
+
+      // 先拦系统横幅，避免把 LLM request failed 记成「已投递」导致真回复被误杀
+      if (shouldBlockOutbound(text)) {
+        const preview = text.replace(/\s+/g, ' ').slice(0, 100);
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled outbound: ${preview}`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled outbound: ${preview}`);
+        if (needsSessionRollover(text)) {
+          queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+        }
+        return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
+      }
+
+      if (shouldCancelDuplicateRunOutbound(event, text)) {
+        const preview = String(text || '').replace(/\s+/g, ' ').slice(0, 100);
+        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate run outbound: ${preview}`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] cancelled duplicate run outbound: ${preview}`);
+        return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-run-outbound' };
+      }
+
+      rememberRunOutbound(event, text);
     } catch (e) {
       console.warn(`[${PLUGIN_ID}] message_sending hook error:`, e && e.message);
     }
@@ -635,3 +1115,25 @@ export default pluginEntry;
 export function activate(api) {
   return register(api);
 }
+
+/** @internal smoke / regression tests */
+export const __testables = {
+  normalizePromptFingerprint,
+  pseudoMediaCacheKey,
+  isMediaDeliveryClaimed,
+  claimMediaDelivery,
+  reserveSessionDrawSlot,
+  releaseSessionDrawReservation,
+  extractDrawPicturePrompt,
+  resetMediaDedupeState() {
+    recentMediaOutboundByRun.clear();
+    recentPromptMediaDelivery.clear();
+    recentPathMediaDelivery.clear();
+    recentSessionDrawDelivery.clear();
+    _drawInflightBySession.clear();
+    _pseudoMediaSideEffectCache.clear();
+    _pseudoMediaInflight.clear();
+    recentTextOutboundByRun.clear();
+    recentTextOutboundBySession.clear();
+  },
+};

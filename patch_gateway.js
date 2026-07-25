@@ -60,6 +60,205 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
     }
 })();
 
+// ─── 防「问一句回两句」：message 工具已投递后抑制通道最终口述 ───
+// OpenClaw 仅在 sourceReplyDeliveryMode=message_tool_only 时抑制；普通渠道回合里
+// 模型若先 message(send) 再输出正文，两边都会送达。此处放宽判定。
+(function patchSuppressAssistantAfterMessagingTool() {
+    try {
+        if (globalThis.__NEXORA_MSGTOOL_DEDUP_PATCH__) return;
+        globalThis.__NEXORA_MSGTOOL_DEDUP_PATCH__ = true;
+        const fsMod = require('fs');
+        const pathMod = require('path');
+        const MARK = '/*nexora-msgtool-dedup*/';
+        const OLD =
+            'function hasMessageToolOnlySourceDelivery(ctx) {\n' +
+            '\treturn ctx.params.sourceReplyDeliveryMode === "message_tool_only" && (ctx.state.messageToolOnlySourceReplyDelivered || ctx.params.hasDeliveredMessageToolOnlySourceReply?.() === true || (ctx.state.messagingToolSourceReplyPayloads?.length ?? 0) > 0);\n' +
+            '}';
+        const NEW =
+            'function hasMessageToolOnlySourceDelivery(ctx) {\n' +
+            '\t' + MARK + '\n' +
+            '\tif ((ctx.state.messagingToolSentTexts?.length ?? 0) > 0) return true;\n' +
+            '\tif ((ctx.state.messagingToolSentTextsNormalized?.length ?? 0) > 0) return true;\n' +
+            '\treturn ctx.params.sourceReplyDeliveryMode === "message_tool_only" && (ctx.state.messageToolOnlySourceReplyDelivered || ctx.params.hasDeliveredMessageToolOnlySourceReply?.() === true || (ctx.state.messagingToolSourceReplyPayloads?.length ?? 0) > 0);\n' +
+            '}';
+        const roots = [];
+        const push = (p) => {
+            if (p && typeof p === 'string' && !roots.includes(p)) roots.push(p);
+        };
+        push(process.env.NEXORA_AGENT_RUNTIME_DIR);
+        push(process.env.OPENCLAW_STATE_DIR);
+        push(pathMod.join(__dirname));
+        try {
+            const la = process.env.LOCALAPPDATA || '';
+            if (la) push(pathMod.join(la, 'NexoraAgent', 'gateway-runtime'));
+        } catch (_) {}
+        try {
+            push(pathMod.join(require('os').homedir(), '.openclaw'));
+        } catch (_) {}
+
+        let patched = 0;
+        for (const root of roots) {
+            const distDirs = [
+                pathMod.join(root, 'node_modules', 'openclaw', 'dist'),
+                pathMod.join(root, 'gateway-runtime', 'node_modules', 'openclaw', 'dist'),
+            ];
+            for (const dist of distDirs) {
+                let names = [];
+                try {
+                    names = fsMod.readdirSync(dist);
+                } catch (_) {
+                    continue;
+                }
+                for (const name of names) {
+                    if (!/\.js$/i.test(name)) continue;
+                    const file = pathMod.join(dist, name);
+                    let text = '';
+                    try {
+                        text = fsMod.readFileSync(file, 'utf8');
+                    } catch (_) {
+                        continue;
+                    }
+                    if (!text.includes('function hasMessageToolOnlySourceDelivery') &&
+                        !text.includes('hasMessageToolOnlySourceDelivery = ()')) continue;
+                    let next = text;
+                    let changed = false;
+                    if (text.includes('function hasMessageToolOnlySourceDelivery') && !text.includes(MARK)) {
+                        if (text.includes(OLD)) {
+                            next = next.split(OLD).join(NEW);
+                        } else {
+                            next = next.replace(
+                                /function hasMessageToolOnlySourceDelivery\(ctx\)\s*\{\s*return ctx\.params\.sourceReplyDeliveryMode === ["']message_tool_only["'] &&[\s\S]*?\n\}/,
+                                NEW
+                            );
+                        }
+                        if (next !== text) changed = true;
+                    }
+                    const INNER_MARK = '/*nexora-msgtool-dedup-inner*/';
+                    if (next.includes('hasMessageToolOnlySourceDelivery = ()') && !next.includes(INNER_MARK)) {
+                        const innerNext = next.replace(
+                            /hasMessageToolOnlySourceDelivery\s*=\s*\(\)\s*=>\s*params\.sourceReplyDeliveryMode\s*===\s*["']message_tool_only["']\s*&&\s*\([\s\S]*?messagingToolSourceReplyPayloads\.length\s*>\s*0\)/,
+                            'hasMessageToolOnlySourceDelivery = () => { ' + INNER_MARK +
+                            ' if ((typeof messagingToolSentTexts !== "undefined" && messagingToolSentTexts && messagingToolSentTexts.length) || (typeof messagingToolSentTextsNormalized !== "undefined" && messagingToolSentTextsNormalized && messagingToolSentTextsNormalized.length)) return true; return params.sourceReplyDeliveryMode === "message_tool_only" && (state.messageToolOnlySourceReplyDelivered || params.hasDeliveredMessageToolOnlySourceReply?.() === true || messagingToolSourceReplyPayloads.length > 0); }'
+                        );
+                        if (innerNext !== next) {
+                            next = innerNext;
+                            changed = true;
+                        }
+                    }
+                    if (!changed || next === text) continue;
+                    try {
+                        fsMod.writeFileSync(file, next, 'utf8');
+                        patched += 1;
+                    } catch (_) {}
+                }
+            }
+        }
+        if (patched > 0) {
+            try {
+                console.log(`[TokenGuard] Patched ${patched} OpenClaw file(s) to suppress double reply after message tool`);
+            } catch (_) {}
+        }
+    } catch (e) {
+        try { console.warn('[TokenGuard] message-tool dedup patch failed:', e && e.message); } catch (_) {}
+    }
+})();
+
+// ─── message_end 媒体二次投递防护 ───
+// text_end 已发出 caption+media 后，message_end safety 仍会再发一条 media-only（清空 text 保留 mediaUrls）。
+(function patchMessageEndMediaResend() {
+    try {
+        if (globalThis.__NEXORA_MSGEND_MEDIA_DEDUP__) return;
+        globalThis.__NEXORA_MSGEND_MEDIA_DEDUP__ = true;
+        const fsMod = require('fs');
+        const pathMod = require('path');
+        const MARK = '/*nexora-msgend-media-dedup*/';
+        const roots = [];
+        const push = (p) => {
+            if (p && typeof p === 'string' && !roots.includes(p)) roots.push(p);
+        };
+        push(process.env.NEXORA_AGENT_RUNTIME_DIR);
+        push(process.env.OPENCLAW_STATE_DIR);
+        push(pathMod.join(__dirname));
+        try {
+            const la = process.env.LOCALAPPDATA || '';
+            if (la) push(pathMod.join(la, 'NexoraAgent', 'gateway-runtime'));
+        } catch (_) {}
+        try {
+            push(pathMod.join(require('os').homedir(), '.openclaw'));
+        } catch (_) {}
+
+        let patched = 0;
+        for (const root of roots) {
+            const distDirs = [
+                pathMod.join(root, 'node_modules', 'openclaw', 'dist'),
+                pathMod.join(root, 'gateway-runtime', 'node_modules', 'openclaw', 'dist'),
+            ];
+            for (const dist of distDirs) {
+                let names = [];
+                try {
+                    names = fsMod.readdirSync(dist);
+                } catch (_) {
+                    continue;
+                }
+                for (const name of names) {
+                    if (!/\.js$/i.test(name)) continue;
+                    const file = pathMod.join(dist, name);
+                    let text = '';
+                    try {
+                        text = fsMod.readFileSync(file, 'utf8');
+                    } catch (_) {
+                        continue;
+                    }
+                    if (!text.includes('alreadyDeliveredFinalText')) continue;
+                    if (text.includes(MARK)) continue;
+                    let next = text;
+                    // 1) text_end 跳过条件：已投递过同文案时，即使带媒体也不再 safety send
+                    next = next.replace(
+                        /ctx\.state\.blockReplyBreak === "text_end" && ctx\.state\.lastBlockReplyText != null && !hasMedia/,
+                        'ctx.state.blockReplyBreak === "text_end" && ctx.state.lastBlockReplyText != null && (!hasMedia || (cleanedText && cleanedText === ctx.state.lastBlockReplyText)) ' + MARK
+                    );
+                    // 2) alreadyDeliveredFinalText：整段跳过 emit，禁止 media-only 二次投递
+                    next = next.replace(
+                        /const alreadyDeliveredFinalText = Boolean\(hasMedia && cleanedText && cleanedText === ctx\.state\.lastBlockReplyText\);\s*ctx\.state\.lastBlockReplyText = hasMedia \? cleanedText \|\| text : text;\s*ctx\.state\.lastDeliveredBlockReplyText = hasMedia \? cleanedText \|\| text : text;\s*ctx\.state\.toolExecutionSinceLastBlockReply = false;\s*emitSplitResultAsBlockReply\(hasMedia && parsedText \? \{[\s\S]*?\} : ctx\.consumeReplyDirectives\(text, \{ final: true \}\)\);/,
+                        'const alreadyDeliveredFinalText = Boolean(hasMedia && cleanedText && cleanedText === ctx.state.lastBlockReplyText); ' + MARK + '\n' +
+                        '\t\t\tif (alreadyDeliveredFinalText && hasMedia) ctx.log.debug(`Skipping message_end safety send - media already delivered with final text`);\n' +
+                        '\t\t\telse {\n' +
+                        '\t\t\t\tctx.state.lastBlockReplyText = hasMedia ? cleanedText || text : text;\n' +
+                        '\t\t\t\tctx.state.lastDeliveredBlockReplyText = hasMedia ? cleanedText || text : text;\n' +
+                        '\t\t\t\tctx.state.toolExecutionSinceLastBlockReply = false;\n' +
+                        '\t\t\t\temitSplitResultAsBlockReply(hasMedia && parsedText ? {\n' +
+                        '\t\t\t\t\t...parsedText,\n' +
+                        '\t\t\t\t\ttext: alreadyDeliveredFinalText ? "" : cleanedText\n' +
+                        '\t\t\t\t} : ctx.consumeReplyDirectives(text, { final: true }));\n' +
+                        '\t\t\t}'
+                    );
+                    // 3) buffered flush 后的 media-only 再发：text_end 通道直接跳过
+                    next = next.replace(
+                        /emitSplitResultAsBlockReply\(hasMedia && parsedText \? \{\s*\.\.\.parsedText,\s*text: ""\s*\} : ctx\.consumeReplyDirectives\(""\, \{ final: true \}\)\);/,
+                        'if (!(hasMedia && parsedText && ctx.state.blockReplyBreak === "text_end" && ctx.state.lastBlockReplyText != null)) ' + MARK +
+                        ' emitSplitResultAsBlockReply(hasMedia && parsedText ? {\n' +
+                        '\t\t\t\t...parsedText,\n' +
+                        '\t\t\t\ttext: ""\n' +
+                        '\t\t\t} : ctx.consumeReplyDirectives("", { final: true }));'
+                    );
+                    if (next === text || !next.includes(MARK)) continue;
+                    try {
+                        fsMod.writeFileSync(file, next, 'utf8');
+                        patched += 1;
+                    } catch (_) {}
+                }
+            }
+        }
+        if (patched > 0) {
+            try {
+                console.log(`[TokenGuard] Patched ${patched} OpenClaw file(s) to suppress message_end media re-send`);
+            } catch (_) {}
+        }
+    } catch (e) {
+        try { console.warn('[TokenGuard] message_end media dedup patch failed:', e && e.message); } catch (_) {}
+    }
+})();
+
 // ─── 本地模型工具调用防护 ───
 // OpenClaw 默认走 Ollama 原生 /api/chat（不是 /v1/chat/completions）。
 // 本地小模型看到 tools 后常把 {"name":"tts"| "update_goal", ...} 当正文吐出。
@@ -180,6 +379,84 @@ const NEXORA_MALFORMED_FORMAT_MARK = '/*nexora-malformed-format*/';
 const NEXORA_MALFORMED_FORMAT_SNIPPET =
     NEXORA_MALFORMED_FORMAT_MARK +
     '\n\t\t/malformed_function_call/i,\n\t\t/unexpected_tool_call/i,\n\t\t"provider finish_reason: malformed_function_call",';
+
+const NEXORA_NETWORK_ERROR_MARK = '/*nexora-connection-failed*/';
+
+/**
+ * OpenClaw 未把 "Connection failed, please check your network or proxy settings"
+ * 归入瞬时网络错误，最终被洗成泛化的 "LLM request failed."。
+ * 补进 INTERRUPTED_NETWORK_ERROR_RE，便于走网络类 failover/重试，而不是当未知失败。
+ */
+function ensureInterruptedNetworkPatternOnDisk() {
+    try {
+        const pathMod = require('path');
+        const fsMod = require('fs');
+        const roots = [];
+        const push = (p) => {
+            if (p && typeof p === 'string' && !roots.includes(p)) roots.push(p);
+        };
+        push(process.env.NEXORA_AGENT_RUNTIME_DIR);
+        push(process.env.OPENCLAW_STATE_DIR);
+        push(pathMod.join(__dirname));
+        try {
+            const la = process.env.LOCALAPPDATA || '';
+            if (la) push(pathMod.join(la, 'NexoraAgent', 'gateway-runtime'));
+        } catch (e) {}
+        try {
+            push(pathMod.join(require('os').homedir(), '.openclaw'));
+        } catch (e) {}
+
+        let patched = 0;
+        for (const root of roots) {
+            const distDirs = [
+                pathMod.join(root, 'node_modules', 'openclaw', 'dist'),
+                pathMod.join(root, 'gateway-runtime', 'node_modules', 'openclaw', 'dist'),
+            ];
+            for (const dist of distDirs) {
+                let names = [];
+                try {
+                    names = fsMod.readdirSync(dist);
+                } catch (e) {
+                    continue;
+                }
+                for (const name of names) {
+                    if (!/\.js$/i.test(name)) continue;
+                    const file = pathMod.join(dist, name);
+                    let text = '';
+                    try {
+                        text = fsMod.readFileSync(file, 'utf8');
+                    } catch (e) {
+                        continue;
+                    }
+                    if (!text.includes('INTERRUPTED_NETWORK_ERROR_RE')) continue;
+                    if (text.includes(NEXORA_NETWORK_ERROR_MARK)) continue;
+                    const out = text.replace(
+                        /const INTERRUPTED_NETWORK_ERROR_RE = \/([^/\n]+)\/i;/,
+                        (m, body) => {
+                            if (body.includes('connection failed')) return m;
+                            return (
+                                'const INTERRUPTED_NETWORK_ERROR_RE = /' +
+                                body +
+                                '|\\bconnection failed\\b|network or proxy settings/i; ' +
+                                NEXORA_NETWORK_ERROR_MARK
+                            );
+                        }
+                    );
+                    if (out === text) continue;
+                    try {
+                        fsMod.writeFileSync(file, out, 'utf8');
+                        patched += 1;
+                    } catch (e) {}
+                }
+            }
+        }
+        if (patched > 0) {
+            try {
+                console.log(`[TokenGuard] Patched ${patched} OpenClaw file(s) for Connection-failed network classification`);
+            } catch (e) {}
+        }
+    } catch (e) {}
+}
 
 /** OpenClaw dist 为 ESM，Module._load 拦不到；直接给 format 错误表补上 MALFORMED 规则 */
 function ensureMalformedFormatPatternOnDisk() {
@@ -479,6 +756,7 @@ function rewriteMalformedLlmResponseBody(bodyText) {
 }
 
 ensureMalformedFormatPatternOnDisk();
+ensureInterruptedNetworkPatternOnDisk();
 ensureMediaLocalRootsOnDisk();
 ensureChatMediaParseOnDisk();
 

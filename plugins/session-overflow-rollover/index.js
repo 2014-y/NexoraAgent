@@ -13,7 +13,10 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 const PLUGIN_ID = 'session-overflow-rollover';
-const COOLDOWN_MS = 20_000;
+const COOLDOWN_MS = 60_000;
+/** 本会话近期已有用户可见回复时，禁止 silent-retry / rollover 再跑一整轮（防双倍烧 token） */
+const recentUserFacingDeliveryAt = new Map();
+const DELIVERY_BLOCK_RESUME_MS = 120_000;
 const TRIGGER_FILE = 'overflow-rollover.trigger.json';
 const ARCHIVE_NOTE_DIR_REL = path.join('workspace', 'compact-history');
 const ACTIVE_CONTEXT_HEADING = '## Active session context';
@@ -30,6 +33,8 @@ const lastUserBySession = new Map();
 const lastRolloverAt = new Map();
 /** @type {Set<string>} */
 const inFlight = new Set();
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const pendingScheduleTimers = new Map();
 
 function stateDir() {
   return (
@@ -207,9 +212,22 @@ function isNoiseUserText(text) {
   const t = String(text || '').trim();
   if (!t) return true;
   if (t.startsWith('/')) return true;
+  if (/\[内部延续上下文\]/.test(t)) return true;
   if (isOverflowRecoveryText(t)) return true;
   if (isRateLimitBannerText(t)) return true;
   return false;
+}
+
+/** 剥掉嵌套的延续提示，只保留最内层真实用户问题 */
+function unwrapUserQuestion(lastUserText) {
+  let t = String(lastUserText || '').trim();
+  for (let i = 0; i < 8; i++) {
+    if (!/\[内部延续上下文\]/.test(t)) break;
+    const m = t.match(/用户问题：\s*([\s\S]+)$/);
+    if (!m || !String(m[1] || '').trim()) break;
+    t = String(m[1]).trim();
+  }
+  return t;
 }
 
 /**
@@ -507,8 +525,8 @@ function writeArchiveNote(sessionKey, lastUserText, continuitySummary, archivePa
 }
 
 function buildContinuePrompt(lastUserText, continuitySummary, archivePath) {
-  const q = String(lastUserText || '').trim();
-  if (!q) return '';
+  const q = unwrapUserQuestion(lastUserText);
+  if (!q || isNoiseUserText(q)) return '';
   const summary = String(continuitySummary || '').trim();
   const arch = String(archivePath || '').trim() || 'memory/last-session-archive.md';
   if (!summary && !archivePath) return q;
@@ -548,7 +566,8 @@ function isOverflowRecoveryText(text) {
     /diagId\s*=\s*ovf-/i.test(t) ||
     /\[agent\/embedded\].*(overflow|compaction)/i.test(t) ||
     /use \/compact/i.test(t) ||
-    /use \/new/i.test(t) ||
+    // 禁止裸匹配 "use /new"：助手闲聊提到 /new 会误触发 rollover
+    /(?:⚠️|⚠|Context overflow|compaction|overflow|请(?:先)?使用)\s*[^\n]{0,80}\/new\b/i.test(t) ||
     /\/new to start/i.test(t) ||
     /Message ordering conflict/i.test(t) ||
     /roles must alternate/i.test(t) ||
@@ -581,17 +600,14 @@ function isUserFacingSystemErrorText(text) {
 }
 
 function looksLikeOverflowFailure(event, ctx) {
+  // 只扫当前回合错误字段，禁止 JSON.stringify 整包 event/messages：
+  // 历史里残留的 "use /new" / overflow 文案会让后续成功回合误触发 rollover → 问一句回两句。
   const parts = [];
   const push = (v) => {
     if (v == null) return;
     if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
       parts.push(String(v));
       return;
-    }
-    try {
-      parts.push(JSON.stringify(v));
-    } catch (_) {
-      parts.push(String(v));
     }
   };
   if (event) {
@@ -604,33 +620,45 @@ function looksLikeOverflowFailure(event, ctx) {
       }
     }
     push(event.kind);
-    // 兜底：整包扫描，避免字段名变动漏检
-    try {
-      parts.push(JSON.stringify(event));
-    } catch (_) {}
   }
   if (ctx) {
     push(ctx.error);
-    try {
-      parts.push(JSON.stringify(ctx));
-    } catch (_) {}
+    push(ctx.reason);
+    push(ctx.outcome);
   }
   const blob = parts.join('\n');
-  if (isOverflowRecoveryText(blob)) return true;
-  if (/context_overflow|compaction_failure|compaction.?timeout|compaction[-_ ]?diag|overflow recovery|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|outcome\s*=\s*failed[\s\S]{0,80}(overflow|compaction|timeout)|reason\s*=\s*timeout|roles must alternate|Message ordering conflict|incorrect role information|rejected the conversation state/i.test(blob)) {
+  if (!blob.trim()) return false;
+  // 硬溢出/角色冲突特征（不要单靠 "use /new"：失败文案里偶尔夹带会误伤）
+  if (/context_overflow|compaction_failure|compaction.?timeout|compaction[-_ ]?diag|overflow recovery|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|Context overflow|Context is too large|prompt too large|Context limit exceeded|Auto-compaction could not recover|roles must alternate|Message ordering conflict|incorrect role information|rejected the conversation state|Session history looks corrupted/i.test(blob)) {
     return true;
   }
-  if (event && event.success === false && /overflow|compaction|too large|precheck|timeout|roles must alternate|ordering conflict|role information|\/new/i.test(blob)) {
+  if (event && event.success === false && /overflow|compaction|too large|precheck|roles must alternate|ordering conflict|role information/i.test(blob)) {
     return true;
   }
   return false;
 }
 
+function markUserFacingDelivery(sessionKey, text) {
+  const key = String(sessionKey || '').trim();
+  const raw = String(text || '').trim();
+  if (!key || !raw) return;
+  if (isUserFacingSystemErrorText(raw)) return;
+  if (/^NO_REPLY$/i.test(raw)) return;
+  if (raw.length < 8 && !/MEDIA\s*:/i.test(raw)) return;
+  recentUserFacingDeliveryAt.set(key, Date.now());
+}
+
+function sessionRecentlyDelivered(sessionKey) {
+  const key = String(sessionKey || '').trim();
+  if (!key) return false;
+  const at = recentUserFacingDeliveryAt.get(key) || 0;
+  return at && Date.now() - at < DELIVERY_BLOCK_RESUME_MS;
+}
+
 function rememberUserText(sessionKey, text) {
   if (!sessionKey || !text) return;
-  if (isUserFacingSystemErrorText(text)) return;
-  if (text.startsWith('/')) return;
-  lastUserBySession.set(sessionKey, { text, at: Date.now() });
+  if (isNoiseUserText(text)) return;
+  lastUserBySession.set(sessionKey, { text: unwrapUserQuestion(text), at: Date.now() });
 }
 
 function pickLastUserText(sessionKey, event, ctx) {
@@ -650,7 +678,7 @@ function readLastUserTextFromSessionFile(sessionFile) {
         const msg = obj && obj.message;
         if (!msg || msg.role !== 'user') continue;
         const text = extractText(msg);
-        if (text && !isOverflowRecoveryText(text) && !text.startsWith('/')) return text;
+        if (text && !isNoiseUserText(text)) return unwrapUserQuestion(text);
       } catch (_) {}
     }
   } catch (_) {}
@@ -672,6 +700,15 @@ async function performRollover(api, sessionKey, lastUserText, via) {
   const prev = lastRolloverAt.get(sessionKey) || 0;
   if (now - prev < COOLDOWN_MS) {
     console.log(`[${PLUGIN_ID}] skip rollover (cooldown) key=${sessionKey} via=${via}`);
+    return false;
+  }
+
+  // 已对用户发过实质内容：禁止 reset+resume（否则先清空会话再重跑 = 双倍 token）
+  if (sessionRecentlyDelivered(sessionKey)) {
+    lastRolloverAt.set(sessionKey, Date.now());
+    console.log(
+      `[${PLUGIN_ID}] skip rollover entirely (already delivered, no reset) key=${sessionKey} via=${via}`
+    );
     return false;
   }
 
@@ -777,47 +814,50 @@ function filesystemEmergencyReset(sessionKey, lastUserText) {
 
 function scheduleRollover(api, sessionKey, lastUserText, via) {
   if (!sessionKey) return;
-  setTimeout(() => {
+  if (sessionRecentlyDelivered(sessionKey)) {
+    console.log(`[${PLUGIN_ID}] skip duplicate rollover schedule (already delivered) key=${sessionKey} via=${via}`);
+    return;
+  }
+  const timerKey = `rollover:${sessionKey}`;
+  if (pendingScheduleTimers.has(timerKey) || inFlight.has(sessionKey)) {
+    console.log(`[${PLUGIN_ID}] skip duplicate rollover schedule key=${sessionKey} via=${via}`);
+    return;
+  }
+  const timer = setTimeout(() => {
+    pendingScheduleTimers.delete(timerKey);
     performRollover(api, sessionKey, lastUserText, via).catch(() => {});
   }, 80);
+  pendingScheduleTimers.set(timerKey, timer);
 }
 
 async function performSilentRetry(api, sessionKey, lastUserText, via) {
   if (!sessionKey || !lastUserText) return false;
-  if (inFlight.has(sessionKey)) return false;
-  const now = Date.now();
-  const prev = lastRolloverAt.get(sessionKey) || 0;
-  if (now - prev < COOLDOWN_MS) {
-    console.log(`[${PLUGIN_ID}] skip silent-retry (cooldown) key=${sessionKey} via=${via}`);
-    return false;
-  }
-  inFlight.add(sessionKey);
-  try {
-    console.log(
-      `[${PLUGIN_ID}] silent-retry start via=${via} key=${sessionKey} lastUserChars=${lastUserText.length}`
-    );
-    await gatewayRequest(api, 'chat.send', buildChatSendParams(
-      sessionKey,
-      String(lastUserText).trim(),
-      readSessionDeliveryRoute(sessionKey)
-    ));
-    lastRolloverAt.set(sessionKey, Date.now());
-    console.log(`[${PLUGIN_ID}] silent-retry done key=${sessionKey} deliver=true`);
-    return true;
-  } catch (e) {
-    lastRolloverAt.delete(sessionKey);
-    console.error(`[${PLUGIN_ID}] silent-retry failed:`, e && e.message ? e.message : e);
-    return false;
-  } finally {
-    inFlight.delete(sessionKey);
-  }
+  // 永久关闭自动 silent-retry：限流横幅静默即可，禁止后台再跑一整轮 LLM（双回复主因之一）
+  console.log(
+    `[${PLUGIN_ID}] skip silent-retry (disabled to prevent double replies) key=${sessionKey} via=${via}`
+  );
+  return false;
 }
 
 function scheduleSilentRetry(api, sessionKey, lastUserText, via) {
   if (!sessionKey || !lastUserText) return;
-  setTimeout(() => {
+  const timerKey = `silent:${sessionKey}`;
+  // message_sending + reply_payload_sending 常成对触发；合并成一次 chat.send
+  if (pendingScheduleTimers.has(timerKey) || inFlight.has(sessionKey)) {
+    console.log(`[${PLUGIN_ID}] skip duplicate silent-retry schedule key=${sessionKey} via=${via}`);
+    return;
+  }
+  const now = Date.now();
+  const prev = lastRolloverAt.get(sessionKey) || 0;
+  if (now - prev < COOLDOWN_MS) {
+    console.log(`[${PLUGIN_ID}] skip silent-retry schedule (cooldown) key=${sessionKey} via=${via}`);
+    return;
+  }
+  const timer = setTimeout(() => {
+    pendingScheduleTimers.delete(timerKey);
     performSilentRetry(api, sessionKey, lastUserText, via).catch(() => {});
   }, 120);
+  pendingScheduleTimers.set(timerKey, timer);
 }
 
 function resolveFreshestInteractiveSessionKey() {
@@ -913,9 +953,15 @@ function register(api) {
 
   api.on('agent_end', async (event, ctx) => {
     try {
+      // 成功回合绝不因历史残留文案触发换新；失败且像溢出/角色冲突才 rollover
+      if (event && event.success !== false) return;
       if (!looksLikeOverflowFailure(event, ctx)) return;
       const key = resolveSessionKeyWithFallback(event, ctx);
       if (!key) return;
+      if (sessionRecentlyDelivered(key)) {
+        console.log(`[${PLUGIN_ID}] skip agent_end rollover (already delivered) key=${key}`);
+        return;
+      }
       const lastUser = pickLastUserText(key, event, ctx);
       scheduleRollover(api, key, lastUser, 'agent_end');
     } catch (e) {
@@ -926,10 +972,15 @@ function register(api) {
   try {
     api.on('llm_output', async (event, ctx) => {
       try {
+        // 只认「输出正文本身」是溢出恢复横幅；禁止扫 event 其它字段误触发
         const text = extractText(event) || extractText(event && event.payload);
-        if (!isOverflowRecoveryText(text) && !looksLikeOverflowFailure(event, ctx)) return;
+        if (!isOverflowRecoveryText(text)) return;
         const key = resolveSessionKeyWithFallback(event, ctx);
         if (!key) return;
+        if (sessionRecentlyDelivered(key)) {
+          console.log(`[${PLUGIN_ID}] skip llm_output rollover (already delivered) key=${key}`);
+          return;
+        }
         const lastUser = pickLastUserText(key, event, ctx);
         scheduleRollover(api, key, lastUser, 'llm_output');
       } catch (_) {}
@@ -939,12 +990,20 @@ function register(api) {
   api.on('message_sending', async (event, ctx) => {
     try {
       const text = extractText(event);
-      if (!isUserFacingSystemErrorText(text)) return;
       let key = resolveSessionKeyWithFallback(event, ctx);
       if (!key) key = resolveFreshestInteractiveSessionKey();
+      if (key && text) markUserFacingDelivery(key, text);
+      if (!isUserFacingSystemErrorText(text)) return;
       const lastUser = key ? pickLastUserText(key, event, ctx) : '';
       if (isOverflowRecoveryText(text)) {
-        // 只在能实际调度 rollover 时才静默；否则放行，避免「拦了却不修」导致通讯哑火
+        // 已有实质回复：只拦横幅，绝不 reset/重跑
+        if (key && sessionRecentlyDelivered(key)) {
+          console.log(`[${PLUGIN_ID}] cancel overflow banner only (already delivered) key=${key}`);
+          return {
+            cancel: true,
+            cancelReason: 'session-overflow-rollover:suppress-overflow-banner-after-delivery',
+          };
+        }
         if (key) {
           scheduleRollover(api, key, lastUser, 'message_sending');
           console.log(`[${PLUGIN_ID}] cancel overflow/ordering recovery banner key=${key}`);
@@ -956,10 +1015,9 @@ function register(api) {
         console.warn(`[${PLUGIN_ID}] overflow banner without sessionKey — not cancelling`);
         return;
       }
-      // 限流/过载横幅：对用户静默，并在后台重提原问题（不重置会话）
-      if (key && lastUser) {
-        scheduleSilentRetry(api, key, lastUser, 'message_sending');
-        console.log(`[${PLUGIN_ID}] cancel rate-limit banner key=${key}`);
+      // 限流/过载横幅：只对用户静默，不再后台重提原问题（防双回复烧 token）
+      if (key) {
+        console.log(`[${PLUGIN_ID}] cancel rate-limit banner key=${key} (no silent-retry)`);
         return {
           cancel: true,
           cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
@@ -974,11 +1032,18 @@ function register(api) {
     api.on('reply_payload_sending', async (event, ctx) => {
       try {
         const text = extractText(event?.payload) || extractText(event);
-        if (!isUserFacingSystemErrorText(text)) return;
         let key = resolveSessionKeyWithFallback(event, ctx);
         if (!key) key = resolveFreshestInteractiveSessionKey();
+        if (key && text) markUserFacingDelivery(key, text);
+        if (!isUserFacingSystemErrorText(text)) return;
         const lastUser = key ? pickLastUserText(key, event, ctx) : '';
         if (isOverflowRecoveryText(text)) {
+          if (key && sessionRecentlyDelivered(key)) {
+            return {
+              cancel: true,
+              cancelReason: 'session-overflow-rollover:suppress-overflow-banner-after-delivery',
+            };
+          }
           if (key) {
             scheduleRollover(api, key, lastUser, 'reply_payload_sending');
             return {
@@ -988,8 +1053,7 @@ function register(api) {
           }
           return;
         }
-        if (key && lastUser) {
-          scheduleSilentRetry(api, key, lastUser, 'reply_payload_sending');
+        if (key) {
           return {
             cancel: true,
             cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',

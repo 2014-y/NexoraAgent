@@ -67,6 +67,7 @@ html {
   -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-weight:700;
 }
 .header .time { font-size:16px; color:var(--glow); font-family:'DIN',monospace; }
+.header .refresh-meta { font-size:12px; color:var(--text-secondary); margin-right:16px; }
 .header .status-dot { width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:8px;animation:pulse 1.5s infinite; }
 @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 4px var(--ok)} 50%{opacity:0.5;box-shadow:0 0 12px var(--ok)} }
 
@@ -156,8 +157,9 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
 <div id="app">
   <header class="header">
     <h1>⚔️ Nexora 数据中心</h1>
-    <div style="display:flex;align-items:center;gap:20px">
+      <div style="display:flex;align-items:center;gap:20px">
       <div><span class="status-dot"></span><span style="color:var(--ok)">系统运行中</span></div>
+      <div class="refresh-meta">数据更新 {{ lastRefreshText }}</div>
       <div class="time">{{ currentTime }}</div>
     </div>
   </header>
@@ -296,13 +298,19 @@ const app = Vue.createApp({
   data() {
     return {
       currentTime: '',
+      lastRefreshText: '—',
+      lastRefreshAt: 0,
+      refreshing: false,
       sysStatus: {},
       overview: {},
       cronJobs: [],
       recentAudit: [],
       deliveryQueue: [],
       models: [],
-      statCards: []
+      statCards: [],
+      _charts: {},
+      _pollTimer: null,
+      _clockTimer: null,
     };
   },
   methods: {
@@ -323,14 +331,36 @@ const app = Vue.createApp({
       if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
       return String(n);
     },
+    formatAxisTime(ms) {
+      return new Date(+ms).toLocaleString('zh-CN', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+        hour12: false, timeZone: 'Asia/Shanghai',
+      });
+    },
     updateTime() {
       this.currentTime = new Date().toLocaleString('zh-CN', {
         hour12: false, timeZone: 'Asia/Shanghai',
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit'
       });
+      if (this.lastRefreshAt) {
+        const sec = Math.max(0, Math.round((Date.now() - this.lastRefreshAt) / 1000));
+        this.lastRefreshText = sec < 5 ? '刚刚' : (sec + ' 秒前');
+      }
     },
-    async fetchAll() {
+    getChart(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      if (this._charts[id]) {
+        try { this._charts[id].resize(); } catch (_) {}
+        return this._charts[id];
+      }
+      this._charts[id] = echarts.init(el);
+      return this._charts[id];
+    },
+    async fetchAll(reason) {
+      if (this.refreshing) return;
+      this.refreshing = true;
       try {
         const [ov, status, jobs, audit, tools, auditTrend, tokenTrend, boots, delivery, modelsCat, auditStats] =
           await Promise.all([
@@ -371,10 +401,17 @@ const app = Vue.createApp({
         this.renderEventPie(auditStats);
         this.renderStatusPie(auditStats);
         this.renderGateway(boots);
-      } catch(e) { console.error('Fetch error:', e); }
+        this.lastRefreshAt = Date.now();
+        this.updateTime();
+      } catch(e) {
+        console.error('Fetch error:', reason || '', e);
+      } finally {
+        this.refreshing = false;
+      }
     },
     renderAuditTrend(data) {
-      const chart = echarts.init(document.getElementById('chartAuditTrend'));
+      const chart = this.getChart('chartAuditTrend');
+      if (!chart) return;
       const grouped = {};
       data.forEach(d => {
         const t = d.hour_ms;
@@ -385,17 +422,18 @@ const app = Vue.createApp({
       chart.setOption({
         tooltip:{ trigger:'axis' },
         grid:{ left:50, right:20, top:20, bottom:30 },
-        xAxis:{ type:'category', data:times.map(t=>new Date(+t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Shanghai'})), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
+        xAxis:{ type:'category', data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
         yAxis:{ type:'value', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
         series:[{
           type:'line', data:times.map(t=>grouped[t]), smooth:true,
           areaStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(0,212,255,0.3)'},{offset:1,color:'rgba(0,212,255,0.02)'}]) },
           lineStyle:{color:'#00d4ff',width:2}, itemStyle:{color:'#00d4ff'}, symbol:'none'
         }]
-      });
+      }, true);
     },
     renderTokenTrend(data) {
-      const chart = echarts.init(document.getElementById('chartTokenTrend'));
+      const chart = this.getChart('chartTokenTrend');
+      if (!chart) return;
       const grouped = {};
       data.forEach(d => {
         const t = d.hour_ms;
@@ -406,17 +444,18 @@ const app = Vue.createApp({
       chart.setOption({
         tooltip:{ trigger:'axis', formatter: p => p[0]?.name + '<br/>Token: ' + (p[0]?.value||0).toLocaleString() },
         grid:{ left:60, right:20, top:20, bottom:30 },
-        xAxis:{ type:'category', data:times.map(t=>new Date(+t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Shanghai'})), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
+        xAxis:{ type:'category', data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
         yAxis:{ type:'value', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
         series:[{
           type:'bar', data:times.map(t=>grouped[t]),
           itemStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#7b61ff'},{offset:1,color:'rgba(123,97,255,0.2)'}]) },
           barMaxWidth:20
         }]
-      });
+      }, true);
     },
     renderTools(data) {
-      const chart = echarts.init(document.getElementById('chartTools'));
+      const chart = this.getChart('chartTools');
+      if (!chart) return;
       const merged = {};
       data.forEach(d => { if(d.tool_name){ merged[d.tool_name] = (merged[d.tool_name]||0) + d.cnt; } });
       const sorted = Object.entries(merged).sort((a,b)=>b[1]-a[1]).slice(0,15).reverse();
@@ -430,10 +469,11 @@ const app = Vue.createApp({
           itemStyle:{ color:new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'rgba(0,255,136,0.3)'},{offset:1,color:'#00ff88'}]) },
           barMaxWidth:16
         }]
-      });
+      }, true);
     },
     renderEventPie(data) {
-      const chart = echarts.init(document.getElementById('chartEventPie'));
+      const chart = this.getChart('chartEventPie');
+      if (!chart) return;
       const grouped = {};
       data.forEach(d => { grouped[d.kind] = (grouped[d.kind]||0) + d.cnt; });
       const pieData = Object.entries(grouped).map(([k,v])=>({name:k,value:v}));
@@ -446,10 +486,11 @@ const app = Vue.createApp({
           emphasis:{ itemStyle:{ shadowBlur:20, shadowColor:'rgba(0,212,255,0.3)' } }
         }],
         color:['#00d4ff','#7b61ff','#00ff88','#ffa502','#ff4757','#2ed573','#ff6b81']
-      });
+      }, true);
     },
     renderStatusPie(data) {
-      const chart = echarts.init(document.getElementById('chartStatusPie'));
+      const chart = this.getChart('chartStatusPie');
+      if (!chart) return;
       const grouped = {};
       data.forEach(d => { grouped[d.status] = (grouped[d.status]||0) + d.cnt; });
       const pieData = Object.entries(grouped).map(([k,v])=>({name:k,value:v}));
@@ -462,10 +503,11 @@ const app = Vue.createApp({
           emphasis:{ itemStyle:{ shadowBlur:20, shadowColor:'rgba(0,212,255,0.3)' } }
         }],
         color:['#2ed573','#00d4ff','#ff4757','#ffa502','#7b61ff']
-      });
+      }, true);
     },
     renderGateway(data) {
-      const chart = echarts.init(document.getElementById('chartGateway'));
+      const chart = this.getChart('chartGateway');
+      if (!chart) return;
       const recent = data.slice(0,30).reverse();
       chart.setOption({
         tooltip:{ trigger:'axis' },
@@ -476,14 +518,59 @@ const app = Vue.createApp({
           type:'scatter', data:recent.map(d=>d.pid), symbolSize:10,
           itemStyle:{ color:'#ffa502', shadowBlur:10, shadowColor:'rgba(255,165,2,0.4)' }
         }]
+      }, true);
+    },
+    startPolling() {
+      this.stopPolling();
+      this._pollTimer = setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        this.fetchAll('interval');
+      }, 5000);
+    },
+    stopPolling() {
+      if (this._pollTimer) {
+        clearInterval(this._pollTimer);
+        this._pollTimer = null;
+      }
+    },
+    onVisibleRefresh() {
+      this.fetchAll('visible');
+      this.startPolling();
+      Object.keys(this._charts).forEach((id) => {
+        try { this._charts[id].resize(); } catch (_) {}
       });
-    }
+    },
   },
   mounted() {
     this.updateTime();
-    setInterval(()=>this.updateTime(), 1000);
-    this.fetchAll();
-    setInterval(()=>this.fetchAll(), 15000); // 每15秒刷新
+    this._clockTimer = setInterval(() => this.updateTime(), 1000);
+    this.fetchAll('mount');
+    this.startPolling();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.onVisibleRefresh();
+      else this.stopPolling();
+    });
+    window.addEventListener('focus', () => this.onVisibleRefresh());
+    window.addEventListener('message', (evt) => {
+      const data = evt && evt.data;
+      if (!data) return;
+      if (data.type === 'nexora-data-center-refresh' || data.type === 'nexora-theme') {
+        if (data.type === 'nexora-data-center-refresh') this.onVisibleRefresh();
+      }
+    });
+    window.addEventListener('resize', () => {
+      Object.keys(this._charts).forEach((id) => {
+        try { this._charts[id].resize(); } catch (_) {}
+      });
+    });
+  },
+  beforeUnmount() {
+    this.stopPolling();
+    if (this._clockTimer) clearInterval(this._clockTimer);
+    Object.keys(this._charts).forEach((id) => {
+      try { this._charts[id].dispose(); } catch (_) {}
+    });
+    this._charts = {};
   }
 });
 app.mount('#app');

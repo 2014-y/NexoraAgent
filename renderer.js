@@ -2049,13 +2049,15 @@ async function init() {
         });
     }
 
-    // 监听主进程发起的启动清空日志信号：保留活动流历史，仅整理内存队列。
+    // 监听主进程发起的启动清空日志信号：活动流 + 系统日志一并清掉旧内容
     if (window.api && window.api.onGatewayClearLogs) {
         window.api.onGatewayClearLogs(() => {
-            resetConsoleRuntimeLogs({ preservePersisted: true });
+            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
         });
     }
-    restorePersistedActivityLogs({ replace: true });
+    // 应用冷启动：不要回灌上一轮活动流，界面先干净
+    clearPersistedActivityLogs();
+    resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
 
     // Nexora Agent开关按钮监听
     gatewayToggleBtn.addEventListener('click', () => {
@@ -2068,8 +2070,9 @@ async function init() {
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
 
-            // 启动时不再清空活动流；保留 Win+R / 重启前的最近状态，并据此恢复通道绿点。
-            restorePersistedActivityLogs({ replace: true, forceOnline: true });
+            // 启动时清空上一轮活动流 / 系统日志，只保留本轮输出
+            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
+            try { window.api.clearSystemLogs && window.api.clearSystemLogs(); } catch (_) {}
             ensureStartingActivityTip();
 
             window.api.gatewayAction('start');
@@ -3436,11 +3439,8 @@ function setupIpcListeners() {
         } 
         else if (status === 'running') {
             gatewayRunningTime = Date.now();
-            // 仅从「已停止」冷启动时回放活动流；starting→running（含崩溃自动拉起）保留诊断信息
-            if (oldStatus === 'stopped') {
-                restorePersistedActivityLogs({ replace: true, forceOnline: true });
-            } else {
-                // 热恢复/崩溃拉起：即使没整表替换，也按最近日志把绿点补回来
+            // 冷启动/热恢复都不再回灌旧活动流；通道绿点等本轮连接日志刷新
+            if (oldStatus !== 'stopped') {
                 syncChannelStatusTilesFromLogs({ forceOnline: true });
             }
             // 冷启动：维持 starting 做端口探测；自启时进度可能已非 0，避免按钮一直停在「启动中」
@@ -7450,7 +7450,7 @@ function setupTabSwitching() {
                     const token = ++pageLoadMaskToken;
                     showPageLoadMask(t('正在刷新数据中心…', 'Refreshing Data Center…', '正在重新整理數據中心…'));
                     Promise.resolve()
-                        .then(() => loadDataCenterUi(true))
+                        .then(() => loadDataCenterUi(false))
                         .catch((err) => console.error(err))
                         .finally(async () => {
                             await waitForPaint();
@@ -7488,6 +7488,11 @@ function setupTabSwitching() {
                 const frame = document.getElementById('data-center-iframe');
                 if (frame) {
                     frame.style.visibility = (nextTab === 'data-center-view') ? 'visible' : 'hidden';
+                    if (nextTab === 'data-center-view') {
+                        try {
+                            frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, '*');
+                        } catch (_) {}
+                    }
                 }
             }
 
@@ -12117,8 +12122,11 @@ async function loadDataCenterUi(forceReload = false) {
         }
         const url = String(info.url).replace(/\/?$/, '/');
         const currentSrc = (frame.getAttribute('src') || '').trim();
-        if (!forceReload && currentSrc && currentSrc === url) {
+        if (!forceReload && currentSrc && (currentSrc === url || currentSrc.startsWith(url))) {
             pushDataCenterTheme(frame);
+            try {
+                frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, '*');
+            } catch (_) {}
             return;
         }
         const waitLoad = new Promise((resolve) => {
