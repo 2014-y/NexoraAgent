@@ -5035,6 +5035,31 @@ function ensureOpenClawConfigInitialized() {
             }
         }
 
+        // 渠道回复朗读：必须允许读取对话钩子，否则 agent_end/llm_output 拿不到正文
+        {
+            const name = 'voice-bridge';
+            if (!config.plugins.entries[name]) {
+                config.plugins.entries[name] = {};
+                needsSave = true;
+            }
+            if (config.plugins.entries[name].enabled !== true) {
+                config.plugins.entries[name].enabled = true;
+                needsSave = true;
+            }
+            if (!config.plugins.entries[name].hooks) {
+                config.plugins.entries[name].hooks = {};
+                needsSave = true;
+            }
+            if (config.plugins.entries[name].hooks.allowConversationAccess !== true) {
+                config.plugins.entries[name].hooks.allowConversationAccess = true;
+                needsSave = true;
+            }
+            if (!config.plugins.allow.includes(name)) {
+                config.plugins.allow.push(name);
+                needsSave = true;
+            }
+        }
+
         // 压缩缓冲拉高，尽量在真正溢出前触发压缩；失败仍由 session-overflow-rollover 兜底
         {
             if (!config.agents) config.agents = {};

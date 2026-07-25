@@ -3200,6 +3200,8 @@ function formatLogForUser(text) {
             lowerLine.includes('speak failed') ||
             lowerLine.includes('econnrefused') ||
             lowerLine.includes('18791') ||
+            lowerLine.includes('allowconversationaccess') ||
+            lowerLine.includes('typed hook') ||
             lowerLine.includes('cannot delete the main session') ||
             lowerLine.includes('sessions.delete') ||
             lowerLine.includes('provider-transport-fetch') ||
@@ -17629,10 +17631,24 @@ const __localMinPcmSamples = 9600; // ~0.6s @16kHz，太短的噪点不送识别
 let __voicePausedForTts = false;
 /** 试听中：彻底挂起唤醒/对话采集与抢话，避免与试听互相打断 */
 let __voicePreviewGuard = false;
-/** 朗读中暂停采集，防止喇叭回灌；人声打断时仍会监测 RMS */
+/** 朗读中暂停采集，防止喇叭回灌；仅语音对话模式允许严格条件的人声打断 */
 let __voiceBargeStartAt = null;
-const __voiceBargeRms = 0.055;
-const __voiceBargeHoldMs = 380;
+let __voiceTtsStartedAt = 0;
+/** 对话抢话：阈值明显抬高，避免 100% 音量回灌误触 */
+const __voiceBargeRms = 0.12;
+const __voiceBargeHoldMs = 700;
+/** TTS 开场宽限：回声最强阶段不接受打断 */
+const __voiceBargeGraceMs = 1000;
+/** 朗读结束后短暂冷却，避免尾音回灌立刻触发 speech-start */
+let __voiceTtsEndedAt = 0;
+const __voicePostTtsCooldownMs = 900;
+
+function clearVoiceChatSilenceTimer() {
+    if (__voiceChatSilenceTimer) {
+        clearTimeout(__voiceChatSilenceTimer);
+        __voiceChatSilenceTimer = null;
+    }
+}
 
 async function interruptVoicePlayback(reason) {
     try {
@@ -17643,9 +17659,16 @@ async function interruptVoicePlayback(reason) {
     } catch (e) {}
     __voicePausedForTts = false;
     __voiceBargeStartAt = null;
+    __voiceTtsStartedAt = 0;
+    __voiceTtsEndedAt = Date.now();
+    clearVoiceChatSilenceTimer();
     // 手动停止 / 试听前清理：结束试听护栏并恢复麦克风
     if (reason === 'manual-stop' || reason === 'before-preview') {
         endVoicePreviewGuard();
+    }
+    // 唤醒模式下朗读会挂起麦克风；打断后需恢复，否则再也听不到唤醒词
+    if (__voiceRecMode === 'wake' && !__voicePreviewGuard) {
+        setVoiceMicSuspended(false);
     }
     if (reason) console.log('[Voice] playback interrupted:', reason);
 }
@@ -17730,6 +17753,10 @@ function startLocalVoiceRecognition(mode) {
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         __localAudioStream = stream;
+        // 识别链路若在朗读中途重建，立刻重新挂起麦克风，避免回声窗口
+        if ((__voicePausedForTts || __voicePreviewGuard) && (__voiceRecMode === 'wake' || __voicePreviewGuard)) {
+            setVoiceMicSuspended(true);
+        }
         // 尽量请求 16k；若被浏览器忽略，后面会 downsamplePcmTo16k
         __localAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const source = __localAudioContext.createMediaStreamSource(stream);
@@ -17752,8 +17779,17 @@ function startLocalVoiceRecognition(mode) {
             }
             const rms = Math.sqrt(sum / channelData.length);
 
-            // 朗读中：不采集识别，但允许人声打断（阈值略高，避免喇叭回灌误触）
+            // 朗读中：默认不抢话。仅「语音对话」模式允许更严格的人声打断
+            // （唤醒倾听时喇叭回灌极易误判，造成朗读莫名中断）
             if (__voicePausedForTts) {
+                if (__voiceRecMode !== 'chat') {
+                    __voiceBargeStartAt = null;
+                    return;
+                }
+                if (Date.now() - (__voiceTtsStartedAt || 0) < __voiceBargeGraceMs) {
+                    __voiceBargeStartAt = null;
+                    return;
+                }
                 if (rms > __voiceBargeRms) {
                     if (!__voiceBargeStartAt) __voiceBargeStartAt = Date.now();
                     else if (Date.now() - __voiceBargeStartAt >= __voiceBargeHoldMs) {
@@ -17764,9 +17800,7 @@ function startLocalVoiceRecognition(mode) {
                             __localSpeechStartAt = null;
                             __localSilenceStart = null;
                             if (window.api && window.api.voice) {
-                                window.api.voice.setListenStatus(
-                                    __voiceRecMode === 'wake' ? 'listening_wake' : 'listening'
-                                );
+                                window.api.voice.setListenStatus('listening');
                             }
                         });
                     }
@@ -17777,13 +17811,17 @@ function startLocalVoiceRecognition(mode) {
             }
 
             if (__voiceRecMode === 'chat') {
+                // 朗读尾音回灌：冷却期内不因「开始说话」打断刚排队的下一句
+                const inPostTtsCooldown = (Date.now() - (__voiceTtsEndedAt || 0)) < __voicePostTtsCooldownMs;
                 if (rms > __localRmsThreshold) {
                     if (!__localSpeaking) {
                         if (!__localSpeechStartAt) __localSpeechStartAt = Date.now();
                         else if (Date.now() - __localSpeechStartAt >= __localSpeechStartHoldMs) {
                             __localSpeaking = true;
                             __localSpeechStartAt = null;
-                            interruptVoicePlayback('speech-start');
+                            if (!inPostTtsCooldown) {
+                                interruptVoicePlayback('speech-start');
+                            }
                             if (window.api && window.api.voice) {
                                 window.api.voice.setListenStatus('listening');
                             }
@@ -17960,15 +17998,8 @@ function createSpeechRecognition() {
     return rec;
 }
 
-function startVoiceRecognition(mode) {
-    if (__asrModelState && __asrModelState.installed) {
-        startLocalVoiceRecognition(mode);
-        return;
-    }
-    // 未装离线模型：在线识别在国内常失败，先提示下载，仍尝试在线兜底
-    if (mode === 'chat' || mode === 'wake') {
-        showToast('尚未安装离线识别模型，语音对话可能识别不到。请点击「下载离线识别模型」');
-    }
+function startOnlineVoiceRecognitionFallback(mode) {
+    // 未装离线模型：在线识别在国内常失败，仍尝试在线兜底
     stopLocalVoiceRecognition();
     stopVoiceRecognition();
     const rec = createSpeechRecognition();
@@ -17994,7 +18025,16 @@ function startVoiceRecognition(mode) {
         if (!heard) return;
 
         if (__voicePausedForTts) {
+            // 唤醒模式朗读中忽略识别结果，避免把喇叭声当成抢话
+            if (__voiceRecMode !== 'chat') return;
+            // 对话模式：仅完整结果、且过了开场宽限才打断
+            if (!finalText || finalText.trim().length < 2) return;
+            if (Date.now() - (__voiceTtsStartedAt || 0) < __voiceBargeGraceMs) return;
             interruptVoicePlayback('barge-in-online');
+            // 抢话后继续走下方缓冲逻辑提交用户话
+        } else if (__voiceRecMode === 'chat' && (Date.now() - (__voiceTtsEndedAt || 0)) < __voicePostTtsCooldownMs) {
+            // 朗读刚结束：忽略尾音被识别成「用户说完」，防止立刻二次打断
+            return;
         }
 
         if (__voiceRecMode === 'wake') {
@@ -18014,11 +18054,15 @@ function startVoiceRecognition(mode) {
             if (finalText) {
                 __voiceChatBuffer = (__voiceChatBuffer + ' ' + finalText).trim();
             }
-            if (__voiceChatSilenceTimer) clearTimeout(__voiceChatSilenceTimer);
+            clearVoiceChatSilenceTimer();
             __voiceChatSilenceTimer = setTimeout(() => {
+                // 朗读中途不得被「说完了」定时器误杀（回声/延迟 final 常见）
+                if (__voicePausedForTts) {
+                    clearVoiceChatSilenceTimer();
+                    return;
+                }
                 const utter = (__voiceChatBuffer || heard).trim();
                 __voiceChatBuffer = '';
-                // 说完立刻停朗读
                 interruptVoicePlayback('speech-end-online');
                 if (utter) submitVoiceChatUtterance(utter);
             }, 1400);
@@ -18103,6 +18147,8 @@ async function submitVoiceChatUtterance(text) {
 }
 
 let __voiceDesiredListenMode = null;
+/** startVoiceRecognition 异步核对 ASR 期间的目标模式，防止重复开麦 */
+let __voiceRecStarting = null;
 
 function syncVoiceListeningFromSettings(settings) {
     const s = settings || {};
@@ -18114,10 +18160,12 @@ function syncVoiceListeningFromSettings(settings) {
     }
     // chat 由唤醒进入的临时态不被 wake 目标覆盖
     if (desired === 'wake' && __voiceRecMode === 'chat') return;
-    if (desired === __voiceDesiredListenMode && desired === (__voiceRecMode === 'off' ? 'off' : __voiceRecMode)) return;
+    const current = __voiceRecStarting || (__voiceRecMode === 'off' ? 'off' : __voiceRecMode);
+    if (desired === __voiceDesiredListenMode && desired === current) return;
     __voiceDesiredListenMode = desired;
 
     if (desired === 'off') {
+        __voiceRecStarting = null;
         if (__voiceRecMode !== 'off') {
             stopVoiceRecognition();
             stopLocalVoiceRecognition();
@@ -18125,7 +18173,37 @@ function syncVoiceListeningFromSettings(settings) {
         if (window.api && window.api.voice) window.api.voice.setListenStatus('idle');
         return;
     }
-    if (__voiceRecMode !== desired) startVoiceRecognition(desired);
+    if (__voiceRecMode !== desired && __voiceRecStarting !== desired) startVoiceRecognition(desired);
+}
+
+function startVoiceRecognition(mode) {
+    // 异步启动：先确认 ASR 状态，避免启动竞态把「已安装」误判成未安装
+    if (__voiceRecStarting === mode || __voiceRecMode === mode) return;
+    __voiceRecStarting = mode;
+    void (async () => {
+        try {
+            // 未确认或缓存显示未安装时，强制再查一次磁盘
+            if (!__asrStateChecked || !(__asrModelState && __asrModelState.installed)) {
+                await ensureAsrModelState(true);
+            }
+            // 期间设置已关掉监听则放弃
+            if (__voiceDesiredListenMode !== mode && __voiceDesiredListenMode !== 'chat') {
+                return;
+            }
+            if (__asrModelState && __asrModelState.installed) {
+                startLocalVoiceRecognition(mode);
+                return;
+            }
+            // 确实未装：仅提示一次，并尝试在线识别兜底
+            if ((mode === 'chat' || mode === 'wake') && !__asrMissingToastShown) {
+                __asrMissingToastShown = true;
+                showToast('尚未安装离线识别模型，语音对话可能识别不到。请点击「下载离线识别模型」');
+            }
+            startOnlineVoiceRecognitionFallback(mode);
+        } finally {
+            if (__voiceRecStarting === mode) __voiceRecStarting = null;
+        }
+    })();
 }
 
 function bindVoiceControlsOnce() {
@@ -18239,23 +18317,33 @@ function bindVoiceControlsOnce() {
             if (speakingNow) {
                 if (!__voicePausedForTts) {
                     __voicePausedForTts = true;
+                    __voiceTtsStartedAt = Date.now();
+                    __voiceBargeStartAt = null;
                     __localAudioChunks = [];
                     __localSpeaking = false;
                     __localSilenceStart = null;
+                    __localSpeechStartAt = null;
+                    clearVoiceChatSilenceTimer();
                 }
-                // 试听进行中：持续挂起麦克风，防止回声打断
-                if (__voicePreviewGuard) setVoiceMicSuspended(true);
+                // 试听 / 唤醒倾听：朗读时挂起麦克风，杜绝回声打断
+                if (__voicePreviewGuard || __voiceRecMode === 'wake') {
+                    setVoiceMicSuspended(true);
+                }
             } else if (__voicePausedForTts || __voicePreviewGuard) {
                 __voicePausedForTts = false;
+                __voiceTtsStartedAt = 0;
+                __voiceBargeStartAt = null;
+                __voiceTtsEndedAt = Date.now();
                 const wasPreview = __voicePreviewGuard;
+                const needMicResume = wasPreview || __voiceRecMode === 'wake';
                 endVoicePreviewGuard();
+                if (needMicResume) setVoiceMicSuspended(false);
                 // 朗读/试听结束：任意页面都恢复倾听（不依赖是否停在语音管理页）
                 const mode = __voiceRecMode;
                 if (mode === 'wake' || mode === 'chat') {
                     try {
                         window.api.voice.setListenStatus(mode === 'wake' ? 'listening_wake' : 'listening');
                     } catch (e) {}
-                    if (wasPreview) setVoiceMicSuspended(false);
                 } else {
                     try {
                         syncVoiceListeningFromSettings((__voiceState && __voiceState.settings) || {});
@@ -18282,6 +18370,29 @@ function bindVoiceControlsOnce() {
 }
 
 let __asrModelState = { installed: false, downloading: false, percent: 0 };
+/** 是否已向主进程核对过 ASR 安装状态（避免启动竞态误报未安装） */
+let __asrStateChecked = false;
+let __asrMissingToastShown = false;
+
+async function ensureAsrModelState(force = false) {
+    if (!force && __asrStateChecked) return __asrModelState;
+    if (!window.api || !window.api.voice || typeof window.api.voice.getAsrState !== 'function') {
+        __asrStateChecked = true;
+        return __asrModelState;
+    }
+    try {
+        const asrRes = await window.api.voice.getAsrState();
+        if (asrRes && asrRes.success && asrRes.data) {
+            __asrModelState = asrRes.data;
+            updateAsrUi();
+        }
+    } catch (e) {
+        console.warn('[Voice] ensureAsrModelState failed:', e);
+    } finally {
+        __asrStateChecked = true;
+    }
+    return __asrModelState;
+}
 
 function updateAsrUi() {
     const statusText = document.getElementById('asr-model-status');
@@ -18316,6 +18427,20 @@ function updateAsrUi() {
 async function initVoiceModule() {
     bindVoiceControlsOnce();
     if (!window.api || !window.api.voice) return;
+
+    // 先核对离线识别模型，再恢复唤醒/对话监听，避免启动瞬间误报「尚未安装」
+    try {
+        await ensureAsrModelState(true);
+        window.api.voice.onAsrStateUpdated((state) => {
+            if (state) __asrModelState = state;
+            __asrStateChecked = true;
+            if (state && state.installed) __asrMissingToastShown = false;
+            updateAsrUi();
+        });
+    } catch (e) {
+        console.warn('[Voice] init asr failed:', e);
+    }
+
     try {
         const res = await window.api.voice.getState();
         if (res && res.data) applyVoiceStateToUi(res.data);
@@ -18324,19 +18449,12 @@ async function initVoiceModule() {
     }
 
     try {
-        const asrRes = await window.api.voice.getAsrState();
-        if (asrRes && asrRes.success) {
-            __asrModelState = asrRes.data;
-            updateAsrUi();
-        }
-        window.api.voice.onAsrStateUpdated((state) => {
-            __asrModelState = state;
-            updateAsrUi();
-        });
         const downloadBtn = document.getElementById('btn-asr-download');
         const importBtn = document.getElementById('btn-asr-import');
         const afterAsrReady = async () => {
             __asrModelState = { installed: true, downloading: false, percent: 100 };
+            __asrStateChecked = true;
+            __asrMissingToastShown = false;
             updateAsrUi();
             __voiceDesiredListenMode = null;
             try {
@@ -18381,7 +18499,7 @@ async function initVoiceModule() {
             };
         }
     } catch (e) {
-        console.warn('[Voice] init asr failed:', e);
+        console.warn('[Voice] bind asr buttons failed:', e);
     }
 }
 
@@ -18396,6 +18514,7 @@ async function refreshVoicePanel() {
         const asrRes = await window.api.voice.getAsrState();
         if (asrRes && asrRes.success) {
             __asrModelState = asrRes.data;
+            __asrStateChecked = true;
             updateAsrUi();
         }
     } catch (e) {}

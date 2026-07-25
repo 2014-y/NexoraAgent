@@ -78,7 +78,7 @@ window.LOCALES = {
 
     'voice.title': '语音管理',
     'voice.desc': '本地语音：渠道回复朗读（在线云扬）、唤醒倾听、语音对话；默认关闭以节省性能',
-    'voice.notice': '朗读使用微软在线「云扬」神经音色（需联网）。语音对话/唤醒需先下载「离线语音识别」模型（约 220MB）。识别内容会发到「模型对话」；朗读时可说话打断。关闭总开关即释放麦克风。',
+    'voice.notice': '朗读使用微软在线「云扬」神经音色（需联网）。语音对话/唤醒需先下载「离线语音识别」模型（约 220MB）。识别内容会发到「模型对话」。仅开启「语音对话」时支持说话打断；仅开唤醒时朗读不会被回声打断。关闭总开关即释放麦克风。',
     'voice.section.jarvis': '接近贾维斯风格（英文）',
     'voice.section.zh': '中文离线音色（推荐给内置角色）',
     'voice.section.role_bind': '角色音色绑定',
@@ -1027,7 +1027,7 @@ window.LOCALES = {
 
     'voice.title': 'Voice Management',
     'voice.desc': 'Local voice: channel reply TTS (online Yunyang), wake listening, voice chat. Off by default to save performance.',
-    'voice.notice': 'TTS uses Microsoft online Yunyang neural voice (needs network). Voice chat/wake needs the offline ASR model (~220MB) first. Recognized speech goes to chat; you can barge in while speaking. Turn off the master switch to release the mic.',
+    'voice.notice': 'TTS uses Microsoft online Yunyang neural voice (needs network). Voice chat/wake needs the offline ASR model (~220MB) first. Recognized speech goes to chat. Barge-in only works when Voice Chat is on; wake-only mode will not interrupt playback due to speaker echo. Turn off the master switch to release the mic.',
     'voice.section.jarvis': 'Jarvis-like (English)',
     'voice.section.zh': 'Chinese offline voices (for built-in roles)',
     'voice.section.role_bind': 'Role voice binding',
@@ -1975,7 +1975,7 @@ window.LOCALES = {
 
     'voice.title': '語音管理',
     'voice.desc': '本地語音：渠道回覆朗讀（線上雲揚）、喚醒傾聽、語音對話；預設關閉以節省效能',
-    'voice.notice': '朗讀使用微軟線上「雲揚」神經音色（需連網）。語音對話/喚醒需先下載「離線語音識別」模型（約 220MB）。識別內容會發到「模型對話」；朗讀時可說話打斷。關閉總開關即釋放麥克風。',
+    'voice.notice': '朗讀使用微軟線上「雲揚」神經音色（需連網）。語音對話/喚醒需先下載「離線語音識別」模型（約 220MB）。識別內容會發到「模型對話」。僅開啟「語音對話」時支援說話打斷；僅開喚醒時朗讀不會被回聲打斷。關閉總開關即釋放麥克風。',
     'voice.section.jarvis': '接近賈維斯風格（英文）',
     'voice.section.zh': '中文離線音色（推薦給內建角色）',
     'voice.section.role_bind': '角色音色綁定',

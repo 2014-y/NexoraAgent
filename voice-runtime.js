@@ -591,9 +591,10 @@ class VoiceRuntime extends EventEmitter {
         
         const now = Date.now();
         if (this._lastSpeakText && clean && now - (this._lastSpeakAt || 0) < 15000) {
-            // Check for prefix match to handle truncation differences (e.g. 500 vs 800)
+            // 仅拦截「几乎同一句」重复投递，避免长回复因开头相同被误丢
+            const sameLen = Math.abs(clean.length - this._lastSpeakText.length) <= 12;
             const cmpLen = Math.min(50, Math.min(clean.length, this._lastSpeakText.length));
-            if (cmpLen > 5 && clean.slice(0, cmpLen) === this._lastSpeakText.slice(0, cmpLen)) {
+            if (sameLen && cmpLen > 5 && clean.slice(0, cmpLen) === this._lastSpeakText.slice(0, cmpLen)) {
                 return { success: false, error: 'duplicate' };
             }
         }
@@ -604,7 +605,8 @@ class VoiceRuntime extends EventEmitter {
             return { success: false, error: this._settings.muted ? 'muted' : 'disabled' };
         }
 
-        const chunks = this._segmentText(clean, 180);
+        // 较大分片：减少 Edge 在线 TTS「合成→播放→再合成」之间的断句感
+        const chunks = this._segmentText(clean, 480);
         for (const chunk of chunks) {
             this._queue.push({ text: chunk, packId, source });
         }
@@ -692,6 +694,7 @@ class VoiceRuntime extends EventEmitter {
         }
 
         const job = this._queue.shift();
+        const jobEpoch = this._speakEpoch;
         this._speaking = true;
         this._setStatus('speaking');
         try {
@@ -699,6 +702,8 @@ class VoiceRuntime extends EventEmitter {
         } catch (e) {
             console.warn('[VoiceRuntime] speak failed:', e && e.message);
         } finally {
+            // stop() 会抬 epoch；过期任务不得清掉新任务的 speaking，也不得续播空队列
+            if (jobEpoch !== this._speakEpoch) return;
             this._speaking = false;
             this._currentProc = null;
             setImmediate(() => this._pumpQueue());
@@ -991,11 +996,11 @@ $p = New-Object System.Windows.Media.MediaPlayer
 $p.Open([Uri]'${wavPath.replace(/'/g, "''")}')
 $p.Volume = ${Math.max(0, Math.min(1, volume / 100))}
 $p.Play()
-Start-Sleep -Milliseconds 200
-while ($p.NaturalDuration.HasTimeSpan -eq $false) { Start-Sleep -Milliseconds 50 }
+Start-Sleep -Milliseconds 80
+while ($p.NaturalDuration.HasTimeSpan -eq $false) { Start-Sleep -Milliseconds 40 }
 $ms = [int]$p.NaturalDuration.TimeSpan.TotalMilliseconds
 if ($ms -lt 100) { $ms = 100 }
-Start-Sleep -Milliseconds ($ms + 120)
+Start-Sleep -Milliseconds ($ms + 40)
 $p.Close()
 `;
             const proc = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', ps], {
@@ -1259,14 +1264,19 @@ try {
                 return;
             }
             const t = String(logText || '');
-            if (!/Closed streaming|dispatch complete \(queuedFinal=true, replies=[1-9]/i.test(t)) {
-                return;
-            }
+            // 旧版 OpenClaw 信号 + 微信/渠道实际出站成功日志
+            const hit =
+                /Closed streaming|dispatch complete \(queuedFinal=true, replies=[1-9]/i.test(t) ||
+                /outbound:\s*text sent OK/i.test(t) ||
+                /\[feishu\].*(?:message sent|sent successfully|reply sent)/i.test(t) ||
+                /\[qqbot\].*(?:message sent|sent OK|reply sent|send.*success)/i.test(t);
+            if (!hit) return;
+            if (/outbound:\s*cancelled/i.test(t)) return;
             if (this._channelSpeakTimer) clearTimeout(this._channelSpeakTimer);
             this._channelSpeakTimer = setTimeout(() => {
                 this._channelSpeakTimer = null;
                 this._speakLatestAssistantFromSessions();
-            }, 600);
+            }, 700);
         } catch (e) {}
     }
 
