@@ -64,12 +64,52 @@ function clampVolume(v) {
     return Math.max(0, Math.min(1, n));
 }
 
+/**
+ * 朗读噪音清洗（仅影响 TTS 文案，不改消息展示/发送）：
+ * - emoji / 符号图标（避免念「交叉的剑」「齿轮」）
+ * - MEDIA:、本地盘符路径、file/http(s) URL
+ * - 工具状态英文尾巴
+ * 不做过宽匹配，避免误删正常中英文内容。
+ */
+function stripEmojisForSpeech(text) {
+    return String(text || '')
+        .replace(/\p{Regional_Indicator}{2}/gu, '')
+        .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/gu, '')
+        .replace(/[\d#*]\uFE0F?\u20E3/g, '')
+        .replace(/[\u2600-\u27BF\u2B00-\u2BFF]/g, '')
+        .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
+        .replace(/[\uFE0F\u200D\u20E3\uFE0E]/g, '');
+}
+
+function stripMediaPathsForSpeech(text) {
+    return String(text || '')
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+        .replace(/<\/?(?:img|video|audio)\b[^>]*>/gi, ' ')
+        // MEDIA: 整行（截图/生图指令，不应朗读）
+        .replace(/(^|\n)\s*MEDIA\s*:\s*[^\n]*/gi, '$1')
+        .replace(/\bMEDIA\s*:\s*/gi, ' ')
+        // 协议 URL
+        .replace(/\b(?:nexora-media|file|https?|ftp):\/\/[^\s)\]\"'<>]+/gi, ' ')
+        // UNC
+        .replace(/\\\\[^\s\n\"'<>\\]+(?:\\[^\s\n\"'<>\\]+)+/g, ' ')
+        // Windows 盘符路径（C:\... / C:/...）
+        .replace(/\b[A-Za-z]:\\[^\s\n\"'<>]+/g, ' ')
+        .replace(/\b[A-Za-z]:\/[^\s\n\"'<>]+/g, ' ')
+        // 常见 Unix 绝对路径
+        .replace(/\/(?:Users|home|tmp|var|opt|mnt|media|root|Volumes|private)\/[^\s\n\"'<>]+/g, ' ')
+        .replace(/\b(?:Screenshot captured|Image generated|Video generated|Media saved)\.?/gi, ' ')
+        .replace(/\[\[(?:image|video|audio|media)\]\]/gi, ' ');
+}
+
 function sanitizeText(text, maxLen = 500) {
     let s = String(text || '')
         .replace(/\r\n/g, '\n')
         .replace(/```[\s\S]*?```/g, ' ')
+        // Markdown 链接保留可见文字
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .replace(/[#>*_`]/g, '')
+        .replace(/[#>*_`]/g, '');
+    s = stripMediaPathsForSpeech(s);
+    s = stripEmojisForSpeech(s)
         .replace(/\s+/g, ' ')
         .trim();
     if (!s) return '';

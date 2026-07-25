@@ -10139,6 +10139,60 @@ function initChatModelSearchPicker() {
     });
 }
 
+/** 朗读前去掉 emoji / 符号图标（仅 TTS，不影响气泡展示） */
+function stripIconsForSpeech(text) {
+    return String(text || '')
+        .replace(/\p{Regional_Indicator}{2}/gu, '')
+        .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/gu, '')
+        .replace(/[\d#*]\uFE0F?\u20E3/g, '')
+        .replace(/[\u2600-\u27BF\u2B00-\u2BFF]/g, '')
+        .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
+        .replace(/[\uFE0F\u200D\u20E3\uFE0E]/g, '');
+}
+
+/** 朗读前去掉 MEDIA/盘符路径/URL（仅 TTS） */
+function stripMediaPathsForSpeech(text) {
+    return String(text || '')
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+        .replace(/<\/?(?:img|video|audio)\b[^>]*>/gi, ' ')
+        .replace(/(^|\n)\s*MEDIA\s*:\s*[^\n]*/gi, '$1')
+        .replace(/\bMEDIA\s*:\s*/gi, ' ')
+        .replace(/\b(?:nexora-media|file|https?|ftp):\/\/[^\s)\]\"'<>]+/gi, ' ')
+        .replace(/\\\\[^\s\n\"'<>\\]+(?:\\[^\s\n\"'<>\\]+)+/g, ' ')
+        .replace(/\b[A-Za-z]:\\[^\s\n\"'<>]+/g, ' ')
+        .replace(/\b[A-Za-z]:\/[^\s\n\"'<>]+/g, ' ')
+        .replace(/\/(?:Users|home|tmp|var|opt|mnt|media|root|Volumes|private)\/[^\s\n\"'<>]+/g, ' ')
+        .replace(/\b(?:Screenshot captured|Image generated|Video generated|Media saved)\.?/gi, ' ')
+        .replace(/\[\[(?:image|video|audio|media)\]\]/gi, ' ');
+}
+
+/** 取气泡正文用于朗读：去掉图片/视频节点，避免念 alt 或残留路径 */
+function getBubbleTextForSpeech(bubble) {
+    if (!bubble) return '';
+    try {
+        const clone = bubble.cloneNode(true);
+        clone.querySelectorAll('img, video, audio, svg, canvas, .nexora-media-img, .chat-message-image, .tts-action-row').forEach((el) => {
+            try { el.remove(); } catch (_) {}
+        });
+        return clone.innerText || clone.textContent || '';
+    } catch (_) {
+        return bubble.innerText || bubble.textContent || '';
+    }
+}
+
+function sanitizeTextForSpeech(text) {
+    let s = String(text || '');
+    s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    s = stripMediaPathsForSpeech(s);
+    s = stripIconsForSpeech(s)
+        .replace(/[\*\_\`\#]/g, '')
+        .replace(/AI 正在直连.*联络思考中\.\.\./g, '')
+        .replace(/思考中\.\.\./g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return s;
+}
+
 // 为 AI 的气泡消息添加朗读操作按钮
 function addTtsToAiBubble(msgDiv, bubble) {
     if (!msgDiv || !bubble) return;
@@ -10232,13 +10286,8 @@ function addTtsToAiBubble(msgDiv, bubble) {
             }
             window.speechSynthesis.cancel();
             
-            let textToSpeak = bubble.textContent || '';
-            textToSpeak = textToSpeak
-                .replace(/[\*\_\`\#]/g, '')
-                .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-                .replace(/AI 正在直连.*联络思考中\.\.\./g, '')
-                .replace(/思考中\.\.\./g, '')
-                .trim();
+            // 只取正文：去掉图片节点 + 路径/emoji 噪音；不改气泡展示
+            let textToSpeak = sanitizeTextForSpeech(getBubbleTextForSpeech(bubble));
 
             if (!textToSpeak) return;
 
@@ -10594,9 +10643,9 @@ function clearChatHistory(options = {}) {
                 <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw Nexora Agent未启动，请前往【控制台】启动Nexora Agent。</span>
                 <br><br>
                 <span data-i18n="chat.welcome.functions">在这里您可以：</span>
-                <br>💬 <span data-i18n="chat.welcome.chat_mode">与当前选中的大模型进行实时对话；</span>
-                <br>🖼️ <span data-i18n="chat.welcome.image_mode">点击左下角按钮上传图片，让支持多模态的模型进行**识图对话**；</span>
-                <br>🎨 <span data-i18n="chat.welcome.generator_mode">输入指令并点击下方生图/生视频快捷键，快速体验生成式创作。</span>
+                <br>• <span data-i18n="chat.welcome.chat_mode">与当前选中的大模型进行实时对话；</span>
+                <br>• <span data-i18n="chat.welcome.image_mode">点击左下角按钮上传图片，让支持多模态的模型进行**识图对话**；</span>
+                <br>• <span data-i18n="chat.welcome.generator_mode">输入指令并点击下方生图/生视频快捷键，快速体验生成式创作。</span>
             </div>
         </div>
     `;
@@ -17332,8 +17381,10 @@ async function maybeSpeakDesktopReply(text, roleId) {
         const s = st.settings;
         if (!s.enabled || s.muted) return;
         if (!(s.desktopSpeak || s.voiceChat)) return;
-        const clean = String(text || '').trim();
-        if (!clean || clean.startsWith('⚠️') || clean.startsWith('❌')) return;
+        const raw = String(text || '').trim();
+        if (!raw || raw.startsWith('⚠️') || raw.startsWith('❌')) return;
+        const clean = sanitizeTextForSpeech(raw);
+        if (!clean) return;
         await window.api.voice.speak({
             text: clean,
             source: 'desktop',

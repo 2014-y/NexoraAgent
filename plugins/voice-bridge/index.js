@@ -20,12 +20,40 @@ const DEDUPE_MS = 12000;
 /** 语音服务不可达时的退避，避免首装/未开朗读时每条消息都报错 */
 const HTTP_BACKOFF_MS = 15000;
 
+function stripEmojisForSpeech(text) {
+  return String(text || '')
+    .replace(/\p{Regional_Indicator}{2}/gu, '')
+    .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/gu, '')
+    .replace(/[\d#*]\uFE0F?\u20E3/g, '')
+    .replace(/[\u2600-\u27BF\u2B00-\u2BFF]/g, '')
+    .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
+    .replace(/[\uFE0F\u200D\u20E3\uFE0E]/g, '');
+}
+
+/** 仅剥朗读噪音：MEDIA/路径/URL/状态句；不碰正常中英文 */
+function stripMediaPathsForSpeech(text) {
+  return String(text || '')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/<\/?(?:img|video|audio)\b[^>]*>/gi, ' ')
+    .replace(/(^|\n)\s*MEDIA\s*:\s*[^\n]*/gi, '$1')
+    .replace(/\bMEDIA\s*:\s*/gi, ' ')
+    .replace(/\b(?:nexora-media|file|https?|ftp):\/\/[^\s)\]\"'<>]+/gi, ' ')
+    .replace(/\\\\[^\s\n\"'<>\\]+(?:\\[^\s\n\"'<>\\]+)+/g, ' ')
+    .replace(/\b[A-Za-z]:\\[^\s\n\"'<>]+/g, ' ')
+    .replace(/\b[A-Za-z]:\/[^\s\n\"'<>]+/g, ' ')
+    .replace(/\/(?:Users|home|tmp|var|opt|mnt|media|root|Volumes|private)\/[^\s\n\"'<>]+/g, ' ')
+    .replace(/\b(?:Screenshot captured|Image generated|Video generated|Media saved)\.?/gi, ' ')
+    .replace(/\[\[(?:image|video|audio|media)\]\]/gi, ' ');
+}
+
 function sanitize(text) {
   let s = String(text || '')
     .replace(/\r\n/g, '\n')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/[#>*_`]/g, '')
+    .replace(/[#>*_`]/g, '');
+  s = stripMediaPathsForSpeech(s);
+  s = stripEmojisForSpeech(s)
     .replace(/\s+/g, ' ')
     .trim();
   if (!s) return '';
