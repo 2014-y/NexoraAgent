@@ -1224,6 +1224,68 @@ body.theme-custom.has-custom-bg .title-bar {
   letter-spacing: 0.04em;
 }
 
+/* OpenClaw webview 首次加载 / 白屏自愈遮罩 */
+.openclaw-panel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base, #0a0e17);
+  pointer-events: auto;
+}
+.openclaw-panel-overlay[hidden] {
+  display: none !important;
+}
+.openclaw-panel-overlay-inner {
+  max-width: 420px;
+  padding: 28px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.openclaw-panel-overlay-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(var(--accent-rgb, 212, 160, 74), 0.18);
+  border-top-color: var(--accent-color, #d4a04a);
+  animation: spin 0.85s linear infinite;
+  margin-bottom: 6px;
+}
+.openclaw-panel-overlay.is-error .openclaw-panel-overlay-spinner {
+  display: none;
+}
+.openclaw-panel-overlay-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #e8e4dc);
+}
+.openclaw-panel-overlay-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary, #9a9080);
+}
+.openclaw-panel-overlay-retry {
+  margin-top: 8px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--accent-rgb, 212, 160, 74), 0.45);
+  background: rgba(var(--accent-rgb, 212, 160, 74), 0.12);
+  color: var(--accent-color, #d4a04a);
+  cursor: pointer;
+  font-size: 13px;
+}
+.openclaw-panel-overlay-retry:hover {
+  background: rgba(var(--accent-rgb, 212, 160, 74), 0.22);
+}
+.openclaw-panel-overlay-retry[hidden] {
+  display: none !important;
+}
+
 /* OpenClaw / 数据中心 内置面板铺满视口，避免外层 padding 挤压 */
 .content-viewport:has(#openclaw-panel-view.active),
 .content-viewport:has(#data-center-view.active) {
@@ -3542,7 +3604,7 @@ textarea.acc-input {
   color: var(--text-secondary);
 }
 
-input:not([type="checkbox"]):not([type="radio"]), select:not(.chat-model-select-hidden):not(#chat-model-select), textarea {
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select:not(.chat-model-select-hidden):not(#chat-model-select):not(#stats-model-select), textarea {
   background: var(--bg-input) !important;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -7594,6 +7656,234 @@ input:focus, select:focus, textarea:focus {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 用量监控：头部 + 筛选条布局（标题左、条件右） */
+#dashboard-view .stats-header-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 40;
+  overflow: visible;
+}
+
+#dashboard-view .stats-header-copy {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+#dashboard-view .stats-header-desc {
+  margin-top: 4px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+#dashboard-view .stats-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  margin-left: auto;
+  position: relative;
+  z-index: 45;
+  overflow: visible;
+  --stats-control-h: 32px;
+}
+
+#dashboard-view .stats-toolbar .toolbar-select,
+#dashboard-view .stats-toolbar .stats-model-search,
+#dashboard-view .stats-toolbar #btn-stats-query {
+  box-sizing: border-box !important;
+  height: var(--stats-control-h) !important;
+  min-height: var(--stats-control-h) !important;
+  max-height: var(--stats-control-h) !important;
+  line-height: calc(var(--stats-control-h) - 2px) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+  margin: 0 !important;
+  vertical-align: middle;
+}
+
+#dashboard-view .stats-toolbar .toolbar-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--bg-input) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa0b0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 8px center !important;
+  background-size: 12px !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+  padding: 0 24px 0 10px !important;
+  outline: none;
+  cursor: pointer;
+  max-width: 140px;
+}
+
+#dashboard-view .stats-toolbar #btn-stats-query {
+  min-width: 84px;
+  width: auto;
+  padding: 0 14px !important;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 4px;
+  border: none !important;
+  box-shadow: none;
+  transform: none !important;
+}
+
+#dashboard-view .stats-toolbar #btn-stats-query:hover {
+  transform: none !important;
+}
+
+#dashboard-view .stats-scroll-container {
+  position: relative;
+  z-index: 1;
+}
+
+/* 用量监控：可搜索模型筛选（仅自定义下拉，无原生 select 叠层） */
+.stats-model-picker {
+  position: relative;
+  width: 168px;
+  min-width: 148px;
+  max-width: 200px;
+  height: var(--stats-control-h, 32px);
+  flex-shrink: 0;
+  overflow: visible;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+}
+
+.stats-model-picker input[type="hidden"],
+#stats-model-select {
+  display: none !important;
+}
+
+.stats-model-search,
+#stats-model-search.stats-model-search {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: var(--bg-input) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+  height: var(--stats-control-h, 32px) !important;
+  min-height: var(--stats-control-h, 32px) !important;
+  max-height: var(--stats-control-h, 32px) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--text-primary) !important;
+  padding: 0 28px 0 10px !important;
+  margin: 0 !important;
+  outline: none !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  line-height: calc(var(--stats-control-h, 32px) - 2px) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  letter-spacing: 0 !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.stats-model-search::-webkit-search-decoration,
+.stats-model-search::-webkit-search-cancel-button,
+.stats-model-search::-webkit-search-results-button,
+.stats-model-search::-webkit-search-results-decoration {
+  display: none !important;
+  -webkit-appearance: none !important;
+}
+
+.stats-model-search::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.stats-model-search:focus {
+  border-color: rgba(var(--accent-rgb), 0.65) !important;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.18) !important;
+  cursor: text;
+}
+
+.stats-model-search-icon {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.stats-model-dropdown {
+  display: none;
+  position: absolute;
+  right: 0;
+  left: auto;
+  min-width: 220px;
+  width: max(100%, 220px);
+  top: calc(100% + 6px);
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* 必须用不透明底，否则会透出下方「总成本」数字 */
+  background: #160e28 !important;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.72);
+  z-index: 9999;
+  padding: 6px;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.stats-model-dropdown:not([hidden]) {
+  display: block;
+}
+
+.stats-model-dropdown .stats-model-option {
+  display: block !important;
+  width: 100% !important;
+  min-height: 32px !important;
+  height: auto !important;
+  text-align: left !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 8px 10px !important;
+  margin: 0 0 2px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  letter-spacing: normal !important;
+}
+
+.stats-model-dropdown .stats-model-option:hover,
+.stats-model-dropdown .stats-model-option.is-active {
+  background: rgba(var(--accent-rgb), 0.22) !important;
 }
 
 .roles-search-input:focus {

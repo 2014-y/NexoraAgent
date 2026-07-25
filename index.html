@@ -975,7 +975,7 @@
         <section class="tab-pane" id="voice-view">
           <div class="view-header">
             <h2 data-i18n="voice.title">语音管理</h2>
-            <p data-i18n="voice.desc">本地离线语音：渠道 AI 回复朗读、唤醒倾听、语音对话；全部可开关，默认关闭以节省性能</p>
+            <p data-i18n="voice.desc">本地语音：渠道回复朗读（在线云扬）、唤醒倾听、语音对话；默认关闭以节省性能</p>
           </div>
 
           <div class="voice-control-panel">
@@ -1065,12 +1065,12 @@
             </div>
 
           <div class="voice-notice" data-i18n="voice.notice">
-            说明：语音对话/唤醒需「离线语音识别」模型（国内网络下在线识别常失败）。朗读音色可单独下载；关闭总开关即释放麦克风与播放队列。
+            说明：朗读使用微软在线「云扬」；语音对话/唤醒需离线识别模型。识别内容会发到「模型对话」；朗读时可说话打断。
           </div>
 
           <div class="voice-section-header">
-            <div class="voice-section-label" data-i18n="voice.section.packs">语音包（全局共用一个音色）</div>
-            <button type="button" class="btn-secondary" id="btn-voice-import" data-i18n="voice.btn.import">导入自定义语音包</button>
+            <div class="voice-section-label" data-i18n="voice.section.packs">朗读音色（在线云扬）</div>
+            <button type="button" class="btn-secondary" id="btn-voice-import" data-i18n="voice.btn.import" style="display:none;">导入自定义语音包</button>
           </div>
           <div class="plugins-masonry" id="voice-pack-grid"></div>
         </section>
@@ -1141,37 +1141,40 @@
 
         <!-- Tab 4: 用量统计 -->
         <section class="tab-pane" id="dashboard-view">
-          <!-- 头部与工具过滤条 -->
-          <div class="view-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; flex-wrap: wrap; gap: 12px;">
-            <div class="view-header" style="flex: 1 1 250px; min-width: 250px;">
+          <!-- 头部与工具过滤条：标题左、筛选右 -->
+          <div class="view-header-row stats-header-row">
+            <div class="view-header stats-header-copy">
               <h2 data-i18n="stats.title">使用统计</h2>
-              <p data-i18n="stats.desc" style="margin-top: 4px; line-height: 1.4; color: var(--text-secondary);">查看 AI 模型的使用情况和成本统计</p>
+              <p data-i18n="stats.desc" class="stats-header-desc">查看 AI 模型的使用情况和成本统计</p>
             </div>
             
-            <!-- 顶栏过滤工具组 -->
-            <div class="stats-toolbar" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0;">
-              <select class="toolbar-select" id="stats-source-select" style="height: 30px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 0 8px; outline: none; cursor: pointer;">
+            <div class="stats-toolbar">
+              <select class="toolbar-select" id="stats-source-select">
                 <option value="all" data-i18n="stats.source.all">全部来源</option>
                 <option value="gateway" data-i18n="stats.source.gateway">网关入口</option>
                 <option value="plugins" data-i18n="stats.source.plugins">插件管道</option>
               </select>
-              <select class="toolbar-select" id="stats-model-select" style="height: 30px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 0 8px; outline: none; cursor: pointer;">
-                <option value="all" data-i18n="stats.model.all">全部模型</option>
-                <option value="primary" data-i18n="stats.model.primary">主用模型</option>
-                <option value="fallback" data-i18n="stats.model.fallback">备用模型</option>
-              </select>
-              <select class="toolbar-select" id="stats-refresh-select" style="height: 30px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 0 8px; outline: none; cursor: pointer;">
-                <option value="30s" data-i18n="stats.refresh.30s">🔄 30s 刷新</option>
+              <div id="stats-model-picker" class="stats-model-picker">
+                <input type="hidden" id="stats-model-select" value="all">
+                <input id="stats-model-search" class="stats-model-search" type="search"
+                  autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                  data-form-type="other" data-lpignore="true"
+                  data-i18n-placeholder="stats.model.all"
+                  placeholder="全部模型"
+                  title="点击选择或输入关键字筛选模型">
+                <svg class="stats-model-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <div id="stats-model-dropdown" class="stats-model-dropdown" role="listbox" hidden></div>
+              </div>
+              <select class="toolbar-select" id="stats-refresh-select">
+                <option value="30s" data-i18n="stats.refresh.30s">30s 刷新</option>
                 <option value="manual" data-i18n="stats.refresh.manual">手动刷新</option>
               </select>
-              <select class="toolbar-select" id="stats-time-select" style="height: 30px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 0 8px; outline: none; cursor: pointer;">
-                <option value="all" data-i18n="stats.time.all">📊 全部</option>
-                <option value="today" data-i18n="stats.time.today" selected>📅 当天</option>
+              <select class="toolbar-select" id="stats-time-select">
+                <option value="all" data-i18n="stats.time.all">全部</option>
+                <option value="today" data-i18n="stats.time.today" selected>当天</option>
                 <option value="7days" data-i18n="stats.time.7days">最近7天</option>
               </select>
-              <button class="btn-primary" id="btn-stats-query" data-i18n="stats.btn.query" style="height: 30px; font-size: 12px; margin-top: 0; width: 92px; justify-content: center; flex-shrink: 0; white-space: nowrap; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: opacity 0.2s ease;">
-                🔍 查询
-              </button>
+              <button type="button" class="btn-primary" id="btn-stats-query" data-i18n="stats.btn.query">查询</button>
             </div>
           </div>
           
@@ -1429,7 +1432,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
               <div>
                 <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.auto_update.title">🔄 自动检查更新</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.auto_update.desc">开启后，每次进入客户端都会自动在后台检查新版本。</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.auto_update.desc">开启后启动时在后台静默检查新版本，有更新再弹窗，不打扰界面。</div>
               </div>
               <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-auto-update-toggle" checked>
@@ -1493,8 +1496,8 @@
                   <span id="app-version-badge" style="font-size: 11px; padding: 2px 6px; background: var(--accent-color); border-radius: 4px; color: var(--accent-text); font-weight: normal; margin-left: 5px;">v1.0.9</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;" data-i18n="settings.about.app_desc">本地 AI 智能体桌面端：OpenClaw 核心、多渠道通讯、技能中心与数据看板。</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.about.update_hint">有新版本时会自动弹窗提示，也可在上方开启「自动检查更新」。</div>
               </div>
-              <button type="button" class="btn-primary" id="btn-check-update" style="width: auto; padding: 6px 16px; font-size: 12px; margin-top: 0; border-radius: 6px; cursor: pointer;" data-i18n="nav.update">🔍 检查更新</button>
             </div>
 
             <!-- 详细系统信息 -->
@@ -2167,6 +2170,14 @@
 
         <!-- Tab 7: 内置 OpenClaw 面板 -->
         <section class="tab-pane" id="openclaw-panel-view" style="width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; background: var(--bg-base); position: relative;">
+          <div id="openclaw-panel-overlay" class="openclaw-panel-overlay" hidden aria-hidden="true">
+            <div class="openclaw-panel-overlay-inner">
+              <div class="openclaw-panel-overlay-spinner" aria-hidden="true"></div>
+              <div id="openclaw-panel-overlay-title" class="openclaw-panel-overlay-title">正在连接 OpenClaw…</div>
+              <div id="openclaw-panel-overlay-desc" class="openclaw-panel-overlay-desc">首次安装初始化较慢，请稍候，面板就绪后会自动打开。</div>
+              <button type="button" id="openclaw-panel-overlay-retry" class="openclaw-panel-overlay-retry" hidden>重试加载</button>
+            </div>
+          </div>
           <webview id="openclaw-iframe" partition="persist:nexora-agent-openclaw-panel" allowtransparency="false" style="width: 100%; height: 100%; border: none; background: #150a04; opacity: 1;" src=""></webview>
         </section>
 

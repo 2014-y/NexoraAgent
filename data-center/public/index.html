@@ -67,7 +67,6 @@ html {
   -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-weight:700;
 }
 .header .time { font-size:16px; color:var(--glow); font-family:'DIN',monospace; }
-.header .refresh-meta { font-size:12px; color:var(--text-secondary); margin-right:16px; }
 .header .status-dot { width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:8px;animation:pulse 1.5s infinite; }
 @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 4px var(--ok)} 50%{opacity:0.5;box-shadow:0 0 12px var(--ok)} }
 
@@ -146,6 +145,40 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
 /* 加载 */
 .loading { display:flex; align-items:center; justify-content:center; height:200px; color:var(--text-secondary); }
 
+/* 空数据态 */
+.empty-banner {
+  grid-column:1/-1;
+  display:flex; align-items:flex-start; gap:14px;
+  padding:16px 20px;
+  border-radius:12px;
+  border:1px dashed rgba(var(--accent-rgb), 0.35);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(123,97,255,0.06));
+}
+.empty-banner .empty-icon {
+  width:40px; height:40px; border-radius:10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px;
+  background: rgba(var(--accent-rgb), 0.12);
+  border:1px solid rgba(var(--accent-rgb), 0.25);
+}
+.empty-banner .empty-title { font-size:15px; color:var(--text-primary); font-weight:600; margin-bottom:4px; }
+.empty-banner .empty-desc { font-size:12px; color:var(--text-secondary); line-height:1.55; }
+.stat-card.is-empty .value {
+  background:none; -webkit-text-fill-color:var(--text-secondary);
+  color:var(--text-secondary); opacity:0.75;
+}
+.stat-card.is-empty { opacity:0.85; }
+.chart-box { position:relative; }
+.table-empty {
+  text-align:center; color:var(--text-secondary); padding:28px 12px !important;
+  border-bottom:none !important;
+}
+.table-empty-wrap {
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+}
+.table-empty-wrap .te-title { font-size:13px; color:var(--text-secondary); }
+.table-empty-wrap .te-hint { font-size:11px; color:#667788; }
+
 @media (max-width:1400px) {
   .stat-cards { grid-template-columns:repeat(4,1fr); }
   .dashboard { grid-template-columns:repeat(2,1fr); }
@@ -159,7 +192,6 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
     <h1>⚔️ Nexora 数据中心</h1>
       <div style="display:flex;align-items:center;gap:20px">
       <div><span class="status-dot"></span><span style="color:var(--ok)">系统运行中</span></div>
-      <div class="refresh-meta">数据更新 {{ lastRefreshText }}</div>
       <div class="time">{{ currentTime }}</div>
     </div>
   </header>
@@ -175,11 +207,23 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
       <div class="sys-item"><span class="lbl">堆内存</span><span class="val">{{ formatBytes(sysStatus.memoryUsage?.heapUsed) }} / {{ formatBytes(sysStatus.memoryUsage?.heapTotal) }}</span></div>
     </div>
 
+    <!-- 空数据提示 -->
+    <div class="empty-banner" v-if="isEmptyDashboard">
+      <div class="empty-icon">📭</div>
+      <div>
+        <div class="empty-title">暂时还没有运行数据</div>
+        <div class="empty-desc">
+          系统已就绪。去「模型会话」聊几句、调用工具，或跑一次定时任务后，这里的趋势图与统计会自动出现。
+          上方主机 / CPU / 内存信息会持续刷新。
+        </div>
+      </div>
+    </div>
+
     <!-- 统计卡片 -->
     <div class="stat-cards">
-      <div class="stat-card" v-for="s in statCards" :key="s.label">
+      <div class="stat-card" v-for="s in statCards" :key="s.label" :class="{ 'is-empty': isEmptyDashboard && isZeroish(s.raw) }">
         <div class="icon">{{ s.icon }}</div>
-        <div class="value">{{ s.value }}</div>
+        <div class="value">{{ isEmptyDashboard && isZeroish(s.raw) ? '—' : s.value }}</div>
         <div class="label">{{ s.label }}</div>
       </div>
     </div>
@@ -222,11 +266,19 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
           <tr><th>任务名</th><th>类型</th><th>状态</th><th>上次运行</th><th>耗时</th><th>连续错误</th></tr>
           <tr v-for="j in cronJobs" :key="j.job_id">
             <td>{{ j.name }}</td>
-            <td>{{ j.schedule_kind }}</td>
-            <td><span :class="'badge '+(j.last_run_status==='ok'?'badge-ok':'badge-err')">{{ j.last_run_status || '-' }}</span></td>
+            <td>{{ labelZh(j.schedule_kind, 'schedule') }}</td>
+            <td><span :class="'badge '+(j.last_run_status==='ok'?'badge-ok':'badge-err')">{{ labelZh(j.last_run_status, 'status') || '-' }}</span></td>
             <td>{{ formatTime(j.last_run_at_ms) }}</td>
             <td>{{ j.last_duration_ms ? (j.last_duration_ms/1000).toFixed(1)+'s' : '-' }}</td>
             <td><span :class="j.consecutive_errors>0?'badge badge-err':''">{{ j.consecutive_errors }}</span></td>
+          </tr>
+          <tr v-if="!cronJobs.length">
+            <td colspan="6" class="table-empty">
+              <div class="table-empty-wrap">
+                <span class="te-title">暂无定时任务</span>
+                <span class="te-hint">创建后会显示执行状态与耗时</span>
+              </div>
+            </td>
           </tr>
         </table>
       </div>
@@ -240,10 +292,18 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
           <tr><th>时间</th><th>类型</th><th>动作</th><th>状态</th><th>工具</th></tr>
           <tr v-for="e in recentAudit" :key="e.sequence">
             <td>{{ formatTime(e.occurred_at) }}</td>
-            <td>{{ e.kind }}</td>
-            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ e.action }}</td>
-            <td><span :class="'badge '+(e.status==='succeeded'||e.status==='started'?'badge-ok':'badge-err')">{{ e.status }}</span></td>
-            <td>{{ e.tool_name || '-' }}</td>
+            <td>{{ labelZh(e.kind, 'kind') }}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" :title="e.action">{{ labelZh(e.action, 'action') }}</td>
+            <td><span :class="'badge '+(e.status==='succeeded'||e.status==='started'?'badge-ok':'badge-err')">{{ labelZh(e.status, 'status') }}</span></td>
+            <td>{{ labelZh(e.tool_name, 'tool') || '-' }}</td>
+          </tr>
+          <tr v-if="!recentAudit.length">
+            <td colspan="5" class="table-empty">
+              <div class="table-empty-wrap">
+                <span class="te-title">暂无审计事件</span>
+                <span class="te-hint">对话或工具调用后会出现在这里</span>
+              </div>
+            </td>
           </tr>
         </table>
       </div>
@@ -263,12 +323,19 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
           <tr><th>时间</th><th>渠道</th><th>状态</th><th>重试</th><th>错误</th></tr>
           <tr v-for="d in deliveryQueue" :key="d.id">
             <td>{{ formatTime(d.enqueued_at) }}</td>
-            <td>{{ d.channel }}</td>
-            <td><span :class="'badge '+(d.status==='delivered'?'badge-ok':d.status==='failed'?'badge-err':'badge-warn')">{{ d.status }}</span></td>
+            <td>{{ labelZh(d.channel, 'channel') }}</td>
+            <td><span :class="'badge '+(d.status==='delivered'?'badge-ok':d.status==='failed'?'badge-err':'badge-warn')">{{ labelZh(d.status, 'status') }}</span></td>
             <td>{{ d.retry_count }}</td>
-            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.last_error || '-' }}</td>
+            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="d.last_error || ''">{{ d.last_error || '-' }}</td>
           </tr>
-          <tr v-if="!deliveryQueue.length"><td colspan="5" style="text-align:center;color:var(--text2)">暂无数据</td></tr>
+          <tr v-if="!deliveryQueue.length">
+            <td colspan="5" class="table-empty">
+              <div class="table-empty-wrap">
+                <span class="te-title">投递队列为空</span>
+                <span class="te-hint">渠道消息投递时会显示在此</span>
+              </div>
+            </td>
+          </tr>
         </table>
       </div>
     </div>
@@ -285,6 +352,14 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
             <td>{{ m.provider }}</td>
             <td>{{ m.api }}</td>
           </tr>
+          <tr v-if="!models.length">
+            <td colspan="4" class="table-empty">
+              <div class="table-empty-wrap">
+                <span class="te-title">暂无可用模型</span>
+                <span class="te-hint">请先在「模型管理」中配置 API Key</span>
+              </div>
+            </td>
+          </tr>
         </table>
       </div>
     </div>
@@ -298,8 +373,6 @@ const app = Vue.createApp({
   data() {
     return {
       currentTime: '',
-      lastRefreshText: '—',
-      lastRefreshAt: 0,
       refreshing: false,
       sysStatus: {},
       overview: {},
@@ -308,12 +381,32 @@ const app = Vue.createApp({
       deliveryQueue: [],
       models: [],
       statCards: [],
+      isEmptyDashboard: false,
       _charts: {},
       _pollTimer: null,
       _clockTimer: null,
     };
   },
   methods: {
+    isZeroish(n) {
+      return n == null || Number(n) === 0 || Number.isNaN(Number(n));
+    },
+    emptyChartOption(hint) {
+      return {
+        title: {
+          text: '暂无数据',
+          subtext: hint || '有活动后会自动更新',
+          left: 'center',
+          top: 'middle',
+          textStyle: { color: '#8a9bb0', fontSize: 15, fontWeight: 500 },
+          subtextStyle: { color: '#5f7085', fontSize: 12, lineHeight: 18 },
+        },
+        xAxis: { show: false },
+        yAxis: { show: false },
+        series: [],
+        graphic: [],
+      };
+    },
     formatTime(ms) {
       if (!ms) return '-';
       const d = new Date(ms);
@@ -337,16 +430,120 @@ const app = Vue.createApp({
         hour12: false, timeZone: 'Asia/Shanghai',
       });
     },
+    /** 英文枚举 → 中文展示（未知值原样回退） */
+    labelZh(raw, type) {
+      if (raw == null || raw === '') return '';
+      const key = String(raw).trim();
+      const maps = {
+        kind: {
+          agent_run: '智能体运行',
+          tool_call: '工具调用',
+          tool_result: '工具结果',
+          session: '会话',
+          message: '消息',
+          cron: '定时任务',
+          gateway: '网关',
+          model: '模型',
+          auth: '鉴权',
+          system: '系统',
+        },
+        action: {
+          'agent.run.started': '智能体开始运行',
+          'agent.run.finished': '智能体运行完成',
+          'agent.run.failed': '智能体运行失败',
+          'agent.run.aborted': '智能体运行中止',
+          'tool.call.started': '工具开始调用',
+          'tool.call.finished': '工具调用完成',
+          'tool.call.failed': '工具调用失败',
+          'session.created': '会话已创建',
+          'session.compacted': '会话已压缩',
+          'message.received': '收到消息',
+          'message.sent': '发送消息',
+          'message.delivered': '消息已投递',
+          'message.failed': '消息投递失败',
+        },
+        status: {
+          ok: '正常',
+          succeeded: '成功',
+          success: '成功',
+          started: '已开始',
+          running: '运行中',
+          failed: '失败',
+          error: '错误',
+          timed_out: '超时',
+          timeout: '超时',
+          cancelled: '已取消',
+          canceled: '已取消',
+          blocked: '已拦截',
+          delivered: '已投递',
+          pending: '等待中',
+          queued: '排队中',
+          retrying: '重试中',
+          skipped: '已跳过',
+        },
+        channel: {
+          qqbot: 'QQ 机器人',
+          qq: 'QQ',
+          'openclaw-weixin': '微信',
+          wechat: '微信',
+          weixin: '微信',
+          feishu: '飞书',
+          lark: '飞书',
+          telegram: 'Telegram',
+          discord: 'Discord',
+          slack: 'Slack',
+          whatsapp: 'WhatsApp',
+          web: '网页',
+          desktop: '桌面',
+          gateway: '网关',
+        },
+        schedule: {
+          every: '周期执行',
+          cron: 'Cron 表达式',
+          at: '指定时间',
+          once: '一次性',
+        },
+        tool: {
+          read: '读取文件',
+          write: '写入文件',
+          edit: '编辑文件',
+          exec: '执行命令',
+          process: '进程管理',
+          message: '发送消息',
+          gateway: '网关操作',
+          web_search: '网页搜索',
+          web_fetch: '抓取网页',
+          memory_search: '记忆搜索',
+          memory_get: '读取记忆',
+          sessions_history: '会话历史',
+          sessions_list: '会话列表',
+          sessions_send: '会话发送',
+          skill_workshop: '技能工坊',
+          image_generate: '图片生成',
+          draw_picture: '绘图',
+          draw_video: '视频生成',
+          browser: '浏览器',
+          canvas: '画布',
+        },
+      };
+      const map = maps[type] || {};
+      if (map[key]) return map[key];
+      const lower = key.toLowerCase();
+      if (map[lower]) return map[lower];
+      // agent.run.xxx 等点分动作：尽量逐段翻译
+      if (type === 'action' && key.includes('.')) {
+        const parts = key.split('.');
+        const translated = parts.map((p) => map[p] || maps.status[p] || maps.kind[p] || p);
+        if (translated.some((p, i) => p !== parts[i])) return translated.join(' · ');
+      }
+      return key;
+    },
     updateTime() {
       this.currentTime = new Date().toLocaleString('zh-CN', {
         hour12: false, timeZone: 'Asia/Shanghai',
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit'
       });
-      if (this.lastRefreshAt) {
-        const sec = Math.max(0, Math.round((Date.now() - this.lastRefreshAt) / 1000));
-        this.lastRefreshText = sec < 5 ? '刚刚' : (sec + ' 秒前');
-      }
     },
     getChart(id) {
       const el = document.getElementById(id);
@@ -379,20 +576,36 @@ const app = Vue.createApp({
 
         this.sysStatus = status;
         this.overview = ov;
-        this.cronJobs = jobs;
-        this.recentAudit = audit.slice(0, 50);
-        this.deliveryQueue = delivery;
-        this.models = modelsCat.slice(0, 50);
+        this.cronJobs = Array.isArray(jobs) ? jobs : [];
+        this.recentAudit = (Array.isArray(audit) ? audit : []).slice(0, 50);
+        this.deliveryQueue = Array.isArray(delivery) ? delivery : [];
+        this.models = (Array.isArray(modelsCat) ? modelsCat : []).slice(0, 50);
+
+        const auditEvents = Number(ov.auditEvents) || 0;
+        const toolCalls = Number(ov.toolCalls) || 0;
+        const totalTokens = Number(ov.totalTokens) || 0;
+        const cronRuns = Number(ov.cronRunsTotal) || 0;
+        const hasTrend = Array.isArray(auditTrend) && auditTrend.length > 0;
+        const hasTools = Array.isArray(tools) && tools.some((d) => d && d.cnt > 0);
+        this.isEmptyDashboard = (
+          auditEvents === 0 &&
+          toolCalls === 0 &&
+          totalTokens === 0 &&
+          cronRuns === 0 &&
+          this.recentAudit.length === 0 &&
+          !hasTrend &&
+          !hasTools
+        );
 
         this.statCards = [
-          { icon:'📊', value:this.formatNum(ov.auditEvents), label:'审计事件' },
-          { icon:'🔧', value:this.formatNum(ov.toolCalls), label:'工具调用' },
-          { icon:'🪙', value:this.formatNum(ov.totalTokens), label:'Token 总消耗' },
-          { icon:'⏰', value:ov.cronJobsActive, label:'活跃定时任务' },
-          { icon:'🔄', value:this.formatNum(ov.cronRunsTotal), label:'任务执行次数' },
-          { icon:'❌', value:ov.cronErrors, label:'任务失败次数' },
-          { icon:'🚀', value:ov.gatewayBoots, label:'网关启动次数' },
-          { icon:'📬', value:ov.deliveryFailed, label:'投递失败' },
+          { icon:'📊', raw:auditEvents, value:this.formatNum(auditEvents), label:'审计事件' },
+          { icon:'🔧', raw:toolCalls, value:this.formatNum(toolCalls), label:'工具调用' },
+          { icon:'🪙', raw:totalTokens, value:this.formatNum(totalTokens), label:'Token 总消耗' },
+          { icon:'⏰', raw:ov.cronJobsActive, value:ov.cronJobsActive ?? 0, label:'活跃定时任务' },
+          { icon:'🔄', raw:cronRuns, value:this.formatNum(cronRuns), label:'任务执行次数' },
+          { icon:'❌', raw:ov.cronErrors, value:ov.cronErrors ?? 0, label:'任务失败次数' },
+          { icon:'🚀', raw:ov.gatewayBoots, value:ov.gatewayBoots ?? 0, label:'网关启动次数' },
+          { icon:'📬', raw:ov.deliveryFailed, value:ov.deliveryFailed ?? 0, label:'投递失败' },
         ];
 
         this.renderAuditTrend(auditTrend);
@@ -401,7 +614,6 @@ const app = Vue.createApp({
         this.renderEventPie(auditStats);
         this.renderStatusPie(auditStats);
         this.renderGateway(boots);
-        this.lastRefreshAt = Date.now();
         this.updateTime();
       } catch(e) {
         console.error('Fetch error:', reason || '', e);
@@ -412,18 +624,25 @@ const app = Vue.createApp({
     renderAuditTrend(data) {
       const chart = this.getChart('chartAuditTrend');
       if (!chart) return;
+      const rows = Array.isArray(data) ? data : [];
       const grouped = {};
-      data.forEach(d => {
+      rows.forEach(d => {
         const t = d.hour_ms;
         if (!grouped[t]) grouped[t] = 0;
         grouped[t] += d.cnt;
       });
       const times = Object.keys(grouped).sort().slice(-72);
+      if (!times.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('对话或工具调用后显示趋势'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'axis' },
         grid:{ left:50, right:20, top:20, bottom:30 },
-        xAxis:{ type:'category', data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
-        yAxis:{ type:'value', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
+        xAxis:{ type:'category', show:true, data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
+        yAxis:{ type:'value', show:true, axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
         series:[{
           type:'line', data:times.map(t=>grouped[t]), smooth:true,
           areaStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(0,212,255,0.3)'},{offset:1,color:'rgba(0,212,255,0.02)'}]) },
@@ -434,18 +653,25 @@ const app = Vue.createApp({
     renderTokenTrend(data) {
       const chart = this.getChart('chartTokenTrend');
       if (!chart) return;
+      const rows = Array.isArray(data) ? data : [];
       const grouped = {};
-      data.forEach(d => {
+      rows.forEach(d => {
         const t = d.hour_ms;
         if (!grouped[t]) grouped[t] = 0;
         grouped[t] += d.tokens;
       });
       const times = Object.keys(grouped).sort().slice(-72);
+      if (!times.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('Token 消耗会按小时汇总'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'axis', formatter: p => p[0]?.name + '<br/>Token: ' + (p[0]?.value||0).toLocaleString() },
         grid:{ left:60, right:20, top:20, bottom:30 },
-        xAxis:{ type:'category', data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
-        yAxis:{ type:'value', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
+        xAxis:{ type:'category', show:true, data:times.map(t=>this.formatAxisTime(t)), axisLabel:{color:'#8899aa',fontSize:10}, axisLine:{lineStyle:{color:'#1a2456'}} },
+        yAxis:{ type:'value', show:true, axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
         series:[{
           type:'bar', data:times.map(t=>grouped[t]),
           itemStyle:{ color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#7b61ff'},{offset:1,color:'rgba(123,97,255,0.2)'}]) },
@@ -456,14 +682,21 @@ const app = Vue.createApp({
     renderTools(data) {
       const chart = this.getChart('chartTools');
       if (!chart) return;
+      const rows = Array.isArray(data) ? data : [];
       const merged = {};
-      data.forEach(d => { if(d.tool_name){ merged[d.tool_name] = (merged[d.tool_name]||0) + d.cnt; } });
+      rows.forEach(d => { if(d.tool_name){ merged[d.tool_name] = (merged[d.tool_name]||0) + d.cnt; } });
       const sorted = Object.entries(merged).sort((a,b)=>b[1]-a[1]).slice(0,15).reverse();
+      if (!sorted.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('工具被调用后会出现排行'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'axis' },
         grid:{ left:120, right:30, top:10, bottom:10 },
-        xAxis:{ type:'value', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
-        yAxis:{ type:'category', data:sorted.map(s=>s[0]), axisLabel:{color:'#c8d6e5',fontSize:11} },
+        xAxis:{ type:'value', show:true, axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
+        yAxis:{ type:'category', show:true, data:sorted.map(s=>this.labelZh(s[0], 'tool')), axisLabel:{color:'#c8d6e5',fontSize:11} },
         series:[{
           type:'bar', data:sorted.map(s=>s[1]),
           itemStyle:{ color:new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'rgba(0,255,136,0.3)'},{offset:1,color:'#00ff88'}]) },
@@ -474,14 +707,24 @@ const app = Vue.createApp({
     renderEventPie(data) {
       const chart = this.getChart('chartEventPie');
       if (!chart) return;
+      const rows = Array.isArray(data) ? data : [];
       const grouped = {};
-      data.forEach(d => { grouped[d.kind] = (grouped[d.kind]||0) + d.cnt; });
-      const pieData = Object.entries(grouped).map(([k,v])=>({name:k,value:v}));
+      rows.forEach(d => { grouped[d.kind] = (grouped[d.kind]||0) + d.cnt; });
+      const pieData = Object.entries(grouped).map(([k,v])=>({name:this.labelZh(k, 'kind'),value:v}));
+      if (!pieData.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('事件类型分布待产生'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'item', formatter:'{b}: {c} ({d}%)' },
+        xAxis: { show: false },
+        yAxis: { show: false },
         series:[{
           type:'pie', radius:['40%','70%'], center:['50%','55%'],
-          data:pieData, label:{color:'#8899aa',fontSize:11},
+          data:pieData,
+          label:{ color:'#8899aa', fontSize:11, formatter:'{b}' },
           itemStyle:{ borderColor:'#0f1535', borderWidth:2 },
           emphasis:{ itemStyle:{ shadowBlur:20, shadowColor:'rgba(0,212,255,0.3)' } }
         }],
@@ -491,14 +734,24 @@ const app = Vue.createApp({
     renderStatusPie(data) {
       const chart = this.getChart('chartStatusPie');
       if (!chart) return;
+      const rows = Array.isArray(data) ? data : [];
       const grouped = {};
-      data.forEach(d => { grouped[d.status] = (grouped[d.status]||0) + d.cnt; });
-      const pieData = Object.entries(grouped).map(([k,v])=>({name:k,value:v}));
+      rows.forEach(d => { grouped[d.status] = (grouped[d.status]||0) + d.cnt; });
+      const pieData = Object.entries(grouped).map(([k,v])=>({name:this.labelZh(k, 'status'),value:v}));
+      if (!pieData.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('运行状态分布待产生'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'item', formatter:'{b}: {c} ({d}%)' },
+        xAxis: { show: false },
+        yAxis: { show: false },
         series:[{
           type:'pie', radius:['40%','70%'], center:['50%','55%'],
-          data:pieData, label:{color:'#8899aa',fontSize:11},
+          data:pieData,
+          label:{ color:'#8899aa', fontSize:11, formatter:'{b}' },
           itemStyle:{ borderColor:'#0f1535', borderWidth:2 },
           emphasis:{ itemStyle:{ shadowBlur:20, shadowColor:'rgba(0,212,255,0.3)' } }
         }],
@@ -508,12 +761,19 @@ const app = Vue.createApp({
     renderGateway(data) {
       const chart = this.getChart('chartGateway');
       if (!chart) return;
-      const recent = data.slice(0,30).reverse();
+      const rows = Array.isArray(data) ? data : [];
+      const recent = rows.slice(0,30).reverse();
+      if (!recent.length) {
+        chart.clear();
+        chart.setOption(this.emptyChartOption('网关启动记录会出现在此'), true);
+        return;
+      }
       chart.setOption({
+        title: { show: false },
         tooltip:{ trigger:'axis' },
         grid:{ left:50, right:20, top:20, bottom:30 },
-        xAxis:{ type:'category', data:recent.map((_,i)=>'#'+(i+1)), axisLabel:{color:'#8899aa'}, axisLine:{lineStyle:{color:'#1a2456'}} },
-        yAxis:{ type:'value', name:'PID', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
+        xAxis:{ type:'category', show:true, data:recent.map((_,i)=>'#'+(i+1)), axisLabel:{color:'#8899aa'}, axisLine:{lineStyle:{color:'#1a2456'}} },
+        yAxis:{ type:'value', show:true, name:'PID', axisLabel:{color:'#8899aa'}, splitLine:{lineStyle:{color:'#1a2456'}} },
         series:[{
           type:'scatter', data:recent.map(d=>d.pid), symbolSize:10,
           itemStyle:{ color:'#ffa502', shadowBlur:10, shadowColor:'rgba(255,165,2,0.4)' }

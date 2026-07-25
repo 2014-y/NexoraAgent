@@ -1294,7 +1294,37 @@ function resolveGatewayProbePort() {
     return 18789;
 }
 
-/** HTTP 端口一旦可连就解锁（不等日志分片把 "listening" 拼齐） */
+/** Control UI (/acp/) 可响应再解锁，避免首装仅端口通了就进白屏 */
+function probeControlUiReady(port) {
+    const p = Number(port) > 0 ? Number(port) : 18789;
+    const url = `http://127.0.0.1:${p}/acp/`;
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (e) {} }, 600);
+    return fetch(url, {
+        method: 'GET',
+        signal: ctrl ? ctrl.signal : undefined,
+        cache: 'no-store',
+        headers: { Accept: 'text/html,*/*' },
+    })
+        .then((res) => {
+            clearTimeout(timer);
+            // 能拿到 HTTP 响应即视为 Control UI 已挂上（含重定向）
+            return !!(res && (res.ok || res.status > 0));
+        })
+        .catch(() => {
+            // 无 CORS 头时普通 fetch 会失败；no-cors 只要网络通就会 resolve
+            return fetch(url, { mode: 'no-cors', cache: 'no-store' })
+                .then(() => {
+                    clearTimeout(timer);
+                    return true;
+                })
+                .catch(() => {
+                    clearTimeout(timer);
+                    return false;
+                });
+        });
+}
+
 function startGatewayReadyProbe(reason) {
     if (gatewayFullyReady || gatewayReadyProbeTimer) return;
     const port = resolveGatewayProbePort();
@@ -1305,25 +1335,24 @@ function startGatewayReadyProbe(reason) {
             return;
         }
         tries += 1;
-        if (tries > 90) {
+        if (tries > 180) {
             stopGatewayReadyProbe();
             return;
         }
-        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (e) {} }, 400);
-        fetch(`http://127.0.0.1:${port}/`, { method: 'GET', signal: ctrl ? ctrl.signal : undefined, cache: 'no-store' })
-            .then(() => {
-                clearTimeout(timer);
-                if (!gatewayFullyReady) markGatewayReadyFromLog('核心服务已就绪，可打开 OpenClaw');
-            })
-            .catch(() => { clearTimeout(timer); });
-        if (tries % 3 === 0) {
-            fetch(`http://127.0.0.1:${port}/`, { mode: 'no-cors', cache: 'no-store' })
-                .then(() => {
-                    if (!gatewayFullyReady) markGatewayReadyFromLog('核心服务已就绪，可打开 OpenClaw');
-                })
-                .catch(() => {});
+        // 首装初始化较久：只更新文案，绝不假解锁
+        if (tries === 40 || tries === 80 || tries === 120) {
+            try {
+                updateProgressUI(
+                    Math.min(95, Math.max(currentProgress || 0, 85)),
+                    '首次安装初始化中，请再等片刻…'
+                );
+            } catch (e) {}
         }
+        probeControlUiReady(port).then((ok) => {
+            if (ok && !gatewayFullyReady) {
+                markGatewayReadyFromLog('核心服务已就绪，可打开 OpenClaw');
+            }
+        });
     }, 500);
 }
 
@@ -1691,7 +1720,7 @@ async function init() {
         });
     }
 
-    // 延迟 3 秒自动静默检测一次更新
+    // 延迟 3 秒后台静默检测一次更新（无 Toast，有新版本才弹窗）
     setTimeout(() => {
         if (localStorage.getItem('setting_auto_update') !== 'false') {
             triggerUpdateCheck(false);
@@ -1958,7 +1987,7 @@ async function init() {
             
             consoleSelectedChannel = pill.getAttribute('data-channel');
             localStorage.setItem('console_pref_channel', consoleSelectedChannel);
-            if (typeof renderScopedActivityLogs === 'function') renderScopedActivityLogs();
+            // 活动流日志全通道共用，切换胶囊只刷新右侧绑定信息
             const loadingEl = document.getElementById('console-channel-loading');
             if (loadingEl) loadingEl.style.display = 'flex';
             updateConsoleChannelStatusUI();
@@ -2126,15 +2155,20 @@ async function init() {
         });
     }
 
-    // 监听主进程发起的启动清空日志信号：活动流 + 系统日志一并清掉旧内容
+    // 网关重新拉起：保留活动流与通道状态，不清空本地持久化（Win+R / 重启不丢）
     if (window.api && window.api.onGatewayClearLogs) {
         window.api.onGatewayClearLogs(() => {
-            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
+            resetConsoleRuntimeLogs({ clearPersisted: false, clearSystemLogsArea: false });
+            try { restorePersistedConsoleStatusUi(); } catch (_) {}
         });
     }
-    // 应用冷启动：不要回灌上一轮活动流，界面先干净
-    clearPersistedActivityLogs();
-    resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
+    // 应用冷启动：回灌上一轮活动流 / 通道绿点 / 激活模型，避免 Win+R 后空白
+    try {
+        restorePersistedActivityLogs({ replace: true });
+        restorePersistedConsoleStatusUi();
+    } catch (_) {
+        resetConsoleRuntimeLogs({ clearPersisted: false, clearSystemLogsArea: false });
+    }
 
     // Nexora Agent开关按钮监听
     gatewayToggleBtn.addEventListener('click', () => {
@@ -2147,9 +2181,8 @@ async function init() {
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
 
-            // 启动时清空上一轮活动流 / 系统日志，只保留本轮输出
-            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: true });
-            try { window.api.clearSystemLogs && window.api.clearSystemLogs(); } catch (_) {}
+            // 启动时保留历史活动流（Win+R / 重启不丢），新日志继续追加
+            resetConsoleRuntimeLogs({ clearPersisted: false, clearSystemLogsArea: false });
             ensureStartingActivityTip();
 
             window.api.gatewayAction('start', { source: 'manual' });
@@ -2187,6 +2220,8 @@ async function init() {
                 streamList.innerHTML = `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
             }
             clearPersistedActivityLogs();
+            try { localStorage.removeItem(CHANNEL_STATUS_STORAGE_KEY); } catch (_) {}
+            try { localStorage.removeItem(ACTIVE_MODEL_STORAGE_KEY); } catch (_) {}
             const activeModel = document.getElementById('dash-active-model');
             if (activeModel) activeModel.textContent = t('console.dash.not_configured') || '未启动';
             
@@ -2363,7 +2398,10 @@ let __isProcessingLogQueue = false;
 let __seenPluginLogsThisStartup = new Set();
 const ACTIVITY_LOG_QUEUE_HARD_CAP = 40;
 const ACTIVITY_LOG_STORAGE_KEY = 'nexora_console_activity_logs_v1';
+const ACTIVITY_LOG_SHARED_SCOPE = 'all';
+const ACTIVITY_LOG_LEGACY_SCOPES = ['qqbot', 'wechat', 'feishu'];
 const ACTIVITY_LOG_PERSIST_MAX = 300;
+let __activityLogsMergedOnce = false;
 
 function getActivityEmptyTipsHtml() {
     return `<div class="activity-item-empty" data-i18n="console.dash.empty_tips">${t('console.dash.empty_tips') || '暂无系统活动，启动服务后将在此显示最新状态...'}</div>`;
@@ -2373,21 +2411,53 @@ function getStartingActivityTipsHtml() {
     return `<div class="starting-activity-item" data-i18n="console.dash.starting_tips">${t('console.dash.starting_tips') || '首次启动或深度初始化环境可能需要较长时间，请耐心等待...'}</div>`;
 }
 
+/** 活动流全通道共用，不再按 QQ/微信/飞书分桶 */
 function getCurrentActivityScope() {
-    try {
-        return String(consoleSelectedChannel || localStorage.getItem('console_pref_channel') || 'qqbot');
-    } catch (_) {
-        return 'qqbot';
-    }
+    return ACTIVITY_LOG_SHARED_SCOPE;
 }
 
 function getActivityLogStorageKey(scope = getCurrentActivityScope()) {
-    return `${ACTIVITY_LOG_STORAGE_KEY}:${scope || 'qqbot'}`;
+    return `${ACTIVITY_LOG_STORAGE_KEY}:${scope || ACTIVITY_LOG_SHARED_SCOPE}`;
+}
+
+function mergeLegacyActivityLogsIfNeeded() {
+    if (__activityLogsMergedOnce) return;
+    __activityLogsMergedOnce = true;
+    try {
+        const sharedKey = getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE);
+        const existing = (() => {
+            try {
+                const raw = localStorage.getItem(sharedKey);
+                const list = raw ? JSON.parse(raw) : [];
+                return Array.isArray(list) ? list.filter(Boolean) : [];
+            } catch (_) { return []; }
+        })();
+        if (existing.length) return;
+
+        const merged = [];
+        for (const scope of ACTIVITY_LOG_LEGACY_SCOPES) {
+            try {
+                const raw = localStorage.getItem(`${ACTIVITY_LOG_STORAGE_KEY}:${scope}`);
+                const list = raw ? JSON.parse(raw) : [];
+                if (Array.isArray(list)) {
+                    list.filter(Boolean).forEach((line) => merged.push(line));
+                }
+            } catch (_) {}
+        }
+        if (merged.length) {
+            localStorage.setItem(sharedKey, JSON.stringify(merged.slice(-ACTIVITY_LOG_PERSIST_MAX)));
+        }
+        // 清掉旧分桶，避免以后误读
+        for (const scope of ACTIVITY_LOG_LEGACY_SCOPES) {
+            try { localStorage.removeItem(`${ACTIVITY_LOG_STORAGE_KEY}:${scope}`); } catch (_) {}
+        }
+    } catch (_) {}
 }
 
 function getPersistedActivityLogs(scope = getCurrentActivityScope()) {
+    mergeLegacyActivityLogsIfNeeded();
     try {
-        const raw = localStorage.getItem(getActivityLogStorageKey(scope));
+        const raw = localStorage.getItem(getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE));
         const list = raw ? JSON.parse(raw) : [];
         return Array.isArray(list) ? list.filter(Boolean).slice(-ACTIVITY_LOG_PERSIST_MAX) : [];
     } catch (_) {
@@ -2397,7 +2467,10 @@ function getPersistedActivityLogs(scope = getCurrentActivityScope()) {
 
 function savePersistedActivityLogs(list, scope = getCurrentActivityScope()) {
     try {
-        localStorage.setItem(getActivityLogStorageKey(scope), JSON.stringify((Array.isArray(list) ? list : []).slice(-ACTIVITY_LOG_PERSIST_MAX)));
+        localStorage.setItem(
+            getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE),
+            JSON.stringify((Array.isArray(list) ? list : []).slice(-ACTIVITY_LOG_PERSIST_MAX))
+        );
     } catch (_) {}
 }
 
@@ -2416,7 +2489,10 @@ function persistActivityLogLines(lines) {
 }
 
 function clearPersistedActivityLogs(scope = getCurrentActivityScope()) {
-    try { localStorage.removeItem(getActivityLogStorageKey(scope)); } catch (_) {}
+    try { localStorage.removeItem(getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE)); } catch (_) {}
+    for (const legacy of ACTIVITY_LOG_LEGACY_SCOPES) {
+        try { localStorage.removeItem(`${ACTIVITY_LOG_STORAGE_KEY}:${legacy}`); } catch (_) {}
+    }
 }
 
 const CHANNEL_TILE_META = {
@@ -2440,7 +2516,7 @@ const CHANNEL_TILE_META = {
     }
 };
 
-function setChannelStatusTile(channelId, online) {
+function setChannelStatusTile(channelId, online, options = {}) {
     const tile = document.getElementById(`tile-${channelId}`);
     const meta = CHANNEL_TILE_META[channelId];
     if (!tile || !meta) return;
@@ -2448,10 +2524,58 @@ function setChannelStatusTile(channelId, online) {
     tile.title = online
         ? (t(meta.connectedKey) || meta.connectedFallback)
         : (t(meta.disconnectedKey) || meta.disconnectedFallback);
+    if (options.persist !== false) {
+        try { persistChannelStatusTiles(); } catch (_) {}
+    }
 }
 
-function setAllChannelStatusTilesOffline() {
-    ['weixin', 'qqbot', 'feishu'].forEach((ch) => setChannelStatusTile(ch, false));
+const CHANNEL_STATUS_STORAGE_KEY = 'nexora_console_channel_status_v1';
+const ACTIVE_MODEL_STORAGE_KEY = 'nexora_console_active_model_v1';
+
+function persistChannelStatusTiles() {
+    try {
+        const state = {};
+        ['weixin', 'qqbot', 'feishu'].forEach((ch) => {
+            const tile = document.getElementById(`tile-${ch}`);
+            state[ch] = !!(tile && tile.classList.contains('online'));
+        });
+        localStorage.setItem(CHANNEL_STATUS_STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
+}
+
+function persistActiveModelLabel(label) {
+    try {
+        const text = String(label || '').trim();
+        if (!text) return;
+        localStorage.setItem(ACTIVE_MODEL_STORAGE_KEY, text);
+    } catch (_) {}
+}
+
+function restorePersistedConsoleStatusUi() {
+    try {
+        const raw = localStorage.getItem(CHANNEL_STATUS_STORAGE_KEY);
+        const state = raw ? JSON.parse(raw) : null;
+        if (state && typeof state === 'object') {
+            ['weixin', 'qqbot', 'feishu'].forEach((ch) => {
+                if (typeof state[ch] === 'boolean') setChannelStatusTile(ch, state[ch]);
+            });
+        }
+    } catch (_) {}
+    try {
+        const model = localStorage.getItem(ACTIVE_MODEL_STORAGE_KEY);
+        const activeModelEl = document.getElementById('dash-active-model');
+        if (model && activeModelEl) activeModelEl.textContent = model;
+    } catch (_) {}
+    // 网关已在跑时，用活动流校正绿点；未就绪时保留本地上次状态，避免 Win+R 先被熄灭
+    try {
+        if (gatewayStatus === 'running' || gatewayStatus === 'starting' || gatewayFullyReady) {
+            syncChannelStatusTilesFromLogs({ forceOnline: true });
+        }
+    } catch (_) {}
+}
+
+function setAllChannelStatusTilesOffline(options = {}) {
+    ['weixin', 'qqbot', 'feishu'].forEach((ch) => setChannelStatusTile(ch, false, options));
 }
 
 function stripActivityLogText(lineHtml) {
@@ -2584,6 +2708,7 @@ function restorePersistedActivityLogs(options = {}) {
 }
 
 function renderScopedActivityLogs() {
+    // 兼容旧调用：活动流已改为全通道共用，不再按胶囊切换重载
     __activityLogQueue = [];
     __isProcessingLogQueue = false;
     restorePersistedActivityLogs({ replace: true });
@@ -3463,7 +3588,9 @@ function setupIpcListeners() {
                     let clean = modelVal.replace(/<\/?[^>]+(>|$)/g, "").trim();
                     clean = clean.split('[')[0].trim();
                     const parts = clean.split('/');
-                    activeModelEl.textContent = parts[parts.length - 1].trim();
+                    const name = parts[parts.length - 1].trim();
+                    activeModelEl.textContent = name;
+                    persistActiveModelLabel(name);
                 }
             }
             
@@ -3540,11 +3667,13 @@ function setupIpcListeners() {
             gatewayLogReadyTail = '';
             __gatewayLoadedPluginCount = null;
             stopGatewayReadyProbe();
+            clearOpenclawControlUiRetry();
+            try { setOpenclawPanelOverlay('hide'); } catch (e) {}
             updateGatewayStatusUI('stopped');
             updateRightPluginsCountUI();
             
-            // 服务停止：通道状态卡片回灰（活动流仍保留，便于 Win+R 重启后回放绿点）
-            setAllChannelStatusTilesOffline();
+            // 服务停止：界面熄灭绿点，但不覆盖本地「上次在线」快照（Win+R 回灌用）
+            setAllChannelStatusTilesOffline({ persist: false });
 
             // 重置拓扑图状态与步骤进度 UI 为已停止
             if (typeof updateStepperUI === 'function') {
@@ -3563,39 +3692,20 @@ function setupIpcListeners() {
             if (oldStatus !== 'stopped') {
                 syncChannelStatusTilesFromLogs({ forceOnline: true });
             }
-            // 冷启动：维持 starting 做端口探测；自启时进度可能已非 0，避免按钮一直停在「启动中」
-            if (currentProgress > 0 && !gatewayFullyReady) {
+            // 主进程 fork 后立刻报 running，此时 HTTP/Control UI 往往尚未就绪。
+            // 一律走 /acp/ 探测，禁止 20 秒假解锁（首装白屏主因）。
+            if (!gatewayFullyReady) {
                 gatewayStatus = 'starting';
                 updateGatewayStatusUI('starting');
                 startGatewayReadyProbe('status-running');
                 setTimeout(() => {
                     if (gatewayFullyReady) return;
-                    const port = resolveGatewayProbePort();
-                    fetch(`http://127.0.0.1:${port}/`, { method: 'GET', cache: 'no-store' })
-                        .then(() => {
-                            if (!gatewayFullyReady) {
-                                markGatewayReadyFromLog('核心服务已就绪（自启状态对齐）');
-                            }
-                        })
-                        .catch(() => {});
+                    probeControlUiReady(resolveGatewayProbePort()).then((ok) => {
+                        if (ok && !gatewayFullyReady) {
+                            markGatewayReadyFromLog('核心服务已就绪（自启状态对齐）');
+                        }
+                    });
                 }, 4000);
-                // 保底：主进程已报 running 时，最多再等 20 秒就对齐到 100%，避免侧栏一直卡 85%
-                setTimeout(() => {
-                    if (gatewayFullyReady) return;
-                    markGatewayReadyFromLog('核心服务已就绪（启动进度对齐）');
-                }, 20000);
-            } else {
-                gatewayStatus = 'running';
-                gatewayFullyReady = true;
-                stopGatewayReadyProbe();
-                updateGatewayStatusUI('running');
-                if (currentProgress < 100) {
-                    updateProgressUI(100, '本地 AI Nexora Agent服务就绪！');
-                }
-                if (oldStatus !== 'running') {
-                    sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已成功启动运行！');
-                    __openclawPanelLastUrl = '';
-                }
             }
             if (typeof refreshAccelerationChannel === 'function') refreshAccelerationChannel().catch(() => {});
         }
@@ -7214,21 +7324,32 @@ function updateGatewayStatusUI(status) {
             
             const activeModelEl = document.getElementById('dash-active-model');
             if (activeModelEl) {
-                const modelName = getActiveModelNameFromConfig() || '已启动';
+                const modelName = getActiveModelNameFromConfig()
+                    || localStorage.getItem(ACTIVE_MODEL_STORAGE_KEY)
+                    || '已启动';
                 activeModelEl.textContent = modelName;
+                if (modelName && modelName !== '已启动') persistActiveModelLabel(modelName);
             }
         } else if (status === 'starting') {
             dashServiceStatus.textContent = getCleanText('console.dash.starting', '正在启动...');
             dashStatusDot.className = 'status-indicator-dot running';
             
+            // 启动过程保留上次引擎名，避免 Win+R 闪成「未启动」
             const activeModelEl = document.getElementById('dash-active-model');
-            if (activeModelEl) activeModelEl.textContent = t('console.dash.not_configured') || '未启动';
+            if (activeModelEl) {
+                const kept = localStorage.getItem(ACTIVE_MODEL_STORAGE_KEY);
+                activeModelEl.textContent = kept || getCleanText('console.dash.starting', '正在启动...');
+            }
         } else {
             dashServiceStatus.textContent = getCleanText('console.dash.stopped', '已停止');
             dashStatusDot.className = 'status-indicator-dot stopped';
             
+            // 停止后仍展示上次激活引擎（活动流也保留）；仅手动清日志时重置
             const activeModelEl = document.getElementById('dash-active-model');
-            if (activeModelEl) activeModelEl.textContent = t('console.dash.not_configured') || '未启动';
+            if (activeModelEl) {
+                const kept = localStorage.getItem(ACTIVE_MODEL_STORAGE_KEY);
+                activeModelEl.textContent = kept || (t('console.dash.not_configured') || '未启动');
+            }
         }
     }
 
@@ -7868,7 +7989,7 @@ function setupTabSwitching() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (gatewayStatus === 'starting' || gatewayStatus === 'running') {
-                        showToast('Nexora Agent 正在启动，约十几秒后可打开 OpenClaw…');
+                        showToast('Nexora Agent 正在启动（首次安装可能需 1～2 分钟），就绪后即可打开 OpenClaw…');
                     } else {
                         showToast('请先在左上角启动 Nexora Agent 服务');
                     }
@@ -8272,21 +8393,22 @@ async function renderUsageCharts() {
     if (queryBtn && !queryBtn.dataset.bound) {
         queryBtn.dataset.bound = "true";
         queryBtn.addEventListener('click', async () => {
-            queryBtn.innerText = '🔄 刷新';
+            queryBtn.innerText = '刷新中…';
             queryBtn.disabled = true;
             try {
                 await renderUsageCharts();
-                showToast('📊 统计数据已成功重新同步更新！');
+                showToast('统计数据已成功重新同步更新！');
             } catch (e) {
                 console.error('Failed to query statistics:', e);
             }
-            queryBtn.innerText = '🔍 查询';
+            queryBtn.innerText = t('stats.btn.query') || '查询';
             queryBtn.disabled = false;
         });
     }
 
     // 维持动态选项菜单的去重显示
     updateFilterOptions();
+    initStatsModelSearchPicker();
 
     // 自动初始化刷新控制
     setupStatsAutoRefresh();
@@ -10855,6 +10977,59 @@ function initSessionArchiveView() {
 }
 window.initSessionArchiveView = initSessionArchiveView;
 
+function resolveSelectedChatModel() {
+    const select = ensureChatModelSelect();
+    if (select && select.options.length && select.selectedIndex >= 0 && select.value) {
+        const opt = select.options[select.selectedIndex];
+        return {
+            select,
+            modelId: select.value,
+            providerKey: (opt && opt.getAttribute('data-provider')) || '',
+            option: opt
+        };
+    }
+
+    const tryApply = (id, provider) => {
+        if (!id) return false;
+        return setChatModelSelection(id, provider || '');
+    };
+
+    // 1) 搜索框里记住的有效选择
+    const input = document.getElementById('chat-model-search');
+    if (input && input.dataset.selectedValue) {
+        if (tryApply(input.dataset.selectedValue, input.dataset.selectedProvider || '')) {
+            return resolveSelectedChatModel();
+        }
+    }
+
+    // 2) 从可见文案解析：gemini / gemini-3.1-flash-lite
+    if (input && input.value) {
+        const label = String(input.value).trim().replace(/\s*\([^)]*\)\s*$/, '');
+        const m = label.match(/^([^/]+?)\s*\/\s*(.+)$/);
+        if (m && tryApply(m[2].trim(), m[1].trim())) {
+            return resolveSelectedChatModel();
+        }
+    }
+
+    // 3) 本地记忆 / 主用模型
+    const persisted = readPersistedChatModel();
+    if (tryApply(persisted.id, persisted.provider)) return resolveSelectedChatModel();
+    const { primary } = getConfiguredPrimaryFallbackModels();
+    if (tryApply(primary.id, primary.provider)) return resolveSelectedChatModel();
+
+    // 4) 有选项就强制第一项
+    if (select && select.options.length) {
+        select.selectedIndex = 0;
+        const opt = select.options[0];
+        if (opt && opt.value) {
+            persistChatModelSelection(opt.getAttribute('data-provider') || '', opt.value);
+            syncChatModelSearchFromSelect();
+            return resolveSelectedChatModel();
+        }
+    }
+    return null;
+}
+
 // 处理发送消息（直连各厂家服务，不依赖Nexora Agent）
 async function handleSendMessage() {
     const inputArea = document.getElementById('chat-text-input');
@@ -10878,15 +11053,19 @@ async function handleSendMessage() {
         if (roleCommandHandled) return;
     }
 
-    const modelSelect = ensureChatModelSelect();
-    if (!modelSelect || modelSelect.selectedIndex === -1 || !modelSelect.value) {
+    let resolved = resolveSelectedChatModel();
+    if (!resolved) {
+        try { await loadChatModels(); } catch (e) {}
+        resolved = resolveSelectedChatModel();
+    }
+    if (!resolved || !resolved.modelId) {
         appendChatMessage('ai', '⚠️ 请先在右上角选择对话所用的大模型！如果下拉框为空，请先在【模型配置】中配置厂家模型。');
         return;
     }
 
-    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-    const providerKey = selectedOption.getAttribute('data-provider');
-    const modelId = selectedOption.value;
+    const providerKey = resolved.providerKey;
+    const modelId = resolved.modelId;
+    const modelSelect = resolved.select;
 
     const useBuiltIn = getUseBuiltIn();
     const isAgnesBuiltIn = (providerKey === 'agnes-ai' && useBuiltIn);
@@ -11513,44 +11692,196 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
     applyStatsFilters();
 }
 
+// 模型筛选目录（hidden input 存当前值，不依赖原生 <select>）
+let statsModelCatalog = [{ value: 'all', label: '全部模型' }];
+
 // 动态刷新看板的下拉筛选器选项
 function updateFilterOptions() {
     const modelSelect = document.getElementById('stats-model-select');
+    if (!modelSelect) return;
 
-    if (modelSelect) {
-        const curVal = modelSelect.value || 'all';
-        const models = new Set();
-        
-        // 1. 优先提取当前在模型配置页里配置好的所有模型
-        if (typeof localProviders === 'object' && localProviders !== null) {
-            for (const providerKey of Object.keys(localProviders)) {
-                const provider = localProviders[providerKey];
-                if (provider && Array.isArray(provider.models)) {
-                    provider.models.forEach(model => {
-                        if (model && model.id) {
-                            models.add(model.id.trim());
-                        }
-                    });
-                }
+    const curVal = modelSelect.value || 'all';
+    const models = new Set();
+
+    // 1. 优先提取当前在模型配置页里配置好的所有模型
+    if (typeof localProviders === 'object' && localProviders !== null) {
+        for (const providerKey of Object.keys(localProviders)) {
+            const provider = localProviders[providerKey];
+            if (provider && Array.isArray(provider.models)) {
+                provider.models.forEach(model => {
+                    if (model && model.id) {
+                        models.add(model.id.trim());
+                    }
+                });
             }
         }
-
-        // 2. 辅以当前请求日志中产生过调用记录的其他模型
-        (sessionStats.logs || []).forEach(log => {
-            if (log.model) models.add(log.model.trim());
-        });
-
-        let optHtml = `<option value="all" data-i18n="stats.model.all">${t('stats.model.all')}</option>`;
-        models.forEach(m => {
-            optHtml += `<option value="${m}">${m}</option>`;
-        });
-        modelSelect.innerHTML = optHtml;
-        if (Array.from(modelSelect.options).some(opt => opt.value === curVal)) {
-            modelSelect.value = curVal;
-        } else {
-            modelSelect.value = 'all';
-        }
     }
+
+    // 2. 辅以当前请求日志中产生过调用记录的其他模型
+    (sessionStats.logs || []).forEach(log => {
+        if (log.model) models.add(log.model.trim());
+    });
+
+    const sorted = Array.from(models).filter(Boolean).sort((a, b) => a.localeCompare(b));
+    statsModelCatalog = [
+        { value: 'all', label: t('stats.model.all') },
+        ...sorted.map((m) => ({ value: m, label: m })),
+    ];
+    modelSelect.value = statsModelCatalog.some((o) => o.value === curVal) ? curVal : 'all';
+    syncStatsModelSearchFromSelect();
+}
+
+function syncStatsModelSearchFromSelect() {
+    const select = document.getElementById('stats-model-select');
+    const input = document.getElementById('stats-model-search');
+    if (!select || !input) return;
+    const val = select.value || 'all';
+    if (val && val !== 'all') {
+        input.value = val;
+        input.dataset.selectedValue = val;
+        input.placeholder = t('stats.model.search_placeholder');
+    } else {
+        // 关闭态用 placeholder 显示「全部模型」，避免和搜索图标叠字
+        input.value = '';
+        input.dataset.selectedValue = 'all';
+        input.placeholder = t('stats.model.all');
+    }
+}
+
+function setStatsModelSelection(value) {
+    const select = document.getElementById('stats-model-select');
+    if (!select) return false;
+    const next = value == null || value === '' ? 'all' : String(value);
+    const exists = getStatsModelOptions().some((opt) => opt.value === next);
+    select.value = exists ? next : 'all';
+    syncStatsModelSearchFromSelect();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}
+
+function getStatsModelOptions() {
+    if (!Array.isArray(statsModelCatalog) || !statsModelCatalog.length) {
+        return [{ value: 'all', label: t('stats.model.all') }];
+    }
+    return statsModelCatalog.map((o) => (
+        o.value === 'all' ? { value: 'all', label: t('stats.model.all') } : o
+    ));
+}
+
+function renderStatsModelDropdown(filterText) {
+    const dropdown = document.getElementById('stats-model-dropdown');
+    const select = document.getElementById('stats-model-select');
+    if (!dropdown || !select) return;
+    const q = String(filterText || '').trim().toLowerCase();
+    const selectedValue = select.value || 'all';
+    const items = getStatsModelOptions().filter((o) => {
+        if (!q) return true;
+        if (o.value === 'all') return t('stats.model.all').toLowerCase().includes(q) || 'all'.includes(q);
+        return o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q);
+    });
+
+    if (!items.length) {
+        dropdown.innerHTML = `<div style="padding:10px 12px; font-size:12px; color:var(--text-secondary);">${escapeHtml(t('stats.model.empty'))}</div>`;
+        return;
+    }
+
+    dropdown.innerHTML = items.map((o) => {
+        const active = o.value === selectedValue;
+        const mark = active ? '✓ ' : '';
+        return `<button type="button" class="stats-model-option${active ? ' is-active' : ''}" data-value="${escapeHtml(o.value)}" role="option">${mark}${escapeHtml(o.label)}</button>`;
+    }).join('');
+
+    dropdown.querySelectorAll('.stats-model-option').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            setStatsModelSelection(btn.getAttribute('data-value') || 'all');
+            hideStatsModelDropdown();
+        });
+    });
+}
+
+function showStatsModelDropdown(filterText) {
+    const dropdown = document.getElementById('stats-model-dropdown');
+    const input = document.getElementById('stats-model-search');
+    if (!dropdown) return;
+    renderStatsModelDropdown(filterText);
+    dropdown.hidden = false;
+    if (input) input.setAttribute('aria-expanded', 'true');
+}
+
+function hideStatsModelDropdown() {
+    const dropdown = document.getElementById('stats-model-dropdown');
+    const input = document.getElementById('stats-model-search');
+    if (!dropdown) return;
+    dropdown.hidden = true;
+    if (input) input.setAttribute('aria-expanded', 'false');
+}
+
+function initStatsModelSearchPicker() {
+    const input = document.getElementById('stats-model-search');
+    const picker = document.getElementById('stats-model-picker');
+    const select = document.getElementById('stats-model-select');
+    if (!input || !picker || !select || input.dataset.bound === 'true') return;
+    input.dataset.bound = 'true';
+    // Chromium 常忽略 autocomplete=off，换无意义值避免系统自动补全叠一层造成「乱码」
+    try {
+        input.setAttribute('autocomplete', 'nexora-stats-model-search');
+        input.setAttribute('name', 'nexora_stats_model_q');
+    } catch (e) {}
+    hideStatsModelDropdown();
+    syncStatsModelSearchFromSelect();
+
+    input.addEventListener('focus', () => {
+        // 展开时展示完整列表，不用当前全名当过滤词
+        showStatsModelDropdown('');
+        try { input.select(); } catch (e) {}
+    });
+
+    input.addEventListener('input', () => {
+        showStatsModelDropdown(input.value);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideStatsModelDropdown();
+            syncStatsModelSearchFromSelect();
+            input.blur();
+            return;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const q = String(input.value || '').trim().toLowerCase();
+            const items = getStatsModelOptions().filter((o) => {
+                if (!q) return o.value === 'all';
+                return o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q);
+            });
+            if (items.length === 1) {
+                setStatsModelSelection(items[0].value);
+            } else if (items.length > 1) {
+                // 优先精确匹配，否则取第一条非 all
+                const exact = items.find((o) => o.value.toLowerCase() === q || o.label.toLowerCase() === q);
+                setStatsModelSelection((exact || items.find((o) => o.value !== 'all') || items[0]).value);
+            } else {
+                setStatsModelSelection('all');
+            }
+            hideStatsModelDropdown();
+        }
+    });
+
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            hideStatsModelDropdown();
+            // 未选中有效项时恢复展示文案
+            const selected = select.value || 'all';
+            const matched = getStatsModelOptions().some((opt) => opt.value === selected);
+            if (!matched) setStatsModelSelection('all');
+            else syncStatsModelSearchFromSelect();
+        }, 120);
+    });
+
+    document.addEventListener('mousedown', (e) => {
+        if (!picker.contains(e.target)) hideStatsModelDropdown();
+    });
 }
 
 // 探测生图或生视频通道连通性，支持查看请求包详情
@@ -12286,6 +12617,84 @@ function finishGatewayUpdateProgress(success, message) {
 
 /** 内置 OpenClaw Control UI：免密载入；同 URL 不重复刷新，避免「失败尝试过多」限流 */
 let __openclawPanelLastUrl = '';
+let __openclawLoadRetryTimer = null;
+let __openclawLoadRetryCount = 0;
+const OPENCLAW_LOAD_RETRY_MAX = 10;
+let __openclawOverlayRetryBound = false;
+
+function setOpenclawPanelOverlay(mode, title, desc) {
+    const overlay = document.getElementById('openclaw-panel-overlay');
+    if (!overlay) return;
+    const titleEl = document.getElementById('openclaw-panel-overlay-title');
+    const descEl = document.getElementById('openclaw-panel-overlay-desc');
+    const retryBtn = document.getElementById('openclaw-panel-overlay-retry');
+    if (mode === 'hide') {
+        overlay.hidden = true;
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.classList.remove('is-error');
+        if (retryBtn) retryBtn.hidden = true;
+        return;
+    }
+    overlay.hidden = false;
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.classList.toggle('is-error', mode === 'error');
+    if (titleEl && title) titleEl.textContent = title;
+    if (descEl && desc) descEl.textContent = desc;
+    if (retryBtn) retryBtn.hidden = mode !== 'error';
+    if (!__openclawOverlayRetryBound && retryBtn) {
+        __openclawOverlayRetryBound = true;
+        retryBtn.addEventListener('click', () => {
+            __openclawLoadRetryCount = 0;
+            setOpenclawPanelOverlay(
+                'loading',
+                '正在重新连接 OpenClaw…',
+                '正在重新加载控制台面板，请稍候。'
+            );
+            loadOpenclawControlUi(true, { clearSession: false }).catch(() => {});
+        });
+    }
+}
+
+function scheduleOpenclawControlUiRetry(reason) {
+    if (__openclawLoadRetryTimer) return;
+    if (__openclawLoadRetryCount >= OPENCLAW_LOAD_RETRY_MAX) {
+        setOpenclawPanelOverlay(
+            'error',
+            'OpenClaw 面板加载失败',
+            '首次安装初始化较慢或端口尚未就绪。可点下方重试，或稍后再进一次 OpenClaw。'
+        );
+        return;
+    }
+    const delay = Math.min(8000, 800 + __openclawLoadRetryCount * 700);
+    __openclawLoadRetryCount += 1;
+    setOpenclawPanelOverlay(
+        'loading',
+        '正在等待控制台就绪…',
+        `首次安装可能需要更久（第 ${__openclawLoadRetryCount}/${OPENCLAW_LOAD_RETRY_MAX} 次重试）。${reason ? ' ' + reason : ''}`
+    );
+    __openclawLoadRetryTimer = setTimeout(() => {
+        __openclawLoadRetryTimer = null;
+        const pane = document.getElementById('openclaw-panel-view');
+        if (!pane || !pane.classList.contains('active')) return;
+        if (gatewayStatus === 'stopped') {
+            setOpenclawPanelOverlay(
+                'error',
+                '服务未启动',
+                '请先在左上角启动 Nexora Agent，再打开 OpenClaw。'
+            );
+            return;
+        }
+        loadOpenclawControlUi(true, { clearSession: false }).catch(() => {});
+    }, delay);
+}
+
+function clearOpenclawControlUiRetry() {
+    if (__openclawLoadRetryTimer) {
+        clearTimeout(__openclawLoadRetryTimer);
+        __openclawLoadRetryTimer = null;
+    }
+    __openclawLoadRetryCount = 0;
+}
 let __openclawPanelLoading = false;
 
 /** 从 --bg-base 渐变里取出最深实色（webview 透不出父级渐变） */
@@ -12717,14 +13126,35 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
             webview.style.height = '100%';
         } catch (_) {}
 
+        // 导航前确认 /acp/，首装时避免提前撞上 connection refused 白屏
+        const port = resolveGatewayProbePort();
+        const uiReady = await probeControlUiReady(port);
+        if (!uiReady) {
+            setOpenclawPanelOverlay(
+                'loading',
+                '正在等待 OpenClaw 控制台…',
+                '首次安装初始化较慢，控制台就绪后会自动打开。'
+            );
+            scheduleOpenclawControlUiRetry('控制台尚未就绪');
+            return;
+        }
+
         const url = await window.api.getDashboardUrl();
         const currentSrc = (webview.getAttribute('src') || '').trim();
         injectWebviewUpdateInterceptor(webview);
         if (!forceReload && currentSrc && (currentSrc === url || __openclawPanelLastUrl === url)) {
             scheduleOpenclawThemeSync(webview, { delays: [0, 700] });
+            setOpenclawPanelOverlay('hide');
             return;
         }
         const isFirstLoad = !currentSrc;
+        setOpenclawPanelOverlay(
+            'loading',
+            '正在连接 OpenClaw…',
+            isFirstLoad
+                ? '首次安装初始化较慢，请稍候，面板就绪后会自动打开。'
+                : '正在加载控制台面板…'
+        );
         showToast(
             forceReload && !isFirstLoad
                 ? '正在加载 OpenClaw 控制台…'
@@ -12756,11 +13186,12 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
         // 导航后只温和补 1～2 次，避免叠 CSS 闪烁
         scheduleOpenclawThemeSync(webview, { delays: [80, 900] });
     } catch (err) {
-        const fallback = 'http://127.0.0.1:18789/acp/#token=' + encodeURIComponent('openclaw-dev-token-998877');
-        __openclawPanelLastUrl = fallback;
-        webview.src = fallback;
-        injectWebviewUpdateInterceptor(webview);
-        scheduleOpenclawThemeSync(webview, { delays: [80, 900] });
+        setOpenclawPanelOverlay(
+            'loading',
+            '正在重试连接…',
+            '暂时无法获取控制台地址，将自动重试。'
+        );
+        scheduleOpenclawControlUiRetry((err && err.message) || '获取地址失败');
     } finally {
         __openclawPanelLoading = false;
     }
@@ -12963,6 +13394,7 @@ function injectWebviewUpdateInterceptor(webview) {
                 webview.__nexoraInsertedThemeCss = '';
                 webview.__nexoraInsertedPanelCss = '';
                 webview.__nexoraLayoutPoked = false;
+                webview.__nexoraEmptyHealDone = false;
                 const paint = getOpenclawHostThemePaint();
                 webview.style.background = paint.bgBase;
                 webview.style.opacity = '1';
@@ -12970,7 +13402,58 @@ function injectWebviewUpdateInterceptor(webview) {
         });
         // dom-ready：尽早盖住 OpenClaw 自带纯黑，减少首屏黑底
         webview.addEventListener('dom-ready', () => injectThemeNow('early'));
-        webview.addEventListener('did-finish-load', () => injectThemeNow('late'));
+        webview.addEventListener('did-finish-load', () => {
+            injectThemeNow('late');
+            try {
+                const u = typeof webview.getURL === 'function' ? String(webview.getURL() || '') : '';
+                if (!u || u === 'about:blank' || u.startsWith('chrome-error://') || u.startsWith('data:')) {
+                    scheduleOpenclawControlUiRetry('页面未正确打开');
+                    return;
+                }
+            } catch (_) {}
+            clearOpenclawControlUiRetry();
+            setOpenclawPanelOverlay('hide');
+            // 仅在真正空白/错误页时自愈；正常 SPA 首屏可能稍慢，避免误重载
+            setTimeout(() => {
+                if (typeof webview.executeJavaScript !== 'function') return;
+                if (webview.__nexoraEmptyHealDone) return;
+                webview.executeJavaScript(`
+                    (function () {
+                        try {
+                            var u = String(location.href || '');
+                            if (/chrome-error:/i.test(u)) return 'error';
+                            var b = document.body;
+                            if (!b) return 'empty';
+                            var t = (b.innerText || '').replace(/\\s+/g, '');
+                            var hasShell = !!b.querySelector('main, #root, #app, nav, aside, [data-testid]');
+                            if (hasShell || t.length > 20) return 'ok';
+                            return 'empty';
+                        } catch (e) { return 'empty'; }
+                    })();
+                `).then((state) => {
+                    if (state === 'ok') {
+                        clearOpenclawControlUiRetry();
+                        setOpenclawPanelOverlay('hide');
+                        return;
+                    }
+                    if (state !== 'error' && state !== 'empty') return;
+                    const pane = document.getElementById('openclaw-panel-view');
+                    if (!pane || !pane.classList.contains('active')) return;
+                    webview.__nexoraEmptyHealDone = true;
+                    scheduleOpenclawControlUiRetry(state === 'error' ? '浏览器错误页' : '面板内容为空');
+                }).catch(() => {});
+            }, 3500);
+        });
+        webview.addEventListener('did-fail-load', (evt) => {
+            try {
+                // 子资源失败忽略；主框架失败才重试
+                if (evt && evt.isMainFrame === false) return;
+                const code = evt && typeof evt.errorCode === 'number' ? evt.errorCode : 0;
+                // -3 = ERR_ABORTED（同页跳转常见），不重试
+                if (code === -3) return;
+            } catch (_) {}
+            scheduleOpenclawControlUiRetry('连接被拒绝或尚未监听');
+        });
     }
 
     // 已有文档时补一次（切回面板），不重复导航注入
@@ -13050,10 +13533,9 @@ function injectWebviewUpdateInterceptor(webview) {
 let updateInfo = null; // 存放当前的更新包信息
 
 async function triggerUpdateCheck(isManual = false) {
+    // 后台自动检查：全程静默，有新版本才弹窗；避免右上角 Toast 闪一下
     if (isManual) {
         showToast('正在检查云端新版本，请稍候...');
-    } else {
-        showToast(t('toast.auto_update.checking'));
     }
     
     try {
@@ -13066,8 +13548,6 @@ async function triggerUpdateCheck(isManual = false) {
                 if (window.api && window.api.openExternal) {
                     window.api.openExternal(result.downloadUrl || 'https://github.com/2014-y/NexoraAgent/releases');
                 }
-            } else {
-                showToast(t('toast.auto_update.failed'));
             }
             return;
         }
@@ -13075,13 +13555,11 @@ async function triggerUpdateCheck(isManual = false) {
         if (!result.hasUpdate) {
             if (isManual) {
                 showToast(`当前已是最新版本！(v${result.currentVersion})`);
-            } else {
-                showToast(t('toast.auto_update.latest'));
             }
             return;
         }
         
-        // 有新版本，展示模态弹窗
+        // 有新版本，展示模态弹窗（手动/自动都提示，方便升级）
         updateInfo = result;
         
         document.getElementById('update-current-ver').innerText = 'v' + result.currentVersion;
@@ -13101,8 +13579,6 @@ async function triggerUpdateCheck(isManual = false) {
         console.error('更新检查失败:', err);
         if (isManual) {
             showToast('更新检测失败，请检查网络是否通畅');
-        } else {
-            showToast(t('toast.auto_update.failed'));
         }
     }
 }
@@ -16878,7 +17354,7 @@ function updateVoiceStatusUi(state) {
     const pulseVisualizer = document.getElementById('pulse-visualizer');
     const pulseModule = document.getElementById('ai-pulse-module');
     if (pulseVisualizer && pulseModule) {
-        if (state.speaking || state.status === 'speaking' || state.status === 'listening') {
+        if (state.speaking || state.status === 'speaking' || state.status === 'listening' || state.status === 'listening_wake') {
             pulseVisualizer.classList.add('active');
             pulseModule.style.opacity = '0.8';
         } else {
@@ -16961,6 +17437,34 @@ function voicePreviewPhrase(pack) {
     return voiceT('voice.test.phrase', '你好，我是 Nexora Agent 本地语音助手。');
 }
 
+/** 试听期间挂起麦克风，避免喇叭回灌被「唤醒侦听」当成抢话打断 */
+function setVoiceMicSuspended(suspended) {
+    try {
+        if (__localAudioStream) {
+            __localAudioStream.getAudioTracks().forEach((t) => {
+                try { t.enabled = !suspended; } catch (e) {}
+            });
+        }
+    } catch (e) {}
+}
+
+function beginVoicePreviewGuard() {
+    __voicePreviewGuard = true;
+    __voicePausedForTts = true;
+    __voiceBargeStartAt = null;
+    __localAudioChunks = [];
+    __localSpeaking = false;
+    __localSilenceStart = null;
+    __localSpeechStartAt = null;
+    setVoiceMicSuspended(true);
+}
+
+function endVoicePreviewGuard() {
+    if (!__voicePreviewGuard) return;
+    __voicePreviewGuard = false;
+    setVoiceMicSuspended(false);
+}
+
 async function previewVoicePack(packId) {
     if (!window.api || !window.api.voice) return;
     const pack = getVoicePackById(packId);
@@ -16969,11 +17473,24 @@ async function previewVoicePack(packId) {
         showToast(voiceT('voice.toast.not_downloaded', '该男声音色还未下载，请先下载语音包'));
         return;
     }
-    await window.api.voice.speak({
-        text: voicePreviewPhrase(pack),
-        source: 'preview',
-        packId: pack.id
-    });
+    // 先停当前朗读，再挂起唤醒采集，避免与试听抢麦/回声打断
+    await interruptVoicePlayback('before-preview');
+    beginVoicePreviewGuard();
+    try {
+        const res = await window.api.voice.speak({
+            text: voicePreviewPhrase(pack),
+            source: 'preview',
+            packId: pack.id
+        });
+        if (!res || res.success === false) {
+            endVoicePreviewGuard();
+            __voicePausedForTts = false;
+        }
+    } catch (e) {
+        endVoicePreviewGuard();
+        __voicePausedForTts = false;
+        console.warn('[Voice] preview failed:', e);
+    }
 }
 
 function warnIfPackNotInstalled(packId) {
@@ -17015,8 +17532,10 @@ function renderVoicePackGrids(state) {
     if (grid.dataset.voiceSig === signature) return;
 
     grid.innerHTML = catalog.map((pack) => {
-        const badge = voiceT(pack.badgeKey, pack.group === 'jarvis' ? '贾维斯风' : '中文');
-        const status = pack.installed ? '' : pack.size;
+        const badge = voiceT(pack.badgeKey, pack.online ? '在线神经' : (pack.group === 'jarvis' ? '贾维斯风' : '中文'));
+        const status = pack.installed
+            ? (pack.online ? voiceT('voice.badge.online', '在线神经') : '')
+            : pack.size;
         const previewBtn = pack.installed
             ? `<button type="button" class="btn-secondary btn-voice-preview" data-voice-id="${escapeVoiceHtml(pack.id)}">${escapeVoiceHtml(voiceT('voice.btn.preview', '试听'))}</button>`
             : '';
@@ -17102,7 +17621,34 @@ let __localAudioProcessor = null;
 let __localAudioChunks = [];
 let __localSilenceStart = null;
 let __localSpeaking = false;
-let __localRmsThreshold = 0.015;
+/** 提高阈值，减少环境噪音/键盘/回声误触发 */
+let __localRmsThreshold = 0.038;
+let __localSpeechStartAt = null;
+const __localSpeechStartHoldMs = 280;
+const __localMinPcmSamples = 9600; // ~0.6s @16kHz，太短的噪点不送识别
+let __voicePausedForTts = false;
+/** 试听中：彻底挂起唤醒/对话采集与抢话，避免与试听互相打断 */
+let __voicePreviewGuard = false;
+/** 朗读中暂停采集，防止喇叭回灌；人声打断时仍会监测 RMS */
+let __voiceBargeStartAt = null;
+const __voiceBargeRms = 0.055;
+const __voiceBargeHoldMs = 380;
+
+async function interruptVoicePlayback(reason) {
+    try {
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+    } catch (e) {}
+    try {
+        if (window.api && window.api.voice) await window.api.voice.stop();
+    } catch (e) {}
+    __voicePausedForTts = false;
+    __voiceBargeStartAt = null;
+    // 手动停止 / 试听前清理：结束试听护栏并恢复麦克风
+    if (reason === 'manual-stop' || reason === 'before-preview') {
+        endVoicePreviewGuard();
+    }
+    if (reason) console.log('[Voice] playback interrupted:', reason);
+}
 
 function mergeAudioChunks(chunks) {
     if (!chunks.length) return null;
@@ -17192,9 +17738,12 @@ function startLocalVoiceRecognition(mode) {
         __localAudioChunks = [];
         __localSilenceStart = null;
         __localSpeaking = false;
+        __localSpeechStartAt = null;
 
         __localAudioProcessor.onaudioprocess = (e) => {
             if (__voiceRecMode === 'off') return;
+            // 试听期间不采集、不抢话（麦克风 track 亦已禁用）
+            if (__voicePreviewGuard) return;
             const channelData = e.inputBuffer.getChannelData(0);
 
             let sum = 0;
@@ -17203,25 +17752,56 @@ function startLocalVoiceRecognition(mode) {
             }
             const rms = Math.sqrt(sum / channelData.length);
 
+            // 朗读中：不采集识别，但允许人声打断（阈值略高，避免喇叭回灌误触）
+            if (__voicePausedForTts) {
+                if (rms > __voiceBargeRms) {
+                    if (!__voiceBargeStartAt) __voiceBargeStartAt = Date.now();
+                    else if (Date.now() - __voiceBargeStartAt >= __voiceBargeHoldMs) {
+                        __voiceBargeStartAt = null;
+                        interruptVoicePlayback('barge-in').then(() => {
+                            __localAudioChunks = [];
+                            __localSpeaking = true;
+                            __localSpeechStartAt = null;
+                            __localSilenceStart = null;
+                            if (window.api && window.api.voice) {
+                                window.api.voice.setListenStatus(
+                                    __voiceRecMode === 'wake' ? 'listening_wake' : 'listening'
+                                );
+                            }
+                        });
+                    }
+                } else {
+                    __voiceBargeStartAt = null;
+                }
+                return;
+            }
+
             if (__voiceRecMode === 'chat') {
                 if (rms > __localRmsThreshold) {
                     if (!__localSpeaking) {
-                        __localSpeaking = true;
-                        if (window.api && window.api.voice) {
-                            window.api.voice.setListenStatus('listening');
+                        if (!__localSpeechStartAt) __localSpeechStartAt = Date.now();
+                        else if (Date.now() - __localSpeechStartAt >= __localSpeechStartHoldMs) {
+                            __localSpeaking = true;
+                            __localSpeechStartAt = null;
+                            interruptVoicePlayback('speech-start');
+                            if (window.api && window.api.voice) {
+                                window.api.voice.setListenStatus('listening');
+                            }
                         }
                     }
                     __localSilenceStart = null;
                 } else {
+                    __localSpeechStartAt = null;
                     if (__localSpeaking) {
                         if (!__localSilenceStart) {
                             __localSilenceStart = Date.now();
-                        } else if (Date.now() - __localSilenceStart > 1500) {
+                        } else if (Date.now() - __localSilenceStart > 1800) {
                             __localSpeaking = false;
                             __localSilenceStart = null;
                             const pcmData = pcmForLocalAsr(__localAudioChunks);
                             __localAudioChunks = [];
-                            if (pcmData && pcmData.length > 3200) {
+                            interruptVoicePlayback('speech-end');
+                            if (pcmData && pcmData.length > __localMinPcmSamples) {
                                 triggerLocalAsr(pcmData);
                             } else {
                                 if (window.api && window.api.voice) {
@@ -17238,22 +17818,27 @@ function startLocalVoiceRecognition(mode) {
             } else if (__voiceRecMode === 'wake') {
                 if (rms > __localRmsThreshold) {
                     if (!__localSpeaking) {
-                        __localSpeaking = true;
-                        if (window.api && window.api.voice) {
-                            window.api.voice.setListenStatus('listening_wake');
+                        if (!__localSpeechStartAt) __localSpeechStartAt = Date.now();
+                        else if (Date.now() - __localSpeechStartAt >= __localSpeechStartHoldMs) {
+                            __localSpeaking = true;
+                            __localSpeechStartAt = null;
+                            if (window.api && window.api.voice) {
+                                window.api.voice.setListenStatus('listening_wake');
+                            }
                         }
                     }
                     __localSilenceStart = null;
                 } else {
+                    __localSpeechStartAt = null;
                     if (__localSpeaking) {
                         if (!__localSilenceStart) {
                             __localSilenceStart = Date.now();
-                        } else if (Date.now() - __localSilenceStart > 1200) {
+                        } else if (Date.now() - __localSilenceStart > 1500) {
                             __localSpeaking = false;
                             __localSilenceStart = null;
                             const pcmData = pcmForLocalAsr(__localAudioChunks);
                             __localAudioChunks = [];
-                            if (pcmData && pcmData.length > 3200) {
+                            if (pcmData && pcmData.length > __localMinPcmSamples) {
                                 triggerLocalWakeAsr(pcmData);
                             } else {
                                 if (window.api && window.api.voice) {
@@ -17288,6 +17873,8 @@ function startLocalVoiceRecognition(mode) {
 }
 
 async function triggerLocalAsr(pcmData) {
+    // 识别前再停一次，确保当前朗读任务已清空
+    await interruptVoicePlayback('before-asr');
     const statusText = document.getElementById('voice-status-text');
     if (statusText) statusText.textContent = '正在识别中...';
 
@@ -17394,6 +17981,8 @@ function startVoiceRecognition(mode) {
     __voiceChatBuffer = '';
 
     rec.onresult = (event) => {
+        // 试听期间忽略在线识别结果，避免把试听语音当成唤醒/抢话
+        if (__voicePreviewGuard) return;
         let interim = '';
         let finalText = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -17403,6 +17992,10 @@ function startVoiceRecognition(mode) {
         }
         const heard = (finalText || interim || '').trim();
         if (!heard) return;
+
+        if (__voicePausedForTts) {
+            interruptVoicePlayback('barge-in-online');
+        }
 
         if (__voiceRecMode === 'wake') {
             const settings = (__voiceState && __voiceState.settings) || {};
@@ -17425,6 +18018,8 @@ function startVoiceRecognition(mode) {
             __voiceChatSilenceTimer = setTimeout(() => {
                 const utter = (__voiceChatBuffer || heard).trim();
                 __voiceChatBuffer = '';
+                // 说完立刻停朗读
+                interruptVoicePlayback('speech-end-online');
                 if (utter) submitVoiceChatUtterance(utter);
             }, 1400);
         }
@@ -17474,6 +18069,7 @@ function startVoiceRecognition(mode) {
 function enterVoiceChatListening() {
     const s = (__voiceState && __voiceState.settings) || {};
     if (!s.enabled || !s.voiceChat) return;
+    interruptVoicePlayback('wake-to-chat');
     startVoiceRecognition('chat');
     showToast(voiceT('voice.status.listening', '正在听你说话'));
 }
@@ -17482,15 +18078,20 @@ async function submitVoiceChatUtterance(text) {
     const clean = String(text || '').trim();
     if (!clean) return;
 
-    // 回到唤醒待机，避免把 AI 播报再识别进去
+    // 新一句抢话：先打断当前朗读，再保持全局倾听
+    await interruptVoicePlayback('new-utterance');
     const s = (__voiceState && __voiceState.settings) || {};
-    if (s.wakeListen) startVoiceRecognition('wake');
-    else stopVoiceRecognition();
+    if (s.enabled && s.wakeListen) startVoiceRecognition('wake');
+    else if (s.enabled && s.voiceChat) startVoiceRecognition('chat');
+    else {
+        stopVoiceRecognition();
+        __voiceDesiredListenMode = 'off';
+    }
 
     try {
         const input = document.getElementById('chat-text-input');
         if (input) input.value = clean;
-        // 切到会话页并发送
+        // 切到会话页并发送（任意页面说出的话都进模型对话）
         const chatNav = document.querySelector('.nav-item[data-tab="chat-view"]');
         if (chatNav) chatNav.click();
         if (typeof handleSendMessage === 'function') {
@@ -17594,7 +18195,11 @@ function bindVoiceControlsOnce() {
     }
 
     const btnStop = document.getElementById('btn-voice-stop');
-    if (btnStop) btnStop.addEventListener('click', () => window.api.voice && window.api.voice.stop());
+    if (btnStop) {
+        btnStop.addEventListener('click', () => {
+            interruptVoicePlayback('manual-stop');
+        });
+    }
 
     const btnTest = document.getElementById('btn-voice-test');
     if (btnTest) {
@@ -17630,6 +18235,33 @@ function bindVoiceControlsOnce() {
         window.api.voice.onStatus((data) => {
             if (data) __voiceState = data;
             updateVoiceStatusUi(data);
+            const speakingNow = !!(data && (data.speaking || data.status === 'speaking'));
+            if (speakingNow) {
+                if (!__voicePausedForTts) {
+                    __voicePausedForTts = true;
+                    __localAudioChunks = [];
+                    __localSpeaking = false;
+                    __localSilenceStart = null;
+                }
+                // 试听进行中：持续挂起麦克风，防止回声打断
+                if (__voicePreviewGuard) setVoiceMicSuspended(true);
+            } else if (__voicePausedForTts || __voicePreviewGuard) {
+                __voicePausedForTts = false;
+                const wasPreview = __voicePreviewGuard;
+                endVoicePreviewGuard();
+                // 朗读/试听结束：任意页面都恢复倾听（不依赖是否停在语音管理页）
+                const mode = __voiceRecMode;
+                if (mode === 'wake' || mode === 'chat') {
+                    try {
+                        window.api.voice.setListenStatus(mode === 'wake' ? 'listening_wake' : 'listening');
+                    } catch (e) {}
+                    if (wasPreview) setVoiceMicSuspended(false);
+                } else {
+                    try {
+                        syncVoiceListeningFromSettings((__voiceState && __voiceState.settings) || {});
+                    } catch (e) {}
+                }
+            }
         });
         window.api.voice.onSettingsUpdated((data) => applyVoiceStateToUi(data));
         window.api.voice.onDownloadProgress((p) => {

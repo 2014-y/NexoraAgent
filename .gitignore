@@ -29,8 +29,14 @@ voice-packs/
 *.tar.bz2
 *.zip
 
-# 发版 ASR 目录可进仓库；大压缩包默认忽略（约 220MB）
-# 本地用 scripts/ensure-asr-release-asset.js 下载，打包后复制到 dist/
+# 发版 ASR / 语音资源目录可进仓库；大压缩包默认忽略
+# 本地用 ensure 脚本补齐，打包后复制到 dist/
 !release-assets/asr-models/
 !release-assets/asr-models/**
 release-assets/asr-models/*.tar.bz2
+!release-assets/voice-packs/
+!release-assets/voice-packs/**
+release-assets/voice-packs/*.tar.bz2
+!release-assets/voice-packs/*.mp3
+!release-assets/voice-packs/*.txt
+!release-assets/voice-packs/*.md

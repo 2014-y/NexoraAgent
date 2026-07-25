@@ -25,34 +25,38 @@ const DEFAULT_SETTINGS = Object.freeze({
     volume: 0.8,
     rate: 0,
     wakeWord: '你好 Nexora',
-    activePackId: 'fanchen-wnj-zh-en',
+    activePackId: 'edge-yunyang',
     roleVoiceMap: {},
     httpPort: 18791,
     customPacks: []
 });
 const VOICE_PACKS = Object.freeze([
     {
-        id: 'fanchen-wnj-zh-en',
-        group: 'jarvis',
+        id: 'edge-yunyang',
+        group: 'online',
         lang: 'zh',
-        name: 'Nexora Agent',
-        badgeKey: 'voice.badge.jarvis',
-        summary: '高质量男声音色，支持中英双语混合朗读。',
-        size: '~116 MB',
-        engine: 'sherpa-onnx（离线）',
-        license: '开源（fanchen）',
+        name: '云扬（在线·沉稳解说）',
+        badgeKey: 'voice.badge.online',
+        summary: '微软 Edge 在线神经男声，自然有语气；需联网，无需下载语音包。',
+        size: '在线',
+        engine: 'edge-online',
+        edgeVoice: 'zh-CN-YunyangNeural',
+        license: 'Microsoft Edge TTS',
         speakerId: 0,
-        sapiHint: /zh|Chinese|en|English/i,
+        sapiHint: /zh|Chinese/i,
         rate: 0,
-        downloadUrl: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-zh-hf-fanchen-wnj.tar.bz2',
-        sourceUrl: 'https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-zh-hf-fanchen-wnj.html'
+        online: true
     }
 ]);
 
-// 仅展示保留的默认语音包，其他旧包将从 UI 列表中隐藏
+// 内置音色：仅在线云扬
 const MALE_VOICE_PACK_IDS = new Set([
-    'fanchen-wnj-zh-en'
+    'edge-yunyang'
 ]);
+
+function isOnlinePack(pack) {
+    return !!(pack && (pack.online || pack.engine === 'edge-online'));
+}
 
 function clampVolume(v) {
     const n = Number(v);
@@ -166,6 +170,7 @@ class VoiceRuntime extends EventEmitter {
         this._downloadProgress = null;
         this._mainWindowGetter = null;
         this._sapiVoiceName = null;
+        this._speakEpoch = 0;
         this._lastChannelSpeakAt = 0;
         this._lastChannelSpeakText = '';
         this._channelSpeakTimer = null;
@@ -180,6 +185,13 @@ class VoiceRuntime extends EventEmitter {
         fs.mkdirSync(this.packsDir, { recursive: true });
         fs.mkdirSync(this.tmpDir, { recursive: true });
         this._settings = this._readSettings();
+        // 旧离线包已废弃：一律切到在线云扬（自定义包除外）
+        const cur = this._settings.activePackId;
+        const isCustom = !!(this._settings.customPacks || []).find((p) => p && p.id === cur);
+        if (!isCustom && cur !== 'edge-yunyang') {
+            this._settings.activePackId = 'edge-yunyang';
+            try { this._writeSettings(); } catch (e) {}
+        }
         this._syncHttpServer();
         this._emitStatus();
         return this.getPublicState();
@@ -426,6 +438,8 @@ class VoiceRuntime extends EventEmitter {
     }
 
     isPackInstalled(id) {
+        const pack = this.packMeta(id);
+        if (isOnlinePack(pack)) return true;
         // 有 .onnx 主模型才算真正可用（避免空目录被标成已下载）
         return !!this._findOnnxModel(id);
     }
@@ -435,12 +449,13 @@ class VoiceRuntime extends EventEmitter {
             if (!fs.existsSync(this.settingsPath)) return { ...DEFAULT_SETTINGS };
             const raw = fs.readFileSync(this.settingsPath, 'utf8').replace(/^\uFEFF/, '');
             const parsed = JSON.parse(raw);
+            const activeId = parsed.activePackId;
+            const activeOk = MALE_VOICE_PACK_IDS.has(activeId)
+                || !!(parsed.customPacks || []).find((p) => p && p.id === activeId);
             return {
                 ...DEFAULT_SETTINGS,
                 ...parsed,
-                activePackId: MALE_VOICE_PACK_IDS.has(parsed.activePackId)
-                    ? parsed.activePackId
-                    : DEFAULT_SETTINGS.activePackId,
+                activePackId: activeOk ? activeId : DEFAULT_SETTINGS.activePackId,
                 volume: clampVolume(parsed.volume),
                 roleVoiceMap: {}
             };
@@ -461,10 +476,13 @@ class VoiceRuntime extends EventEmitter {
     _engineNote() {
         const activeId = this._settings.activePackId;
         const pack = this.packMeta(activeId);
-        if (activeId && this._findOnnxModel(activeId)) {
-            return `当前神经引擎音色：${(pack && pack.name) || activeId}`;
+        if (isOnlinePack(pack)) {
+            return `当前在线神经音色：${(pack && pack.name) || activeId}（微软 Edge TTS，需联网）`;
         }
-        return '当前男声音色未下载：不会使用系统女声。请点对应卡片「下载语音包」';
+        if (activeId && this._findOnnxModel(activeId)) {
+            return `当前离线神经引擎音色：${(pack && pack.name) || activeId}`;
+        }
+        return '当前音色未就绪：请选择「云扬（在线）」或下载离线语音包';
     }
 
     setSettings(patch) {
@@ -629,28 +647,47 @@ class VoiceRuntime extends EventEmitter {
     }
 
     stop(opts = {}) {
+        // 抬世代号：正在合成/播放的链路见到过期号就立刻收工，避免杀进程后仍继续播下一段
+        this._speakEpoch = (this._speakEpoch || 0) + 1;
         if (opts.clearQueue !== false) this._queue = [];
         if (this._currentProc) {
-            try { this._currentProc.kill(); } catch (e) {}
+            const proc = this._currentProc;
             this._currentProc = null;
+            try { proc.kill(); } catch (e) {}
+            // Windows：尽量杀掉整棵子进程树（PowerShell MediaPlayer）
+            try {
+                if (process.platform === 'win32' && proc.pid) {
+                    spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
+                        windowsHide: true,
+                        stdio: 'ignore'
+                    });
+                }
+            } catch (e) {}
         }
         this._speaking = false;
-        if (!this._settings.enabled) this._setStatus('idle');
-        else if (this._settings.wakeListen) this._setStatus('listening_wake');
+        this._restoreListenStatusAfterSpeak();
+        return { success: true, interrupted: true };
+    }
+
+    _restoreListenStatusAfterSpeak() {
+        if (!this._settings.enabled) {
+            this._setStatus('idle');
+            return;
+        }
+        if (this._settings.wakeListen) this._setStatus('listening_wake');
+        else if (this._settings.voiceChat) this._setStatus('listening');
         else this._setStatus('idle');
-        return { success: true };
     }
 
     async _pumpQueue() {
         if (this._speaking) return;
         if (!this._queue.length) {
-            if (this._settings.enabled && this._settings.wakeListen) this._setStatus('listening_wake');
-            else this._setStatus('idle');
+            this._restoreListenStatusAfterSpeak();
             return;
         }
         if (this._settings.muted) {
             this._queue = [];
-            this._setStatus(this._settings.wakeListen && this._settings.enabled ? 'listening_wake' : 'idle');
+            this._restoreListenStatusAfterSpeak();
             return;
         }
 
@@ -671,11 +708,16 @@ class VoiceRuntime extends EventEmitter {
     async _speakJob(job) {
         const pack = this.packMeta(job.packId) || this.packMeta(DEFAULT_SETTINGS.activePackId);
         const volume = Math.round(clampVolume(this._settings.volume) * 100);
-        const rate = pack && typeof pack.rate === 'number' ? pack.rate : 0;
+
+        // 1) 微软 Edge 在线神经 TTS（云扬等）
+        if (isOnlinePack(pack)) {
+            await this._speakWithEdgeOnline(job, pack, volume);
+            return;
+        }
 
         const modelPath = this._findOnnxModel(job.packId);
 
-        // 1) sherpa-onnx 神经引擎（模型已下载时），真正区分男女声
+        // 2) sherpa-onnx 离线引擎
         if (modelPath) {
             let sherpaErr = null;
             const ok = await this._speakWithSherpa(job, pack, volume).catch((e) => {
@@ -684,7 +726,6 @@ class VoiceRuntime extends EventEmitter {
                 return false;
             });
             if (ok) return;
-            // 已下载的神经音色失败时，不再静默回退到系统女声（否则听起来像「全是女音」）
             this._broadcast('voice-speak-error', {
                 packId: job.packId,
                 packName: pack && pack.name,
@@ -694,14 +735,13 @@ class VoiceRuntime extends EventEmitter {
             throw sherpaErr || new Error('neural tts failed');
         }
 
-        // 2) 兼容手动放置的 piper.exe
+        // 3) 兼容手动放置的 piper.exe
         const piperBin = this._findPiperBinary();
         if (piperBin && modelPath) {
             await this._speakWithPiper(piperBin, modelPath, job.text, volume, pack);
             return;
         }
 
-        // 3) 纯男声模式不允许回退到本机 Windows 女声。
         this._broadcast('voice-speak-error', {
             packId: job.packId,
             packName: pack && pack.name,
@@ -711,9 +751,99 @@ class VoiceRuntime extends EventEmitter {
         throw new Error('male voice pack not installed');
     }
 
+    /** 微软 Edge 在线神经 TTS → mp3 → 播放 */
+    async _speakWithEdgeOnline(job, pack, volume) {
+        const epoch = this._speakEpoch;
+        const voice = (pack && pack.edgeVoice) || 'zh-CN-YunyangNeural';
+        const userRate = typeof this._settings.rate === 'number' ? this._settings.rate : 0;
+        const packRate = pack && typeof pack.rate === 'number' ? pack.rate : 0;
+        const ratePct = Math.max(-50, Math.min(50, (packRate + userRate) * 5));
+        const rateStr = (ratePct >= 0 ? '+' : '') + ratePct + '%';
+        const volPct = Math.max(0, Math.min(100, volume));
+
+        fs.mkdirSync(this.tmpDir, { recursive: true });
+        const mp3Path = path.join(this.tmpDir, `edge-tts-${Date.now()}.mp3`);
+
+        let synthesized = false;
+        // 1) 优先 Node msedge-tts
+        try {
+            const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+            if (epoch === this._speakEpoch) {
+                const tts = new MsEdgeTTS();
+                await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
+                if (epoch === this._speakEpoch) {
+                    await tts.toFile(mp3Path, job.text, { rate: rateStr, volume: String(volPct) });
+                    synthesized = fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 1000;
+                }
+                try { tts.close(); } catch (e) {}
+            }
+        } catch (e) {
+            console.warn('[VoiceRuntime] msedge-tts failed, fallback python:', e && e.message);
+        }
+
+        // 2) 回退：本机 python -m edge_tts（国内更稳）
+        if (!synthesized && epoch === this._speakEpoch) {
+            await this._synthEdgeWithPython(job.text, voice, rateStr, mp3Path, epoch);
+            synthesized = fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 1000;
+        }
+
+        if (epoch !== this._speakEpoch) {
+            try { fs.unlinkSync(mp3Path); } catch (e) {}
+            return;
+        }
+        if (!synthesized) {
+            throw new Error('在线云扬 TTS 合成失败（请检查网络，或安装: pip install edge-tts）');
+        }
+
+        try {
+            await this._playWav(mp3Path, volume, epoch);
+        } finally {
+            try { fs.unlinkSync(mp3Path); } catch (e) {}
+        }
+    }
+
+    _synthEdgeWithPython(text, voice, rateStr, mp3Path, epoch) {
+        return new Promise((resolve, reject) => {
+            if (epoch !== this._speakEpoch) return resolve(false);
+            const textFile = path.join(this.tmpDir, `edge-text-${Date.now()}.txt`);
+            try {
+                fs.writeFileSync(textFile, text, 'utf8');
+            } catch (e) {
+                return reject(e);
+            }
+            const pyCandidates = ['python', 'py'];
+            const tryNext = (idx) => {
+                if (idx >= pyCandidates.length) {
+                    try { fs.unlinkSync(textFile); } catch (e) {}
+                    return reject(new Error('未找到 python，无法使用 edge-tts'));
+                }
+                const bin = pyCandidates[idx];
+                const args = bin === 'py'
+                    ? ['-3', '-m', 'edge_tts', '--voice', voice, '--rate', rateStr, '--file', textFile, '--write-media', mp3Path]
+                    : ['-m', 'edge_tts', '--voice', voice, '--rate', rateStr, '--file', textFile, '--write-media', mp3Path];
+                const proc = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+                this._currentProc = proc;
+                let err = '';
+                proc.stderr.on('data', (d) => { err += d.toString(); });
+                proc.on('error', () => tryNext(idx + 1));
+                proc.on('close', (code) => {
+                    try { fs.unlinkSync(textFile); } catch (e) {}
+                    if (epoch !== this._speakEpoch) return resolve(false);
+                    if (code === 0 && fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 1000) {
+                        return resolve(true);
+                    }
+                    if (idx + 1 < pyCandidates.length) return tryNext(idx + 1);
+                    reject(new Error(err.slice(0, 300) || 'python edge-tts failed'));
+                });
+            };
+            tryNext(0);
+        });
+    }
+
     /** 通过子进程运行 sherpa-onnx 合成 wav 后播放；返回是否成功 */
     _speakWithSherpa(job, pack, volume) {
         return new Promise((resolve, reject) => {
+            const epoch = this._speakEpoch;
             let workerPath = path.join(__dirname, 'tts-worker.js');
             // 打包后 asar 内脚本无法被子进程直接执行，切到 unpacked 路径
             if (workerPath.includes('app.asar') && !workerPath.includes('app.asar.unpacked')) {
@@ -753,19 +883,28 @@ class VoiceRuntime extends EventEmitter {
             proc.stderr.on('data', (d) => { stderr += d.toString(); });
             proc.on('error', (err) => {
                 try { fs.unlinkSync(textFile); } catch (e) {}
+                if (epoch !== this._speakEpoch) return resolve(true);
                 reject(err);
             });
             proc.on('close', () => {
                 try { fs.unlinkSync(textFile); } catch (e) {}
+                if (epoch !== this._speakEpoch) {
+                    try { fs.unlinkSync(wavPath); } catch (e) {}
+                    return resolve(true); // 已被打断，不算失败
+                }
                 let result = null;
                 try { result = JSON.parse(stdout.trim().split('\n').pop()); } catch (e) {}
                 if (!result || !result.ok || !fs.existsSync(wavPath)) {
                     return reject(new Error((result && result.error) || stderr.slice(0, 300) || 'sherpa worker failed'));
                 }
-                this._playWav(wavPath, volume).then(() => {
+                this._playWav(wavPath, volume, epoch).then(() => {
                     try { fs.unlinkSync(wavPath); } catch (e) {}
                     resolve(true);
-                }, reject);
+                }, (err) => {
+                    try { fs.unlinkSync(wavPath); } catch (e) {}
+                    if (epoch !== this._speakEpoch) return resolve(true);
+                    reject(err);
+                });
             });
         });
     }
@@ -807,6 +946,7 @@ class VoiceRuntime extends EventEmitter {
 
     _speakWithPiper(bin, model, text, volume, pack) {
         return new Promise((resolve, reject) => {
+            const epoch = this._speakEpoch;
             const packRate = pack && typeof pack.rate === 'number' ? pack.rate : 0;
             const userRate = typeof this._settings.rate === 'number' ? this._settings.rate : 0;
             const totalRate = packRate + userRate;
@@ -820,12 +960,19 @@ class VoiceRuntime extends EventEmitter {
             this._currentProc = proc;
             proc.stdin.write(text, 'utf8');
             proc.stdin.end();
-            proc.on('error', reject);
+            proc.on('error', (err) => {
+                if (epoch !== this._speakEpoch) return resolve();
+                reject(err);
+            });
             proc.on('close', (code) => {
+                if (epoch !== this._speakEpoch) {
+                    try { fs.unlinkSync(wavPath); } catch (e) {}
+                    return resolve();
+                }
                 if (code !== 0 || !fs.existsSync(wavPath)) {
                     return this._speakWithSapi(text, volume, 0, null).then(resolve, reject);
                 }
-                this._playWav(wavPath, volume).then(() => {
+                this._playWav(wavPath, volume, epoch).then(() => {
                     try { fs.unlinkSync(wavPath); } catch (e) {}
                     resolve();
                 }, reject);
@@ -833,8 +980,10 @@ class VoiceRuntime extends EventEmitter {
         });
     }
 
-    _playWav(wavPath, volume) {
+    _playWav(wavPath, volume, epoch) {
+        const speakEpoch = typeof epoch === 'number' ? epoch : this._speakEpoch;
         return new Promise((resolve, reject) => {
+            if (speakEpoch !== this._speakEpoch) return resolve();
             const ps = `
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName PresentationCore
@@ -854,7 +1003,10 @@ $p.Close()
                 stdio: 'ignore'
             });
             this._currentProc = proc;
-            proc.on('error', reject);
+            proc.on('error', (err) => {
+                if (speakEpoch !== this._speakEpoch) return resolve();
+                reject(err);
+            });
             proc.on('close', () => resolve());
         });
     }
@@ -894,6 +1046,7 @@ try {
     async downloadPack(packId, onProgress) {
         const pack = this.packMeta(packId);
         if (!pack) return { success: false, error: 'unknown pack' };
+        if (isOnlinePack(pack)) return { success: true, path: null, online: true };
         if (!pack.downloadUrl) return { success: false, error: 'no download url' };
 
         this._downloadProgress = { packId, percent: 0 };

@@ -913,11 +913,12 @@ function notifyGatewayHttpReady(port) {
     } catch (e) {}
 }
 
-/** TCP 探测：端口可连即通知 UI 解锁（比等日志更稳） */
+/** HTTP 探测 Control UI：/acp/ 能响应再通知解锁（避免仅 TCP 通了就进白屏） */
 function startGatewayHttpReadyWatch(port) {
     stopGatewayHttpReadyWatch();
     gatewayHttpReadyNotified = false;
     const targetPort = Number(port) > 0 ? Number(port) : 18789;
+    const http = require('http');
     let tries = 0;
     gatewayHttpReadyTimer = setInterval(() => {
         if (!gatewayProcess || gatewayHttpReadyNotified) {
@@ -925,21 +926,37 @@ function startGatewayHttpReadyWatch(port) {
             return;
         }
         tries += 1;
-        if (tries > 120) {
+        if (tries > 180) {
             stopGatewayHttpReadyWatch();
             return;
         }
-        const socket = net.connect({ host: '127.0.0.1', port: targetPort }, () => {
-            try { socket.destroy(); } catch (e) {}
-            notifyGatewayHttpReady(targetPort);
-        });
-        socket.on('error', () => {
-            try { socket.destroy(); } catch (e) {}
-        });
-        socket.setTimeout(350, () => {
-            try { socket.destroy(); } catch (e) {}
-        });
-    }, 400);
+        let settled = false;
+        const finish = (ok) => {
+            if (settled) return;
+            settled = true;
+            if (ok) notifyGatewayHttpReady(targetPort);
+        };
+        try {
+            const req = http.get({
+                hostname: '127.0.0.1',
+                port: targetPort,
+                path: '/acp/',
+                timeout: 500,
+                headers: { Accept: 'text/html,*/*' },
+            }, (res) => {
+                try { res.resume(); } catch (e) {}
+                // 任意 HTTP 响应都说明 Control UI 路由已起来（含 3xx/401）
+                finish(true);
+            });
+            req.on('error', () => finish(false));
+            req.on('timeout', () => {
+                try { req.destroy(); } catch (e) {}
+                finish(false);
+            });
+        } catch (e) {
+            finish(false);
+        }
+    }, 500);
 }
 
 // 与 open-external / 示例配置一致的桌面端默认网关令牌（仅本机 loopback）
