@@ -5,13 +5,14 @@ contextBridge.exposeInMainWorld('api', {
     // 窗口控制
     windowAction: (action) => ipcRenderer.send('window-action', action),
     
-    // 网关控制
-    gatewayAction: (action) => ipcRenderer.send('gateway-action', action),
-    /** 渠道绑定/改配后热重载网关；opts.startIfStopped=true 时未运行也会拉起 */
+    // 网关控制（IPC start 仅允许 source: manual | autostart；主进程强制校验）
+    gatewayAction: (action, opts) => ipcRenderer.send('gateway-action', action, opts || {}),
+    /** 渠道绑定/改配后热重载网关；未运行时不会自动启用（仅手动/设置自启可启用） */
     reloadGatewayForChannel: (reason, opts) => ipcRenderer.invoke('gateway-reload-for-channel', {
         reason: reason || 'channel-change',
         startIfStopped: !!(opts && opts.startIfStopped)
     }),
+    onGatewayStartBlocked: (callback) => ipcRenderer.on('gateway-start-blocked', (event, data) => callback(data)),
     onChannelGatewayReloading: (callback) => ipcRenderer.on('channel-gateway-reloading', (event, data) => callback(data)),
     
     // 配置读写

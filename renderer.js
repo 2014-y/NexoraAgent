@@ -984,21 +984,26 @@ let configData = null;
 let currentTab = 'console-view';
 let gatewayStatus = 'stopped';
 
-/** 通讯渠道变更后热重载网关（走主进程 await stop→start，带防抖） */
+/** 通讯渠道变更后热重载网关（走主进程 await stop→start，带防抖；未运行时不会自动启用） */
 function reloadGatewayAfterChannelChange(reason, opts = {}) {
     const startIfStopped = opts.startIfStopped === true;
     if (window.api && typeof window.api.reloadGatewayForChannel === 'function') {
         window.api.reloadGatewayForChannel(reason || 'channel-change', { startIfStopped }).catch(() => {});
         return;
     }
-    // 兼容旧 preload：仅在运行中时 stop→start
-    if (gatewayStatus === 'running' || gatewayStatus === 'starting' || startIfStopped) {
-        if (gatewayStatus === 'running' || gatewayStatus === 'starting') {
-            window.api.gatewayAction('stop');
-            setTimeout(() => window.api.gatewayAction('start'), 1500);
-        } else if (startIfStopped) {
-            window.api.gatewayAction('start');
-        }
+    // 兼容旧 preload：仅在运行中时走主进程式热重载提示，禁止 IPC 伪造 reload 启用
+    if (gatewayStatus === 'running' || gatewayStatus === 'starting') {
+        showToast(t(
+            '请稍候，渠道配置将在网关热重载后生效',
+            'Channel config will apply after gateway reload',
+            '請稍候，渠道配置將在網關熱重載後生效'
+        ));
+    } else if (startIfStopped) {
+        showToast(t(
+            '网关未运行：渠道配置已保存，请点击左上角手动启动',
+            'Gateway is stopped. Channel config saved — start it from the top-left button.',
+            '網關未運行：渠道配置已保存，請點擊左上角手動啟動'
+        ));
     }
 }
 let gatewayFullyReady = false;
@@ -2147,8 +2152,8 @@ async function init() {
             try { window.api.clearSystemLogs && window.api.clearSystemLogs(); } catch (_) {}
             ensureStartingActivityTip();
 
-            window.api.gatewayAction('start');
-            
+            window.api.gatewayAction('start', { source: 'manual' });
+
             window.toggleLockTimeout = setTimeout(() => {
                 window.isTogglingGateway = false;
                 gatewayToggleBtn.style.pointerEvents = '';
@@ -2162,7 +2167,7 @@ async function init() {
             gatewayToggleBtn.style.cursor = 'not-allowed';
             window.api.gatewayAction('stop');
             resetConsoleRuntimeLogs();
-            
+
             window.toggleLockTimeout = setTimeout(() => {
                 window.isTogglingGateway = false;
                 gatewayToggleBtn.style.pointerEvents = '';
@@ -2285,7 +2290,7 @@ async function init() {
         statusPanel.addEventListener('click', () => {
             if (gatewayStatus === 'stopped') {
                 showToast('正在启动Nexora Agent核心服务...');
-                window.api.gatewayAction('start');
+                window.api.gatewayAction('start', { source: 'manual' });
             } else if (gatewayStatus === 'running') {
                 showToast('正在关闭Nexora Agent核心服务...');
                 window.api.gatewayAction('stop');
@@ -2309,7 +2314,7 @@ async function init() {
         setTimeout(() => {
             if (gatewayStatus === 'stopped') {
                 logTerminal.innerText += '\n[System] 正在根据系统设置自动启用本地Nexora Agent...\n';
-                window.api.gatewayAction('start');
+                window.api.gatewayAction('start', { source: 'autostart' });
             }
         }, 1500);
         // 自启场景下反复对齐按钮文案：running →「终止」，避免卡在「启动/启动中」
@@ -3472,6 +3477,12 @@ function setupIpcListeners() {
         });
     }
 
+    if (window.api && typeof window.api.onGatewayStartBlocked === 'function') {
+        window.api.onGatewayStartBlocked(() => {
+            showToast(t('console.gateway.start_blocked'));
+        });
+    }
+
     // Nexora Agent状态同步
     window.api.onStatusChanged((status) => {
         const oldStatus = gatewayStatus;
@@ -3691,7 +3702,7 @@ function setupIpcListeners() {
     // 托盘控制触发
     window.api.onControlTriggered((action) => {
         if (action === 'start') {
-            window.api.gatewayAction('start');
+            window.api.gatewayAction('start', { source: 'manual' });
         } else if (action === 'stop') {
             window.api.gatewayAction('stop');
             resetConsoleRuntimeLogs();
@@ -6189,20 +6200,29 @@ const handleSaveConfigAction = async () => {
     // 调用 API 保存配置
     const result = await window.api.saveConfig(configData);
     if (result.success) {
-        alert(t('配置已成功保存！', 'Configuration saved successfully!', '配置已成功保存！'));
         await loadAndRenderConfig();
         const saveLabel = t('保存配置', 'Save Configuration', '保存配置');
         clearSaveBtnDirtyState(document.getElementById('config-save-btn-top'), saveLabel);
         clearSaveBtnDirtyState(document.getElementById('config-save-btn'), saveLabel);
         const jsonErrorEl = document.getElementById('json-format-error');
         if (jsonErrorEl) jsonErrorEl.style.display = 'none';
-        statPort.innerText = configData.gateway.port;
+        if (statPort) statPort.innerText = configData.gateway.port;
+
+        // 网关运行中：一次确认搞定「已保存 + 是否重启」，避免连弹两个窗
         if (gatewayStatus === 'running') {
-            const restart = await confirm(t('Nexora Agent正在运行中，是否立即重启Nexora Agent以使新配置生效？', 'Gateway is running. Do you want to restart it now to apply the new configuration?', 'Nexora Agent正在運行中，是否立即重啟Nexora Agent以使新配置生效？'));
+            const restart = await confirm(
+                t(
+                    '配置已保存成功。\n\nNexora Agent 正在运行，是否立即重启以使新配置生效？',
+                    'Configuration saved.\n\nNexora Agent is running. Restart now to apply changes?',
+                    '配置已保存成功。\n\nNexora Agent 正在運行，是否立即重啟以使新配置生效？'
+                ),
+                t('保存成功', 'Saved', '保存成功')
+            );
             if (restart) {
-                window.api.gatewayAction('stop');
-                setTimeout(() => window.api.gatewayAction('start'), 1000);
+                reloadGatewayAfterChannelChange('config-save', { startIfStopped: false });
             }
+        } else {
+            showToast(t('配置已成功保存！', 'Configuration saved successfully!', '配置已成功保存！'));
         }
     } else {
         alert(t('配置保存失败：', 'Failed to save configuration: ', '配置保存失敗：') + result.error);
@@ -6844,8 +6864,7 @@ async function renderPluginsGrid() {
         paintCards();
 
         if (gatewayStatus === 'running') {
-            window.api.gatewayAction('stop');
-            setTimeout(() => window.api.gatewayAction('start'), 1200);
+            reloadGatewayAfterChannelChange('plugin-toggle', { startIfStopped: false });
         }
     }
 

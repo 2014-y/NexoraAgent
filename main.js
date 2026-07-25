@@ -666,56 +666,25 @@ function resetGatewayCrashRestartBudget() {
 }
 
 /**
- * 网关子进程意外退出后自动重拉（端口已空闲的情况）。
- * 返回 true 表示已安排重启；false 表示放弃（超限或正在退出）。
+ * 网关子进程意外退出：不再自动拉起（仅允许手动 / 设置自启启用）。
  */
 function scheduleGatewayCrashRestart(exitCode) {
     if (isQuitting) return false;
     clearGatewayCrashRestartSchedule();
-    const now = Date.now();
-    gatewayCrashRestartAt = gatewayCrashRestartAt.filter((t) => now - t < GATEWAY_CRASH_RESTART_WINDOW_MS);
-    if (gatewayCrashRestartAt.length >= GATEWAY_CRASH_RESTART_MAX) {
-        if (mainWindow) {
-            mainWindow.webContents.send(
-                'gateway-log',
-                `\n[System] 核心进程意外退出（码 ${exitCode}）。5 分钟内已自动拉起 ${GATEWAY_CRASH_RESTART_MAX} 次仍失败，已暂停自动重启。请点击左上角手动启动；若发微信图片后必现，请先改回纯文字回复再观察。\n`
-            );
-            mainWindow.webContents.send('gateway-status', 'stopped');
-            try {
-                showNotification(
-                    'Nexora Agent 已停止',
-                    '短时间内多次异常退出，已暂停自动重启，请手动启动。'
-                );
-            } catch (e) {}
-        }
-        return false;
-    }
-    gatewayCrashRestartAt.push(now);
-    const attempt = gatewayCrashRestartAt.length;
-    const delayMs = Math.min(8000, 1000 * attempt);
     if (mainWindow) {
         mainWindow.webContents.send(
             'gateway-log',
-            `\n[System] 核心进程意外退出（码 ${exitCode}），${Math.round(delayMs / 1000)}s 后自动重启（${attempt}/${GATEWAY_CRASH_RESTART_MAX}）…\n`
+            `\n[System] 核心进程意外退出（码 ${exitCode}）。已禁止自动重启，请点击左上角手动启动 Nexora Agent。\n`
         );
-        mainWindow.webContents.send('gateway-status', 'starting');
-    }
-    gatewayCrashRestartTimer = setTimeout(() => {
-        gatewayCrashRestartTimer = null;
-        if (isQuitting || gatewayProcess || gatewayStartInFlight) return;
+        mainWindow.webContents.send('gateway-status', 'stopped');
         try {
-            startGatewayProcess();
-        } catch (e) {
-            if (mainWindow) {
-                mainWindow.webContents.send(
-                    'gateway-log',
-                    `[System] 自动重启失败: ${(e && e.message) || e}\n`
-                );
-                mainWindow.webContents.send('gateway-status', 'stopped');
-            }
-        }
-    }, delayMs);
-    return true;
+            showNotification(
+                'Nexora Agent 已停止',
+                '核心异常退出，已禁止自动拉起，请手动点击左上角启动。'
+            );
+        } catch (e) {}
+    }
+    return false;
 }
 
 function probeGatewayPort(port, timeoutMs = 500) {
@@ -3765,7 +3734,7 @@ function createWindow(existingSplash) {
             } catch (e) {}
             try {
                 if (!isAutoLaunchGatewayEnabled()) return;
-                startGatewayProcess();
+                startGatewayProcess({ source: 'autostart' });
                 // 自启后补几次状态推送，避免渲染进程还没挂上监听时漏掉 running
                 const push = () => {
                     try {
@@ -3894,12 +3863,11 @@ let gatewayChannelReloadInFlight = false;
 /**
  * @param {string} reason
  * @param {{ startIfStopped?: boolean }} [opts]
- *   startIfStopped=true：网关未运行也会拉起（扫码/新增绑定后立刻能收消息）
- *   startIfStopped=false：仅在网关已运行时重启（编辑/删除/切默认）
+ *   startIfStopped 已废弃：未运行时禁止由渠道自动启用，仅热重载「已在运行」的实例
  */
 function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
     const label = String(reason || 'channel-change');
-    const startIfStopped = opts.startIfStopped === true;
+    const wantedStartIfStopped = opts.startIfStopped === true;
     if (gatewayChannelReloadTimer) {
         clearTimeout(gatewayChannelReloadTimer);
         gatewayChannelReloadTimer = null;
@@ -3914,16 +3882,22 @@ function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
     gatewayChannelReloadTimer = setTimeout(async () => {
         gatewayChannelReloadTimer = null;
         if (gatewayChannelReloadInFlight) return;
-        const wasRunning = !!gatewayProcess;
-        if (!wasRunning && !startIfStopped) return;
+        const wasRunning = !!gatewayProcess || !!gatewayStartInFlight;
+        if (!wasRunning) {
+            if (wantedStartIfStopped && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send(
+                    'gateway-log',
+                    `[System] 渠道配置已保存（${label}），但网关未运行。已禁止渠道自动启用，请点击左上角手动启动。\n`
+                );
+            }
+            return;
+        }
         gatewayChannelReloadInFlight = true;
         try {
-            if (wasRunning) {
-                await stopGatewayProcess();
-                // Windows 杀进程/释放 18789 需要一点余量
-                await new Promise((r) => setTimeout(r, 1000));
-            }
-            await startGatewayProcess();
+            await stopGatewayProcess();
+            // Windows 杀进程/释放 18789 需要一点余量
+            await new Promise((r) => setTimeout(r, 1000));
+            await withGatewayRestartPermit(() => startGatewayProcess({ source: 'reload' }));
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send(
                     'gateway-log',
@@ -3962,7 +3936,8 @@ function clearGatewayRuntimeLogsForFreshStart() {
     }
 }
 
-async function stopGatewayProcess() {
+async function stopGatewayProcess(opts = {}) {
+    const preserveClash = opts.preserveClash === true;
     resetGatewayCrashRestartBudget();
     if (gatewayProcess) {
         gatewayProcess.isIntentionallyStopped = true; // 标记为主动停止，避免触发意外退出警报
@@ -3979,29 +3954,96 @@ async function stopGatewayProcess() {
                 await killPidsListeningOnPort(port, [process.pid, process.ppid]);
             } catch (err) {}
         } else {
-            gatewayProcess.kill('SIGTERM');
+            try { gatewayProcess.kill('SIGTERM'); } catch (e) {}
+            try { gatewayProcess.kill('SIGKILL'); } catch (e) {}
         }
-        // Linkage: Stop Clash (if enabled in settings) when Agent stops
-        try {
-            const st = acceleration.getStatus();
-            if (st.enabled) {
-                console.log('[Linkage] Stopping Nexora Clash core on Agent stop...');
-                await acceleration.stopCore();
-                await acceleration.applySystemProxy(false);
-                await applyElectronSessionProxy(false);
+        // Linkage: Stop Clash (if enabled in settings) when Agent stops — 仅为「真正停止」时联动，启用前清旧进程不关 Clash
+        if (!preserveClash) {
+            try {
+                const st = acceleration.getStatus();
+                if (st.enabled) {
+                    console.log('[Linkage] Stopping Nexora Clash core on Agent stop...');
+                    await acceleration.stopCore();
+                    await acceleration.applySystemProxy(false);
+                    await applyElectronSessionProxy(false);
+                }
+            } catch (e) {
+                console.warn('[Linkage] Clash stop linkage error:', e.message);
             }
-        } catch (e) {
-            console.warn('[Linkage] Clash stop linkage error:', e.message);
         }
 
         gatewayProcess = null;
         stopGatewayHttpReadyWatch();
         gatewayHttpReadyNotified = false;
-        if (mainWindow) {
+        if (mainWindow && !preserveClash) {
             mainWindow.webContents.send('gateway-status', 'stopped');
             mainWindow.webContents.send('gateway-log', '\n[System] Nexora Agent服务已停止。\n');
             mainWindow.webContents.send('gateway-clear-logs');
         }
+    } else if (process.platform === 'win32') {
+        // 无本进程子句柄时，仍尝试清端口孤儿，避免「启用」叠在旧程序上
+        try {
+            const port = resolveConfiguredGatewayPort();
+            await killPidsListeningOnPort(port, [process.pid, process.ppid]);
+        } catch (err) {}
+    }
+}
+
+/** 启用前强制终止旧网关（本进程子进程 + 端口占用），再允许 fork */
+async function terminateOldGatewayBeforeStart(port) {
+    const targetPort = Number(port) > 0 ? Number(port) : resolveConfiguredGatewayPort();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+            'gateway-log',
+            `[System] 启用前先终止旧的 Nexora Agent / 网关进程（端口 ${targetPort}）...\n`
+        );
+    }
+    try {
+        await stopGatewayProcess({ preserveClash: true });
+    } catch (e) {
+        console.warn('[Gateway] terminate old child failed:', e && e.message);
+    }
+    gatewayProcess = null;
+    stopGatewayHttpReadyWatch();
+    gatewayHttpReadyNotified = false;
+
+    const instanceId = (global.nexoraInstance && global.nexoraInstance.id) || 1;
+    if (process.platform === 'win32' && instanceId <= 1) {
+        try {
+            const killed = await killPidsListeningOnPort(targetPort, [process.pid, process.ppid]);
+            if (killed > 0 && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send(
+                    'gateway-log',
+                    `[System] 已结束占用端口 ${targetPort} 的 ${killed} 个旧进程。\n`
+                );
+            }
+        } catch (e) {
+            console.warn('[Gateway] port reclaim before start failed:', e && e.message);
+        }
+    }
+
+    // 等待端口真正空闲，避免旧进程未退干净就叠启
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+        const busy = await probeGatewayPort(targetPort, 400);
+        if (!busy) break;
+        if (process.platform === 'win32' && instanceId <= 1) {
+            try { await killPidsListeningOnPort(targetPort, [process.pid, process.ppid]); } catch (e) {}
+        }
+        await new Promise((r) => setTimeout(r, 350));
+    }
+    if (await probeGatewayPort(targetPort, 400)) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(
+                'gateway-log',
+                `[System] 警告：端口 ${targetPort} 仍被占用，将继续尝试启动（若失败请手动结束旧进程）。\n`
+            );
+        }
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+            'gateway-log',
+            `[System] 旧进程已清理，端口 ${targetPort} 空闲，开始启用。\n`
+        );
     }
 }
 
@@ -4029,48 +4071,61 @@ ipcMain.on('window-action', (event, action) => {
 });
 
 // 启动后台Nexora Agent进程
-async function startGatewayProcess() {
-        if (gatewayProcess) {
-            if (mainWindow) {
-                mainWindow.webContents.send('gateway-status', 'running');
-            }
+// 启用（从停止拉起）仅允许：manual（手动）、autostart（设置自动启用）
+// reload / update 仅主进程内部热重载/更新流程可用，且必须带内部许可标记
+const IPC_GATEWAY_START_SOURCES = new Set(['manual', 'autostart']);
+const INTERNAL_GATEWAY_RESTART_SOURCES = new Set(['reload', 'update']);
+let gatewayInternalRestartPermit = 0;
+
+async function withGatewayRestartPermit(fn) {
+    gatewayInternalRestartPermit += 1;
+    try {
+        return await fn();
+    } finally {
+        gatewayInternalRestartPermit = Math.max(0, gatewayInternalRestartPermit - 1);
+    }
+}
+
+function notifyGatewayStartBlocked(source, detail) {
+    const src = String(source || 'unknown');
+    const why = detail || src;
+    console.warn('[Gateway] start blocked, source=', src);
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+        mainWindow.webContents.send(
+            'gateway-log',
+            `\n[System] 已拦截非授权启动（来源: ${why}）。仅允许：左上角手动启动，或系统设置「自动启用 Nexora Agent」。\n`
+        );
+        mainWindow.webContents.send('gateway-start-blocked', { source: src });
+        mainWindow.webContents.send('gateway-status', 'stopped');
+    } catch (e) {}
+}
+
+async function startGatewayProcess(opts = {}) {
+        const source = String((opts && opts.source) || 'unknown');
+        if (gatewayStartInFlight) return gatewayStartInFlight;
+
+        const ipcOk = IPC_GATEWAY_START_SOURCES.has(source);
+        const internalOk = INTERNAL_GATEWAY_RESTART_SOURCES.has(source) && gatewayInternalRestartPermit > 0;
+        if (!ipcOk && !internalOk) {
+            notifyGatewayStartBlocked(source);
             return;
         }
-        if (gatewayStartInFlight) return gatewayStartInFlight;
 
         // 取消尚未触发的崩溃自动重启，避免与手动/回收启动叠车
         clearGatewayCrashRestartSchedule();
         gatewayStartInFlight = (async () => {
         try {
         const preferredGatewayPort = resolveConfiguredGatewayPort();
-        let gatewayPortWasOccupied = false;
         // 先把 UI 打到 starting，避免清理端口时界面长时间假“空闲/运行中”
         if (mainWindow) {
             mainWindow.webContents.send('gateway-clear-logs');
             mainWindow.webContents.send('gateway-status', 'starting');
-            mainWindow.webContents.send('gateway-log', `[System] 正在准备启动 Gateway（端口 ${preferredGatewayPort}）...\n`);
+            mainWindow.webContents.send('gateway-log', `[System] 正在准备启动 Gateway（端口 ${preferredGatewayPort}，来源: ${source}）...\n`);
         }
 
-        if (await probeGatewayPort(preferredGatewayPort)) {
-            gatewayPortWasOccupied = true;
-            // 本进程已 fork 过：真·跳过。外部孤儿占用端口时不能跳过，否则 UI 无 stdout、活动流空白。
-            if (gatewayProcess) {
-                console.log(`[Gateway] Port ${preferredGatewayPort} already owned by this app; skip duplicate fork`);
-                if (mainWindow) {
-                    mainWindow.webContents.send('gateway-status', 'running');
-                }
-                startGatewayHttpReadyWatch(preferredGatewayPort);
-                notifyGatewayHttpReady(preferredGatewayPort);
-                return;
-            }
-            console.log(`[Gateway] Port ${preferredGatewayPort} occupied by external process; reclaim then fork`);
-            if (mainWindow) {
-                mainWindow.webContents.send(
-                    'gateway-log',
-                    `[System] 检测到端口 ${preferredGatewayPort} 被外部网关占用，正在回收并重新拉起（否则界面无启动日志）...\n`
-                );
-            }
-        }
+        // 启用前必须先终止旧程序（本进程子进程 + 端口孤儿），禁止叠在旧实例上启用
+        await terminateOldGatewayBeforeStart(preferredGatewayPort);
 
         try {
             await waitForGatewayRuntimeReady();
@@ -4085,14 +4140,11 @@ async function startGatewayProcess() {
             return;
         }
 
-        // 多开时：主实例仍清理本机默认端口残留；第 2+ 实例绝不杀其它实例的网关
+        // 多开时：主实例再兜底清一次端口；第 2+ 实例绝不杀其它实例的网关
         const instanceId = (global.nexoraInstance && global.nexoraInstance.id) || 1;
-        if (process.platform === 'win32') {
+        if (process.platform === 'win32' && instanceId <= 1) {
             try {
-                if (instanceId <= 1) {
-                    if (!gatewayPortWasOccupied) {
-                        console.log(`[Gateway] Port ${preferredGatewayPort} is free; skip netstat cleanup`);
-                    } else {
+                if (await probeGatewayPort(preferredGatewayPort)) {
                     const killed = await killPidsListeningOnPort(
                         preferredGatewayPort,
                         [process.pid, process.ppid]
@@ -4100,12 +4152,10 @@ async function startGatewayProcess() {
                     if (killed > 0 && mainWindow) {
                         mainWindow.webContents.send(
                             'gateway-log',
-                            `[System] 已回收占用端口 ${preferredGatewayPort} 的 ${killed} 个残留进程。\n`
+                            `[System] 启动前再次回收端口 ${preferredGatewayPort} 残留 ${killed} 个进程。\n`
                         );
                     }
-                    // 给 OS 一点时间释放 LISTEN
                     await new Promise((r) => setTimeout(r, 400));
-                    }
                 }
             } catch (err) {
                 console.error('Failed to cleanup leftover gateway port processes:', err);
@@ -4478,30 +4528,17 @@ async function startGatewayProcess() {
                 stopGatewayHttpReadyWatch();
                 gatewayHttpReadyNotified = false;
                 if (!wasIntentionallyStopped && await probeGatewayPort(exitedPort)) {
-                    // 子进程没了但端口仍被占用：绝不能假装 running（会导致活动流空白）
-                    console.warn(`[Gateway] Child exited (${code}) but port ${exitedPort} still listening; reclaim`);
+                    // 子进程没了但端口仍被占用：提示手动处理，禁止自动重拉启用
+                    console.warn(`[Gateway] Child exited (${code}) but port ${exitedPort} still listening; no auto-restart`);
                     if (mainWindow) {
                         mainWindow.webContents.send(
                             'gateway-log',
-                            `\n[System] 网关子进程已退出但端口 ${exitedPort} 仍被占用，正在回收并重拉（保证界面有日志）...\n`
+                            `\n[System] 网关子进程已退出但端口 ${exitedPort} 仍被占用。已禁止自动启用，请点击左上角手动启动（必要时先结束占用该端口的进程）。\n`
                         );
-                        mainWindow.webContents.send('gateway-status', 'starting');
+                        mainWindow.webContents.send('gateway-status', 'stopped');
                     }
-                    if ((global.__gatewayReclaimAttempts || 0) < 2) {
-                        global.__gatewayReclaimAttempts = (global.__gatewayReclaimAttempts || 0) + 1;
-                        setTimeout(() => {
-                            try { startGatewayProcess(); } catch (e) {}
-                        }, 800);
-                    } else {
-                        global.__gatewayReclaimAttempts = 0;
-                        if (mainWindow) {
-                            mainWindow.webContents.send('gateway-status', 'stopped');
-                            mainWindow.webContents.send(
-                                'gateway-log',
-                                `[System] 端口 ${exitedPort} 回收失败，请点击左上角重新启动。\n`
-                            );
-                        }
-                    }
+                    notifyGatewayStartBlocked('port-reclaim', 'port-reclaim');
+                    global.__gatewayReclaimAttempts = 0;
                     return;
                 }
                 global.__gatewayReclaimAttempts = 0;
@@ -4534,9 +4571,17 @@ async function startGatewayProcess() {
         return gatewayStartInFlight;
 }
 
-ipcMain.on('gateway-action', (event, action) => {
+ipcMain.on('gateway-action', (event, action, opts) => {
     if (action === 'start') {
-        startGatewayProcess();
+        const source = (opts && typeof opts === 'object' && opts.source)
+            ? String(opts.source)
+            : '';
+        // 渲染进程 IPC 只能走手动 / 设置自启；禁止伪造 reload/update
+        if (!IPC_GATEWAY_START_SOURCES.has(source)) {
+            notifyGatewayStartBlocked(source || 'ipc-missing-source');
+            return;
+        }
+        startGatewayProcess({ source });
     } else if (action === 'stop') {
         stopGatewayProcess();
     } else if (action === 'query-status') {
@@ -8738,7 +8783,7 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
         const maxAttempts = 3;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                startGatewayProcess();
+                await withGatewayRestartPermit(() => startGatewayProcess({ source: 'update' }));
             } catch (e) {
                 log(`启动尝试 ${attempt}/${maxAttempts} 异常: ${e.message}`);
             }
