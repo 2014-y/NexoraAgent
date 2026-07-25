@@ -154,6 +154,10 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
   border:1px dashed rgba(var(--accent-rgb), 0.35);
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(123,97,255,0.06));
 }
+.empty-banner.is-error {
+  border-color: rgba(255, 165, 2, 0.45);
+  background: linear-gradient(135deg, rgba(255,165,2,0.10), rgba(255,71,87,0.06));
+}
 .empty-banner .empty-icon {
   width:40px; height:40px; border-radius:10px; flex-shrink:0;
   display:flex; align-items:center; justify-content:center;
@@ -161,8 +165,23 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
   background: rgba(var(--accent-rgb), 0.12);
   border:1px solid rgba(var(--accent-rgb), 0.25);
 }
+.empty-banner.is-error .empty-icon {
+  background: rgba(255,165,2,0.14);
+  border-color: rgba(255,165,2,0.35);
+}
 .empty-banner .empty-title { font-size:15px; color:var(--text-primary); font-weight:600; margin-bottom:4px; }
 .empty-banner .empty-desc { font-size:12px; color:var(--text-secondary); line-height:1.55; }
+.empty-banner .retry-btn {
+  margin-top:10px;
+  padding:6px 12px;
+  border-radius:8px;
+  border:1px solid rgba(255,165,2,0.45);
+  background: rgba(255,165,2,0.12);
+  color: #ffc56d;
+  cursor:pointer;
+  font-size:12px;
+}
+.empty-banner .retry-btn:hover { background: rgba(255,165,2,0.22); }
 .stat-card.is-empty .value {
   background:none; -webkit-text-fill-color:var(--text-secondary);
   color:var(--text-secondary); opacity:0.75;
@@ -207,8 +226,21 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
       <div class="sys-item"><span class="lbl">堆内存</span><span class="val">{{ formatBytes(sysStatus.memoryUsage?.heapUsed) }} / {{ formatBytes(sysStatus.memoryUsage?.heapTotal) }}</span></div>
     </div>
 
+    <!-- 读取失败（息屏唤醒等）：保留上次数据，不伪装成「暂无数据」 -->
+    <div class="empty-banner is-error" v-if="loadError">
+      <div class="empty-icon">⚠️</div>
+      <div>
+        <div class="empty-title">运行数据暂时读不到</div>
+        <div class="empty-desc">
+          多半是休眠/息屏后数据库短暂不可用，本地统计并未清空。可点重试；若仍失败，稍等几秒会自动再刷。
+          <span v-if="loadErrorDetail">（{{ loadErrorDetail }}）</span>
+        </div>
+        <button class="retry-btn" type="button" @click="fetchAll('retry')">立即重试</button>
+      </div>
+    </div>
+
     <!-- 空数据提示 -->
-    <div class="empty-banner" v-if="isEmptyDashboard">
+    <div class="empty-banner" v-else-if="isEmptyDashboard">
       <div class="empty-icon">📭</div>
       <div>
         <div class="empty-title">暂时还没有运行数据</div>
@@ -382,14 +414,47 @@ const app = Vue.createApp({
       models: [],
       statCards: [],
       isEmptyDashboard: false,
+      loadError: false,
+      loadErrorDetail: '',
       _charts: {},
       _pollTimer: null,
       _clockTimer: null,
+      _visibleRetryTimers: [],
+      _hadSuccessfulFetch: false,
     };
   },
   methods: {
     isZeroish(n) {
       return n == null || Number(n) === 0 || Number.isNaN(Number(n));
+    },
+    async fetchJson(url) {
+      const r = await fetch(url, { cache: 'no-store' });
+      let body = null;
+      try { body = await r.json(); } catch (_) { body = null; }
+      if (!r.ok || (body && body.ok === false && body.error)) {
+        const msg = (body && body.error) ? String(body.error) : (`HTTP ${r.status}`);
+        const err = new Error(msg);
+        err.status = r.status;
+        throw err;
+      }
+      return body;
+    },
+    clearVisibleRetries() {
+      (this._visibleRetryTimers || []).forEach((id) => clearTimeout(id));
+      this._visibleRetryTimers = [];
+    },
+    scheduleVisibleRetries() {
+      this.clearVisibleRetries();
+      [400, 1200, 2800].forEach((delay) => {
+        const id = setTimeout(() => {
+          if (document.visibilityState === 'hidden') return;
+          if (this.loadError || !this._hadSuccessfulFetch) {
+            this.refreshing = false;
+            this.fetchAll('visible-retry');
+          }
+        }, delay);
+        this._visibleRetryTimers.push(id);
+      });
     },
     emptyChartOption(hint) {
       return {
@@ -558,23 +623,37 @@ const app = Vue.createApp({
     async fetchAll(reason) {
       if (this.refreshing) return;
       this.refreshing = true;
+      const refreshWatchdog = setTimeout(() => {
+        // 防止休眠唤醒后某次 fetch 挂起，卡住后续刷新
+        this.refreshing = false;
+      }, 12000);
       try {
-        const [ov, status, jobs, audit, tools, auditTrend, tokenTrend, boots, delivery, modelsCat, auditStats] =
+        // 主机状态单独拉：即使 SQLite 读失败也应继续刷新
+        try {
+          this.sysStatus = await this.fetchJson(API + '/status');
+        } catch (statusErr) {
+          console.warn('Status fetch error:', reason || '', statusErr);
+        }
+
+        const [ov, jobs, audit, tools, auditTrend, tokenTrend, boots, delivery, modelsCat, auditStats] =
           await Promise.all([
-            fetch(API+'/overview').then(r=>r.json()),
-            fetch(API+'/status').then(r=>r.json()),
-            fetch(API+'/cron/jobs').then(r=>r.json()),
-            fetch(API+'/audit/events?limit=100').then(r=>r.json()),
-            fetch(API+'/audit/tools').then(r=>r.json()),
-            fetch(API+'/audit/trend').then(r=>r.json()),
-            fetch(API+'/tokens/trend').then(r=>r.json()),
-            fetch(API+'/gateway/boots').then(r=>r.json()),
-            fetch(API+'/delivery/queue').then(r=>r.json()),
-            fetch(API+'/models/catalog').then(r=>r.json()),
-            fetch(API+'/audit/stats').then(r=>r.json()),
+            this.fetchJson(API+'/overview'),
+            this.fetchJson(API+'/cron/jobs'),
+            this.fetchJson(API+'/audit/events?limit=100'),
+            this.fetchJson(API+'/audit/tools'),
+            this.fetchJson(API+'/audit/trend'),
+            this.fetchJson(API+'/tokens/trend'),
+            this.fetchJson(API+'/gateway/boots'),
+            this.fetchJson(API+'/delivery/queue'),
+            this.fetchJson(API+'/models/catalog'),
+            this.fetchJson(API+'/audit/stats'),
           ]);
 
-        this.sysStatus = status;
+        this.loadError = false;
+        this.loadErrorDetail = '';
+        this._hadSuccessfulFetch = true;
+        this.clearVisibleRetries();
+
         this.overview = ov;
         this.cronJobs = Array.isArray(jobs) ? jobs : [];
         this.recentAudit = (Array.isArray(audit) ? audit : []).slice(0, 50);
@@ -617,7 +696,12 @@ const app = Vue.createApp({
         this.updateTime();
       } catch(e) {
         console.error('Fetch error:', reason || '', e);
+        this.loadError = true;
+        this.loadErrorDetail = (e && e.message) ? String(e.message) : '读取失败';
+        // 关键：不要用全 0 覆盖已有统计，避免息屏唤醒后误显示「暂无数据」
+        this.isEmptyDashboard = false;
       } finally {
+        clearTimeout(refreshWatchdog);
         this.refreshing = false;
       }
     },
@@ -794,7 +878,10 @@ const app = Vue.createApp({
       }
     },
     onVisibleRefresh() {
+      // 息屏唤醒后可能卡在上一次 fetch；先放开锁再刷
+      this.refreshing = false;
       this.fetchAll('visible');
+      this.scheduleVisibleRetries();
       this.startPolling();
       Object.keys(this._charts).forEach((id) => {
         try { this._charts[id].resize(); } catch (_) {}
@@ -808,7 +895,10 @@ const app = Vue.createApp({
     this.startPolling();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.onVisibleRefresh();
-      else this.stopPolling();
+      else {
+        this.stopPolling();
+        this.clearVisibleRetries();
+      }
     });
     window.addEventListener('focus', () => this.onVisibleRefresh());
     window.addEventListener('message', (evt) => {
@@ -826,6 +916,7 @@ const app = Vue.createApp({
   },
   beforeUnmount() {
     this.stopPolling();
+    this.clearVisibleRetries();
     if (this._clockTimer) clearInterval(this._clockTimer);
     Object.keys(this._charts).forEach((id) => {
       try { this._charts[id].dispose(); } catch (_) {}
