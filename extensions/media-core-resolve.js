@@ -9,9 +9,12 @@ function resolveMediaCoreEntry() {
     || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || "", ".openclaw");
 
   const candidates = [
+    // 正式位置：state/media-runtime（勿放 extensions，否则会被当成插件）
+    path.join(stateDir, "media-runtime", "media-core", "index.js"),
     path.join(__dirname, "media-core", "index.js"),
     path.join(__dirname, "..", "media-core", "index.js"),
     path.join(__dirname, "..", "..", "media-cli", "media-core", "index.js"),
+    // 兼容旧安装残留
     path.join(stateDir, "extensions", "media-core", "index.js"),
     path.join(stateDir, "media-cli", "media-core", "index.js"),
   ].filter(Boolean);

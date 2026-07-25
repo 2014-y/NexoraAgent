@@ -3,29 +3,29 @@
 
 /* 主题 CSS 变量定义 */
 :root {
-  /* 默认暗黑流光主题 */
-  --bg-base: radial-gradient(circle at 50% 50%, #151226 0%, #0d0b18 100%);
-  --bg-panel: rgba(22, 19, 38, 0.65);
-  --bg-card: rgba(30, 27, 51, 0.45);
-  --bg-input: rgba(14, 11, 23, 0.7);
-  --text-primary: #f1ecff;
-  --text-secondary: #a39cb5;
-  --accent-color: #8c52ff;
-  --accent-rgb: 140, 82, 255;
-  --accent-glow: 0 0 25px rgba(140, 82, 255, 0.5);
-  --accent-glow-reduced: 0 0 10px rgba(140, 82, 255, 0.25);
-  --border-color: rgba(140, 82, 255, 0.15);
-  --border-focus: rgba(140, 82, 255, 0.5);
-  --scrollbar-thumb: rgba(140, 82, 255, 0.25);
-  --btn-start-bg: linear-gradient(135deg, #9b6bff 0%, #8c52ff 55%, #6d4aff 100%);
-  --btn-start-bg-hover: linear-gradient(135deg, #a878ff 0%, #9560ff 55%, #7a58ff 100%);
-  --btn-start-text: #ffffff;
-  --accent-text: #ffffff;
+  /* 默认幽冥深渊紫主题 */
+  --bg-base: radial-gradient(circle at 50% 50%, #110924 0%, #06020f 100%);
+  --bg-panel: rgba(20, 10, 40, 0.65);
+  --bg-card: rgba(32, 16, 64, 0.45);
+  --bg-input: rgba(12, 6, 24, 0.7);
+  --text-primary: #f5f3ff;
+  --text-secondary: #c7d2fe;
+  --accent-color: #c084fc;
+  --accent-rgb: 192, 132, 252;
+  --accent-glow: 0 0 25px rgba(192, 132, 252, 0.5);
+  --accent-glow-reduced: 0 0 10px rgba(192, 132, 252, 0.25);
+  --border-color: rgba(192, 132, 252, 0.15);
+  --border-focus: rgba(192, 132, 252, 0.5);
+  --scrollbar-thumb: rgba(192, 132, 252, 0.25);
+  --btn-start-bg: linear-gradient(135deg, #d8b4fe 0%, #c084fc 55%, #a855f7 100%);
+  --btn-start-bg-hover: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 55%, #c084fc 100%);
+  --btn-start-text: #0d0d0f;
+  --accent-text: #0d0d0f;
   --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', Consolas, 'Microsoft YaHei', monospace;
 }
 
-/* 默认暗黑流光（与 :root 一致；早期脚本会写 theme-dark） */
+/* 暗黑流光（可选预设；系统默认已改为 theme-abyss） */
 .theme-dark {
   --bg-base: radial-gradient(circle at 50% 50%, #151226 0%, #0d0b18 100%);
   --bg-panel: rgba(22, 19, 38, 0.65);
@@ -355,7 +355,7 @@ input, select, option, textarea {
 
 html, body {
   /* 禁止透明：Windows 最小化/还原时透明 body 会先闪系统白底 */
-  background: #0d0b18 !important;
+  background: #06020f !important;
 }
 body.theme-dark {
   background: #0d0b18 !important;

@@ -1545,9 +1545,9 @@ async function init() {
     const btnCheckUpdate = document.getElementById('btn-check-update');
 
     if (settingAutoGateway) {
-        // 以 userData 文件为准（主进程启动也能读到）；并与 localStorage 双向同步
+        // 以 userData 文件为准（主进程启动也能读到）；并与 localStorage 双向同步；默认关闭
         (async () => {
-            let on = localStorage.getItem('setting_auto_launch_gateway') !== 'false';
+            let on = localStorage.getItem('setting_auto_launch_gateway') === 'true';
             try {
                 if (window.api && typeof window.api.getAutoLaunchGateway === 'function') {
                     on = await window.api.getAutoLaunchGateway();
@@ -2301,9 +2301,9 @@ async function init() {
         });
     }
 
-    // 自动启用 Nexora Agent（尊重设置；未写入时视为开启）
+    // 自动启用 Nexora Agent（尊重设置；未写入时默认关闭，仅左上角手动启用）
     (async () => {
-        let autoOn = localStorage.getItem('setting_auto_launch_gateway') !== 'false';
+        let autoOn = localStorage.getItem('setting_auto_launch_gateway') === 'true';
         try {
             if (window.api && typeof window.api.getAutoLaunchGateway === 'function') {
                 autoOn = await window.api.getAutoLaunchGateway();
@@ -2863,6 +2863,30 @@ function formatLogForUser(text) {
     // 诊断日志：入口即丢弃，后面任何「error/failed → 系统警报」都碰不到
     if (isHiddenGatewayDiagnosticLog(cleanLine)) return null;
 
+    // —— 启动成败（必须优先于 doctor/failed 噪音过滤，否则活动流会一直空）——
+    if (
+        cleanLine.includes('Gateway failed to start')
+        || cleanLine.includes('Invalid config')
+        || (cleanLine.includes('plugin manifest not found') && cleanLine.includes('media-core'))
+    ) {
+        if (cleanLine.includes('media-core') || cleanLine.includes('plugin manifest not found')) {
+            return `[⚠️ 系统警报] 网关启动失败：媒体运行库被误当成插件。请重启 Nexora Agent 以自动修复，或更新到最新安装包。`;
+        }
+        return `[⚠️ 系统警报] 网关启动失败：配置校验未通过。请查看「系统运行日志」了解详情。`;
+    }
+    if (cleanLine.includes('已拦截非授权启动')) {
+        return `[⚙️ 系统核心] 已跳过自动拉起（当前仅允许左上角手动启动，或在系统设置中打开「自动启用」）`;
+    }
+    if (cleanLine.includes('正在准备启动 Gateway') || cleanLine.includes('正在拉起内置 OpenClaw Gateway')) {
+        return `[⚙️ 系统核心] 正在启动本地 Nexora Agent 核心服务…`;
+    }
+    if (cleanLine.includes('渠道配置已保存') && cleanLine.includes('网关未运行')) {
+        return `[⚙️ 系统核心] 渠道配置已保存。网关未运行，请点击左上角手动启动后再使用。`;
+    }
+    if (cleanLine.includes('端口') && cleanLine.includes('仍被占用')) {
+        return `[⚠️ 系统警报] 网关端口仍被占用，请再次点击左上角启动；若反复失败请结束占用进程后重试。`;
+    }
+
     // 1. 过滤完全无需展示给小白的日志 (底层噪音调试日志)
     // 模型空闲超时 / Abort / rotate_profile 属于网关自愈过程，刷屏会导致活动流卡死
     if (
@@ -3090,8 +3114,8 @@ function formatLogForUser(text) {
     if (cleanLine.includes('核心进程意外退出') && cleanLine.includes('自动重启')) {
         return `[⚙️ 系统核心] ⚠️ 核心进程异常退出，正在自动重新拉起服务…`;
     }
-    if (cleanLine.includes('核心进程意外退出') && cleanLine.includes('暂停自动重启')) {
-        return `[⚙️ 系统核心] 🛑 短时间内多次异常退出，已暂停自动重启，请手动启动`;
+    if (cleanLine.includes('核心进程意外退出') && (cleanLine.includes('暂停自动重启') || cleanLine.includes('已禁止自动重启'))) {
+        return `[⚙️ 系统核心] 🛑 核心进程异常退出，已停止自动拉起，请点击左上角手动启动`;
     }
     if (cleanLine.includes('核心进程意外退出')) {
         return `[⚙️ 系统核心] ⚠️ 核心进程异常退出（正在处理）`;
@@ -3210,6 +3234,16 @@ function setupIpcListeners() {
         const filteredLines = text.split('\n').filter(line => {
             const cleanLine = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
             if (isMediaApiNoiseLog(cleanLine)) return false;
+            // 启动成败行必须保留，即使含表格竖线 / doctor 字样
+            const keepStartOutcome =
+                cleanLine.includes('Gateway failed to start') ||
+                cleanLine.includes('Invalid config') ||
+                (cleanLine.includes('plugin manifest not found') && cleanLine.includes('media-core')) ||
+                cleanLine.includes('已拦截非授权启动') ||
+                cleanLine.includes('正在准备启动 Gateway') ||
+                cleanLine.includes('正在拉起内置 OpenClaw Gateway') ||
+                (cleanLine.includes('端口') && cleanLine.includes('仍被占用'));
+            if (keepStartOutcome) return true;
             return !(
                 cleanLine.includes('|') || 
                 cleanLine.includes('plugin not installed') || 
@@ -3478,7 +3512,10 @@ function setupIpcListeners() {
     }
 
     if (window.api && typeof window.api.onGatewayStartBlocked === 'function') {
-        window.api.onGatewayStartBlocked(() => {
+        window.api.onGatewayStartBlocked((data) => {
+            const src = data && data.source ? String(data.source) : '';
+            // 端口回收等场景不再发此事件；仅真实「非授权自动启用」才提示
+            if (src === 'port-reclaim') return;
             showToast(t('console.gateway.start_blocked'));
         });
     }
@@ -8172,10 +8209,10 @@ function setupThemeSwitching() {
     }
 
     // 默认主题读取（白昼主题已下线）
-    let savedTheme = localStorage.getItem('user-theme') || 'theme-dark';
+    let savedTheme = localStorage.getItem('user-theme') || 'theme-abyss';
     if (savedTheme === 'theme-light') {
-        savedTheme = 'theme-dark';
-        localStorage.setItem('user-theme', 'theme-dark');
+        savedTheme = 'theme-abyss';
+        localStorage.setItem('user-theme', 'theme-abyss');
     }
     if (savedTheme === 'theme-custom') {
         applyCustomTheme();
@@ -12252,7 +12289,7 @@ let __openclawPanelLastUrl = '';
 let __openclawPanelLoading = false;
 
 /** 从 --bg-base 渐变里取出最深实色（webview 透不出父级渐变） */
-function extractSolidBgFromCssValue(raw, fallback = '#0d0b18') {
+function extractSolidBgFromCssValue(raw, fallback = '#06020f') {
     const s = String(raw || '').trim();
     if (!s) return fallback;
     const hexes = s.match(/#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g);
@@ -12317,7 +12354,7 @@ function buildOpenclawPanelCss(paint) {
 
 /** @deprecated 兼容旧引用：静态兜底，实际注入走 buildOpenclawPanelCss */
 const OPENCLAW_TRANSPARENT_PANEL_CSS = buildOpenclawPanelCss({
-    bgBase: '#0d0b18',
+    bgBase: '#06020f',
     bgPanel: 'rgba(22, 19, 38, 0.96)',
     textPrimary: '#f8fafc',
     textSecondary: '#cbd5e1',
@@ -12339,7 +12376,7 @@ function getOpenclawHostThemePaint() {
     let bgBase = extractSolidBgFromCssValue(bgBaseVar, '');
     if (!bgBase) {
         bgBase = bodyStyle.backgroundColor || '';
-        if (!bgBase || bgBase === 'transparent' || bgBase === 'rgba(0, 0, 0, 0)') bgBase = '#0d0b18';
+        if (!bgBase || bgBase === 'transparent' || bgBase === 'rgba(0, 0, 0, 0)') bgBase = '#06020f';
     }
     const bgPanel = bgPanelRaw.includes('rgba')
         ? bgPanelRaw.replace(/rgba?\(([^)]+)\)/, (m, inner) => {
@@ -12424,7 +12461,7 @@ function syncOpenclawThemeToWebview() {
             '      (document.head || document.documentElement).appendChild(style);\n' +
             '    }\n' +
             '    if(style.textContent !== cssText) style.textContent = cssText;\n' +
-            '    var bg = window.__NEXORA_THEME_BG || "#0d0b18";\n' +
+            '    var bg = window.__NEXORA_THEME_BG || "#06020f";\n' +
             '    document.documentElement.style.setProperty("background-color", bg, "important");\n' +
             '    if(document.body){\n' +
             '      document.body.style.setProperty("background-color", bg, "important");\n' +
@@ -12442,7 +12479,7 @@ function collectDataCenterThemeVars() {
     const accent = pick('--accent-color') || '#38bdf8';
     const accentRgb = pick('--accent-rgb') || '56, 189, 248';
     return {
-        '--bg-base': pick('--bg-base') || 'radial-gradient(circle at 50% 50%, #151226 0%, #0d0b18 100%)',
+        '--bg-base': pick('--bg-base') || 'radial-gradient(circle at 50% 50%, #110924 0%, #06020f 100%)',
         '--bg-panel': pick('--bg-panel') || 'rgba(22, 19, 38, 0.65)',
         '--bg-card': pick('--bg-card') || 'rgba(30, 27, 51, 0.45)',
         '--border-color': pick('--border-color') || 'rgba(255, 255, 255, 0.12)',

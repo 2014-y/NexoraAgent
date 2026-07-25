@@ -1171,6 +1171,9 @@ function deployRuntimeArtifacts() {
     return { runtimeDir: dir, patchPath, patchAbs };
 }
 
+/** 同步到 state 的「库」目录，不是 OpenClaw 插件（无 openclaw.plugin.json） */
+const NON_PLUGIN_EXTENSION_DIRS = new Set(['media-core']);
+
 /** 清掉 OpenClaw 已不存在的 plugins.entries（消除启动 Config warnings） */
 function pruneStalePluginConfigEntries(config) {
     if (!config || !config.plugins || !config.plugins.entries) return { changed: false };
@@ -1184,13 +1187,15 @@ function pruneStalePluginConfigEntries(config) {
 
     const existsOnDisk = (id) => {
         if (!id || id.startsWith('.') || id.includes('..')) return false;
+        // media-core 等是运行时库，不是插件根目录
+        if (NON_PLUGIN_EXTENSION_DIRS.has(id)) return false;
         try {
             if (installs[id] && installs[id].installPath
                 && fs.existsSync(path.join(installs[id].installPath, 'package.json'))) return true;
         } catch (e) {}
         try {
             const ext = path.join(CONFIG_DIR, 'extensions', id);
-            if (fs.existsSync(ext)) return true;
+            if (fs.existsSync(ext) && fs.existsSync(path.join(ext, 'openclaw.plugin.json'))) return true;
         } catch (e) {}
         for (const p of loadPaths) {
             try {
@@ -2927,9 +2932,24 @@ function syncMediaCliBundle() {
     }
 }
 
+function removeStaleNonPluginExtensionDirs() {
+    for (const id of NON_PLUGIN_EXTENSION_DIRS) {
+        const stalePluginDir = path.join(CONFIG_DIR, 'extensions', id);
+        try {
+            if (fs.existsSync(stalePluginDir)) {
+                fs.rmSync(stalePluginDir, { recursive: true, force: true });
+                console.log(`[PluginSeed] Removed stale extensions/${id} (not a plugin)`);
+            }
+        } catch (e) {
+            console.warn(`[PluginSeed] Failed removing stale extensions/${id}:`, e.message);
+        }
+    }
+}
+
 function syncMediaCoreBundle() {
     try {
-        const destExtCore = path.join(CONFIG_DIR, 'extensions', 'media-core');
+        // 禁止落到 extensions/media-core：OpenClaw 会把它当插件根目录并要求 openclaw.plugin.json
+        const destExtCore = path.join(CONFIG_DIR, 'media-runtime', 'media-core');
         const destResolve = path.join(CONFIG_DIR, 'extensions', 'media-core-resolve.js');
         const srcCoreCandidates = [
             path.join(__dirname, 'extensions', 'media-core'),
@@ -2938,6 +2958,8 @@ function syncMediaCoreBundle() {
             resolveAppFsPath('media-cli', 'media-core'),
         ];
         const srcCore = srcCoreCandidates.find((p) => p && fs.existsSync(path.join(p, 'index.js')));
+        // 无论源是否存在，都先清掉 extensions 下的误种目录
+        removeStaleNonPluginExtensionDirs();
         if (!srcCore) {
             console.warn('[PluginSeed] media-core source not found in app bundle');
             return;
@@ -2971,10 +2993,57 @@ function syncMediaCoreBundle() {
             fs.mkdirSync(path.dirname(destResolve), { recursive: true });
             fs.copyFileSync(resolveSrc, destResolve);
         }
+        // 再次确保未回写到 extensions（防并发 seed）
+        removeStaleNonPluginExtensionDirs();
         console.log('[PluginSeed] Synced media-core to', destExtCore);
     } catch (e) {
         console.warn('[PluginSeed] syncMediaCoreBundle failed:', e.message);
+        try { removeStaleNonPluginExtensionDirs(); } catch (e2) {}
     }
+}
+
+/** 把 media-core 等非插件目录从 plugins 配置里剔除，防止 Gateway Invalid config */
+function sanitizeNonPluginLibraryConfig(config) {
+    if (!config || !config.plugins) return { changed: false };
+    let changed = false;
+    const isNonPluginPath = (p) => {
+        if (typeof p !== 'string') return false;
+        const n = p.replace(/\\/g, '/').toLowerCase();
+        return [...NON_PLUGIN_EXTENSION_DIRS].some((id) =>
+            n.endsWith('/extensions/' + id) || n.endsWith('/' + id) || n.includes('/extensions/' + id + '/')
+        );
+    };
+    if (config.plugins.entries) {
+        for (const id of Object.keys(config.plugins.entries)) {
+            if (NON_PLUGIN_EXTENSION_DIRS.has(id)) {
+                delete config.plugins.entries[id];
+                changed = true;
+            }
+        }
+    }
+    if (Array.isArray(config.plugins.allow)) {
+        const next = config.plugins.allow.filter((id) => !NON_PLUGIN_EXTENSION_DIRS.has(id));
+        if (next.length !== config.plugins.allow.length) {
+            config.plugins.allow = next;
+            changed = true;
+        }
+    }
+    if (config.plugins.installs) {
+        for (const id of Object.keys(config.plugins.installs)) {
+            if (NON_PLUGIN_EXTENSION_DIRS.has(id)) {
+                delete config.plugins.installs[id];
+                changed = true;
+            }
+        }
+    }
+    if (config.plugins.load && Array.isArray(config.plugins.load.paths)) {
+        const next = config.plugins.load.paths.filter((p) => !isNonPluginPath(p));
+        if (next.length !== config.plugins.load.paths.length) {
+            config.plugins.load.paths = next;
+            changed = true;
+        }
+    }
+    return { changed };
 }
 
 function forceSyncWorkspaceSkill(skillName) {
@@ -3049,6 +3118,8 @@ function seedBundledPlugins(options = {}) {
         if (options.fast === true) {
             try {
                 if (fs.existsSync(seedStampPath) && fs.readFileSync(seedStampPath, 'utf8').trim() === appVersion) {
+                    // 快路径也必须清掉误种的 media-core，并确保 media-runtime 可用
+                    try { syncMediaCoreBundle(); } catch (e) {}
                     return;
                 }
             } catch (e) {}
@@ -3058,6 +3129,7 @@ function seedBundledPlugins(options = {}) {
         if (fs.existsSync(legacyRoot)) {
             try {
                 for (const name of fs.readdirSync(legacyRoot)) {
+                    if (NON_PLUGIN_EXTENSION_DIRS.has(name)) continue;
                     const srcDir = path.join(legacyRoot, name);
                     const destDir = path.join(destRoot, name);
                     if (!fs.statSync(srcDir).isDirectory()) continue;
@@ -3080,6 +3152,8 @@ function seedBundledPlugins(options = {}) {
                 try {
                     if (!fs.statSync(srcDir).isDirectory()) continue;
                     if (name === 'matrix') continue;
+                    // media-core 等是运行时库，绝不能种到 extensions（OpenClaw 会当插件扫）
+                    if (NON_PLUGIN_EXTENSION_DIRS.has(name)) continue;
                     const looksLikePlugin = fs.existsSync(path.join(srcDir, 'openclaw.plugin.json')) ||
                         fs.existsSync(path.join(srcDir, 'index.js')) ||
                         fs.existsSync(path.join(srcDir, 'package.json'));
@@ -3100,6 +3174,7 @@ function seedBundledPlugins(options = {}) {
         // 终极自愈保底：遍历所有已部署的 extensions 插件目录，补齐缺失的配置文件防止 OpenClaw 报错
         if (fs.existsSync(destRoot)) {
             for (const name of fs.readdirSync(destRoot)) {
+                if (NON_PLUGIN_EXTENSION_DIRS.has(name)) continue;
                 const pluginDir = path.join(destRoot, name);
                 try {
                     if (fs.statSync(pluginDir).isDirectory()) {
@@ -3146,6 +3221,11 @@ function prepareChannelPluginsBeforeGateway() {
     try {
         const pruned = pruneStalePluginConfigEntries(config);
         if (pruned.changed) needsSave = true;
+    } catch (e) {}
+
+    try {
+        const cleaned = sanitizeNonPluginLibraryConfig(config);
+        if (cleaned.changed) needsSave = true;
     } catch (e) {}
 
     // 启动前：多机/多用户路径自愈（云电脑、换账号、从旧机拷配置都能用）
@@ -3577,7 +3657,7 @@ function createWindow(existingSplash) {
         ? existingSplash
         : createSplashWindow();
     // 主窗口保持隐藏，待渲染完成后一次性弹出
-    const WINDOW_BG = '#0d0b18';
+    const WINDOW_BG = '#06020f';
     mainWindow = new BrowserWindow({
         width: 1120,
         height: 760,
@@ -3761,7 +3841,7 @@ function createTray() {
         { 
             label: '显示主界面', 
             click: () => {
-                try { mainWindow.setBackgroundColor('#0d0b18'); } catch (e) {}
+                try { mainWindow.setBackgroundColor('#06020f'); } catch (e) {}
                 if (mainWindow.isMinimized()) mainWindow.restore();
                 mainWindow.show();
                 mainWindow.focus();
@@ -3794,7 +3874,7 @@ function createTray() {
     tray.setToolTip('Nexora Agent');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
-        try { mainWindow.setBackgroundColor('#0d0b18'); } catch (e) {}
+        try { mainWindow.setBackgroundColor('#06020f'); } catch (e) {}
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.show();
         mainWindow.focus();
@@ -3978,7 +4058,7 @@ async function stopGatewayProcess(opts = {}) {
         if (mainWindow && !preserveClash) {
             mainWindow.webContents.send('gateway-status', 'stopped');
             mainWindow.webContents.send('gateway-log', '\n[System] Nexora Agent服务已停止。\n');
-            mainWindow.webContents.send('gateway-clear-logs');
+            // 不在此处 clear-logs：避免刚写入的停止提示立刻被清空；清屏由下次「启动」或用户手动清空负责
         }
     } else if (process.platform === 'win32') {
         // 无本进程子句柄时，仍尝试清端口孤儿，避免「启用」叠在旧程序上
@@ -4111,6 +4191,10 @@ async function startGatewayProcess(opts = {}) {
             notifyGatewayStartBlocked(source);
             return;
         }
+        // 设置已关时，静默拒绝 autostart（勿弹「被拦截」以免误导手动启动场景）
+        if (source === 'autostart' && !isAutoLaunchGatewayEnabled()) {
+            return;
+        }
 
         // 取消尚未触发的崩溃自动重启，避免与手动/回收启动叠车
         clearGatewayCrashRestartSchedule();
@@ -4119,7 +4203,6 @@ async function startGatewayProcess(opts = {}) {
         const preferredGatewayPort = resolveConfiguredGatewayPort();
         // 先把 UI 打到 starting，避免清理端口时界面长时间假“空闲/运行中”
         if (mainWindow) {
-            mainWindow.webContents.send('gateway-clear-logs');
             mainWindow.webContents.send('gateway-status', 'starting');
             mainWindow.webContents.send('gateway-log', `[System] 正在准备启动 Gateway（端口 ${preferredGatewayPort}，来源: ${source}）...\n`);
         }
@@ -4242,6 +4325,12 @@ async function startGatewayProcess(opts = {}) {
 
             // 部署内置自定义插件到用户状态目录
             seedBundledPlugins({ fast: true });
+            // fork 前最后一次：确保 media-core 不在 extensions，并同步到 media-runtime
+            try {
+                syncMediaCoreBundle();
+            } catch (e) {
+                console.warn('[PluginSeed] pre-fork media-core sync:', e && e.message);
+            }
 
             // 启动Nexora Agent前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
             try {
@@ -4401,8 +4490,9 @@ async function startGatewayProcess(opts = {}) {
 
             console.log(`[TokenGuard] Fork gateway home=${lockedAuth.homePath} state=${lockedAuth.stateDir} token_len=${String(lockedAuth.token).length}`);
 
-            // 启动子进程运行Nexora Agent
-            gatewayProcess = fork(openclawEntry, ['gateway', 'run', '--force', '--allow-unconfigured'], forkOptions);
+            // 启动子进程运行Nexora Agent（闭包绑定本代 child，避免旧 exit 误清新进程）
+            const child = fork(openclawEntry, ['gateway', 'run', '--force', '--allow-unconfigured'], forkOptions);
+            gatewayProcess = child;
             global.__gatewayReclaimAttempts = 0;
 
             mainWindow.webContents.send('gateway-status', 'running');
@@ -4427,7 +4517,7 @@ async function startGatewayProcess(opts = {}) {
                 text = filterGatewayLogText(text);
                 if (!text) return;
 
-                tryAutoAnswerInstallPluginPrompt(gatewayProcess, text, 'Gateway');
+                tryAutoAnswerInstallPluginPrompt(child, text, 'Gateway');
                 
                 // 实时保存流日志用于诊断
                 try {
@@ -4516,42 +4606,45 @@ async function startGatewayProcess(opts = {}) {
             };
 
             // 同时监听 stdout 与 stderr，防范 debug/wechaty 日志输出在 stderr 中导致二维码漏接
-            gatewayProcess.stdout.on('data', handleLogData);
-            gatewayProcess.stderr.on('data', handleLogData);
+            child.stdout.on('data', handleLogData);
+            child.stderr.on('data', handleLogData);
 
-            // 监听退出
-            gatewayProcess.on('exit', async (code) => {
+            // 监听退出（必须绑定本代 child，忽略停启叠车时的旧进程 exit）
+            child.on('exit', async (code) => {
                 console.log(`Gateway exited with code ${code}`);
-                const wasIntentionallyStopped = gatewayProcess && gatewayProcess.isIntentionallyStopped;
+                const wasIntentionallyStopped = !!child.isIntentionallyStopped;
                 const exitedPort = watchPort;
+                if (gatewayProcess !== child) {
+                    // 已被更新一代替换：不要清全局状态 / 不要推 stopped
+                    return;
+                }
                 gatewayProcess = null;
                 stopGatewayHttpReadyWatch();
                 gatewayHttpReadyNotified = false;
                 if (!wasIntentionallyStopped && await probeGatewayPort(exitedPort)) {
                     // 子进程没了但端口仍被占用：提示手动处理，禁止自动重拉启用
                     console.warn(`[Gateway] Child exited (${code}) but port ${exitedPort} still listening; no auto-restart`);
-                    if (mainWindow) {
+                    if (mainWindow && !gatewayStartInFlight) {
                         mainWindow.webContents.send(
                             'gateway-log',
-                            `\n[System] 网关子进程已退出但端口 ${exitedPort} 仍被占用。已禁止自动启用，请点击左上角手动启动（必要时先结束占用该端口的进程）。\n`
+                            `\n[System] 网关未能正常退出：端口 ${exitedPort} 仍被占用。请点击左上角再次启动；若反复失败，请结束占用该端口的进程后重试。\n`
                         );
                         mainWindow.webContents.send('gateway-status', 'stopped');
                     }
-                    notifyGatewayStartBlocked('port-reclaim', 'port-reclaim');
+                    // 不要发 gateway-start-blocked：那是「设置拦截自动启用」语义，会误导成手动启动被拦
                     global.__gatewayReclaimAttempts = 0;
                     return;
                 }
                 global.__gatewayReclaimAttempts = 0;
                 if (wasIntentionallyStopped || isQuitting) {
-                    if (mainWindow) {
+                    if (mainWindow && !gatewayStartInFlight) {
                         mainWindow.webContents.send('gateway-status', 'stopped');
                     }
                     return;
                 }
                 console.error(`[System] Nexora Agent核心进程意外退出，退出码: ${code}`);
-                // 端口已空闲：自动拉起（覆盖微信发图等硬崩场景，避免界面干等「已停止」）
                 if (!scheduleGatewayCrashRestart(code)) {
-                    if (mainWindow) {
+                    if (mainWindow && !gatewayStartInFlight) {
                         mainWindow.webContents.send('gateway-status', 'stopped');
                     }
                 }
@@ -5069,6 +5162,14 @@ function ensureOpenClawConfigInitialized() {
         } catch (e) {}
 
         try {
+            const cleaned = sanitizeNonPluginLibraryConfig(config);
+            if (cleaned.changed) {
+                needsSave = true;
+                console.log('[PluginSeed] Removed non-plugin libraries (e.g. media-core) from plugins config');
+            }
+        } catch (e) {}
+
+        try {
             if (normalizeWebToolsConfig(config)) {
                 needsSave = true;
                 console.log('[WebSearch] Normalized tools.web.search/fetch config');
@@ -5096,7 +5197,10 @@ function ensureOpenClawConfigInitialized() {
                 for (const name of fs.readdirSync(extensionsRoot)) {
                     const pluginDir = path.join(extensionsRoot, name);
                     if (!fs.statSync(pluginDir).isDirectory()) continue;
+                    if (NON_PLUGIN_EXTENSION_DIRS.has(name)) continue; // media-core 等库目录
                     if (BUNDLED_CUSTOM_PLUGINS.includes(name) || BUNDLED_EXTENSION_PLUGINS.includes(name)) continue; // 已在上面处理
+                    // 无插件清单的目录不要登记，否则 Gateway 会报 manifest not found
+                    if (!fs.existsSync(path.join(pluginDir, 'openclaw.plugin.json'))) continue;
                     if (!config.plugins.entries[name]) {
                         config.plugins.entries[name] = { enabled: false };
                         needsSave = true;
@@ -5177,6 +5281,19 @@ function ensureOpenClawConfigInitialized() {
                 needsSave = true;
                 return false;
             }
+            // media-core 等是库不是插件
+            const low = p.replace(/\\/g, '/').toLowerCase();
+            if ([...NON_PLUGIN_EXTENSION_DIRS].some((id) => low.endsWith('/' + id) || low.includes('/extensions/' + id))) {
+                needsSave = true;
+                return false;
+            }
+            // 目录存在但没有插件清单 → 不能进 load.paths
+            try {
+                if (fs.statSync(p).isDirectory() && !fs.existsSync(path.join(p, 'openclaw.plugin.json'))) {
+                    needsSave = true;
+                    return false;
+                }
+            } catch (e) {}
             return true;
         });
 
@@ -7421,16 +7538,16 @@ function autoLaunchGatewaySettingsPath() {
     }
 }
 
-/** 未写入配置文件时默认开启（与 UI 默认一致） */
+/** 未写入配置文件时默认关闭（仅左上角手动启用；用户可在系统设置中打开） */
 function isAutoLaunchGatewayEnabled() {
     try {
         const p = autoLaunchGatewaySettingsPath();
-        if (!fs.existsSync(p)) return true;
+        if (!fs.existsSync(p)) return false;
         const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
         const data = JSON.parse(raw);
-        return !(data && data.enabled === false);
+        return !!(data && data.enabled === true);
     } catch (e) {
-        return true;
+        return false;
     }
 }
 

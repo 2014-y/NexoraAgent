@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Nexora Agent",
   "keywords": [
     "ai",
@@ -201,6 +201,9 @@
       "!extensions/**/*",
       "extensions/image-generator/**/*",
       "extensions/video-generator/**/*",
+      "extensions/media-core-resolve.js",
+      "extensions/media-http.js",
+      "extensions/media-core/**/*",
       "!.node-sandbox/**/*",
       "!build-resources/_acceleration-core-download/**/*",
       "!dist/**/*"
