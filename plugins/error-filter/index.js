@@ -20,7 +20,6 @@ const BLOCK_SUBSTRINGS = [
   'tool failed',
   'TOOL_FAILED',
   'openclaw-screenshot-latest',
-  'Message:',
   'Model Fallback',
   'LLM request failed',
   'Connection failed, please check your network or proxy settings',
@@ -37,11 +36,6 @@ const recentTextOutboundBySession = new Map();
 
 /** 系统诊断硬特征：仅短消息或警告气泡拦截，避免误伤正常长回复 */
 const DIAGNOSTIC_HARD_SUBSTRINGS = [
-  'All models are temporarily rate-limited',
-  'temporarily rate-limited',
-  'The AI service is temporarily rate-limited',
-  'The AI service is temporarily overloaded',
-  'API rate limit reached',
   'Auto-compaction could not recover this turn',
   'auto-compaction could not recover this turn',
   'Auto-compaction failed',
@@ -58,15 +52,24 @@ const DIAGNOSTIC_HARD_SUBSTRINGS = [
   'Context is too large and auto-compaction',
   'Message ordering conflict',
   'roles must alternate',
-  'Please try again in a few minutes.',
-  'Rate-limited — ready in',
-  '暂时限流',
-  '所有模型暂时',
   '上下文过长',
   '上下文溢出',
   '自动压缩失败',
   '请使用 /new',
   '请使用/new',
+];
+
+/** 限流/过载类文案：短横幅才拦；长对话里提到「Rate Limit」作建议时放行 */
+const RATE_LIMIT_BANNER_SUBSTRINGS = [
+  'All models are temporarily rate-limited',
+  'temporarily rate-limited',
+  'The AI service is temporarily rate-limited',
+  'The AI service is temporarily overloaded',
+  'API rate limit reached',
+  'Please try again in a few minutes.',
+  'Rate-limited — ready in',
+  '暂时限流',
+  '所有模型暂时',
 ];
 
 const BLOCK_REGEXES = [
@@ -78,9 +81,6 @@ const BLOCK_REGEXES = [
 ];
 
 const DIAGNOSTIC_HARD_REGEXES = [
-  /^\s*⚠️?\s*All models are temporarily rate-limited/i,
-  /^\s*⚠️?\s*Rate-limited/i,
-  /^\s*⚠️?\s*API rate limit/i,
   /Auto-compaction could not recover/i,
   /Context overflow:\s*prompt too large/i,
   /use \/compact,\s*or use \/new/i,
@@ -88,11 +88,17 @@ const DIAGNOSTIC_HARD_REGEXES = [
   /Message ordering conflict/i,
   /roles must alternate/i,
   /increase your compaction buffer/i,
-  /所有模型.*(限流|过载|繁忙)/i,
-  /暂时(限流|过载|不可用)/i,
   /(上下文|会话).*(过长|溢出|太大)/i,
   /自动压缩.*(失败|超时|无法)/i,
   /请使用\s*\/new/i,
+];
+
+const RATE_LIMIT_BANNER_REGEXES = [
+  /^\s*⚠️?\s*All models are temporarily rate-limited/i,
+  /^\s*⚠️?\s*Rate-limited/i,
+  /^\s*⚠️?\s*API rate limit/i,
+  /所有模型.*(限流|过载|繁忙)/i,
+  /暂时(限流|过载|不可用)/i,
 ];
 
 function extractText(event) {
@@ -153,18 +159,84 @@ function isLeakedToolJsonOnly(text) {
   return /"action_input"\s*:|"command"\s*:\s*"screen-capture"/.test(raw) && stripped.length < 8;
 }
 
+function looksLikeConversationalReply(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  // 角色口吻 / 明确建议结构（微信人格回复常见）
+  if (/(主子|小的|奴才|臣妾|回主|建议|推荐|主用|备用|方案|双剑|我来帮|当然可以|以下是|已经帮你|完成了|代码如下|```|首先|步骤)/.test(raw)) {
+    return true;
+  }
+  // 长 Markdown 结构（标题/列表）几乎不可能是系统横幅
+  if (raw.length >= 220 && /(^|\n)\s*#{1,3}\s+|(^|\n)\s*[-*]\s+\*\*/m.test(raw)) return true;
+  const cn = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (cn >= 48 && raw.length >= 160) return true;
+  return false;
+}
+
+function isRateLimitBannerShaped(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (/^\s*⚠️/.test(raw)) return true;
+  // 短提示才像系统气泡；长文里夹一句 Rate Limit 不算
+  if (raw.length <= 280) return true;
+  // 几乎全是英文诊断句、中文很少
+  const cn = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
+  return cn < 12;
+}
+
 function isSystemDiagnosticBannerOnly(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
+  if (looksLikeConversationalReply(raw)) return false;
   const stripped = raw.replace(/⚠️/g, '').replace(/\s+/g, ' ').trim();
-  // 长诊断行（compaction-diag 常 >700 字）也必须拦
+  // 注意：不要用裸「所有模型」「rate limit」——正常建议文案也会提到
   const looksDiag =
-    /rate[\s-]?limit|overloaded|auto-compaction|compaction[-_ ]?diag|compaction timed|compaction timeout|context[_\s-]?overflow|prompt too large|reserveTokensFloor|try again (in|later|shortly)|\/compact|\/new to start|Message ordering conflict|roles must alternate|\[agent\/embedded\]|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|runId\s*=|outcome\s*=\s*failed|所有模型|暂时限流|暂时过载|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
+    /temporarily rate-limited|API rate limit reached|Rate-limited — ready in|auto-compaction|compaction[-_ ]?diag|compaction timed|compaction timeout|context[_\s-]?overflow|prompt too large|reserveTokensFloor|try again (in|later|shortly)|\/compact|\/new to start|Message ordering conflict|roles must alternate|\[agent\/embedded\]|trigger\s*=\s*overflow|diagId\s*=\s*ovf-|runId\s*=|outcome\s*=\s*failed|所有模型.*(限流|过载|繁忙)|暂时限流|暂时过载|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
       stripped
     );
   if (!looksDiag) return false;
-  if (/(我来|好的|当然|以下是|已经帮你|完成了|代码如下|```|首先|步骤)/.test(stripped)) return false;
+  // 长诊断行（compaction-diag）可超过 700 字；普通长回复已被 conversational 放行
   return true;
+}
+
+function hitAny(list, raw) {
+  for (const s of list) {
+    if (raw.includes(s)) return true;
+  }
+  return false;
+}
+
+function hitAnyRe(list, raw) {
+  for (const re of list) {
+    try { if (re.test(raw)) return true; } catch (_) {}
+  }
+  return false;
+}
+
+function shouldBlockOutbound(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (/^LLM request failed\.?$/i.test(raw)) return true;
+  if (/Connection failed.*network or proxy/i.test(raw)) return true;
+  if (isModelFallbackNoticeOnly(raw)) return true;
+  if (isLeakedToolJsonOnly(raw)) return true;
+  if (isSystemDiagnosticBannerOnly(raw)) return true;
+  if (/^\s*[!\[]?\s*(warning|error|failed)\b/i.test(raw)) return true;
+
+  // 结构性诊断：不论长短一律拦截（compaction-diag 等）
+  if (hitAny(DIAGNOSTIC_HARD_SUBSTRINGS, raw) || hitAnyRe(DIAGNOSTIC_HARD_REGEXES, raw)) {
+    return true;
+  }
+
+  // 限流/过载横幅：短气泡才拦；长对话建议里提到 Rate Limit / 限流 放行
+  if (hitAny(RATE_LIMIT_BANNER_SUBSTRINGS, raw) || hitAnyRe(RATE_LIMIT_BANNER_REGEXES, raw)) {
+    if (looksLikeConversationalReply(raw) && raw.length >= 160) return false;
+    if (looksLikeConversationalReply(raw) && !isRateLimitBannerShaped(raw)) return false;
+    return true;
+  }
+
+  if (hitAny(BLOCK_SUBSTRINGS, raw) || hitAnyRe(BLOCK_REGEXES, raw)) return true;
+  return false;
 }
 
 /** 仅真实 runId/deliveryId；禁止退化成 peer（否则微信同联系人后续回复会被误杀） */
@@ -285,33 +357,6 @@ function rememberRunOutbound(event, text) {
       prefix: fp.slice(0, 120),
     });
   }
-}
-
-function shouldBlockOutbound(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return false;
-  if (/^LLM request failed\.?$/i.test(raw)) return true;
-  if (/Connection failed.*network or proxy/i.test(raw)) return true;
-  if (isModelFallbackNoticeOnly(raw)) return true;
-  if (isLeakedToolJsonOnly(raw)) return true;
-  if (isSystemDiagnosticBannerOnly(raw)) return true;
-  if (/^\s*[!\[]?\s*(warning|error|failed)\b/i.test(raw)) return true;
-
-  // 硬特征：不论长短一律拦截（避免超长 compaction-diag 漏网）
-  for (const s of DIAGNOSTIC_HARD_SUBSTRINGS) {
-    if (raw.includes(s)) return true;
-  }
-  for (const re of DIAGNOSTIC_HARD_REGEXES) {
-    try { if (re.test(raw)) return true; } catch (_) {}
-  }
-
-  for (const s of BLOCK_SUBSTRINGS) {
-    if (raw.includes(s)) return true;
-  }
-  for (const re of BLOCK_REGEXES) {
-    try { if (re.test(raw)) return true; } catch (_) {}
-  }
-  return false;
 }
 
 function stateDir() {
@@ -1125,6 +1170,9 @@ export const __testables = {
   reserveSessionDrawSlot,
   releaseSessionDrawReservation,
   extractDrawPicturePrompt,
+  shouldBlockOutbound,
+  looksLikeConversationalReply,
+  isSystemDiagnosticBannerOnly,
   resetMediaDedupeState() {
     recentMediaOutboundByRun.clear();
     recentPromptMediaDelivery.clear();

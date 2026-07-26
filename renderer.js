@@ -1213,7 +1213,7 @@ const pluginMetadata = {
     'long-term-memory': { name: '📚 长期记忆', desc: '开箱即用：自动摘要、记忆旋转与压缩护栏，将关键信息持久写入 MEMORY.md，对话压缩后仍可召回。', tier: 'zero' },
     'feishu': { name: '🦆 飞书渠道', desc: '接入飞书/Lark 机器人：支持扫码创建应用或手动填写 App ID/Secret，处理私聊与群聊消息', tier: 'credentials' },
     'qqbot': { name: '🐧 QQ机器人', desc: '将Nexora Agent接入 QQ 开放平台机器人（QQ Bot）消息通道，实现 QQ 群聊及私聊交互。', tier: 'credentials' },
-    'voice-call': { name: '🎤 语音', desc: '本地离线语音：渠道 AI 回复朗读、唤醒倾听、语音对话；全部可在「语音管理」细调，默认关闭以节省性能', tier: 'zero' },
+    'voice-call': { name: '🎤 语音', desc: '本地离线语音：渠道 AI 回复朗读、唤醒倾听、语音对话；全部可在「语音服务」细调，默认关闭以节省性能', tier: 'zero' },
     'telegram': { name: '✈️ Telegram', desc: '通过 Telegram 机器人消息通道直接与您的 AI Nexora Agent对话', tier: 'credentials' },
     'slack': { name: '🎨 Slack 渠道', desc: '将 AI 本地Nexora Agent作为应用机器人接入到您的团队 Slack 频道中', tier: 'credentials' },
     'whatsapp': { name: '🟢 WhatsApp', desc: '接入全球 WhatsApp 消息服务，支持媒体及文本处理', tier: 'credentials' },
@@ -2039,7 +2039,7 @@ async function init() {
         });
     }
 
-    // 绑定系统偏好设置中的加速通道跳转事件
+    // 绑定系统偏好设置中的网络中转跳转事件
     const btnOpenAcc = document.getElementById('btn-open-acceleration');
     if (btnOpenAcc) {
         btnOpenAcc.addEventListener('click', () => {
@@ -5312,7 +5312,7 @@ function bindProviderEvents() {
                         const last = (res && res.attempts && res.attempts[res.attempts.length - 1]) || {};
                         let tip = t(`❌ 内置服务不可用 (${last.error || last.status || '未知错误'})`, `❌ Built-in service unavailable (${last.error || last.status || 'unknown'})`, `❌ 內置服務不可用 (${last.error || last.status || '未知錯誤'})`);
                         if (res && (res.networkHint === 'direct_timeout' || res.networkHint === 'proxy_or_upstream_timeout')) {
-                            tip = t('❌ 网络超时：当前直连/加速都连不上上游，可稍后重试或临时开启 Nexora Clash', '❌ Network timeout: cannot reach upstream via current path; retry later or temporarily enable Nexora Clash', '❌ 網路超時：當前直連/加速都連不上上游，可稍後重試或臨時開啟 Nexora Clash');
+                            tip = t('❌ 网络超时：当前直连/本地转发都连不上上游，可稍后重试或临时开启网络中转', '❌ Network timeout: cannot reach upstream via current path; retry later or temporarily enable Network Relay', '❌ 網路超時：當前直連/本地轉發都連不上上游，可稍後重試或臨時開啟網路中轉');
                         }
                         resultSpan.textContent = tip;
                         resultSpan.style.color = '#ff5252';
@@ -5452,7 +5452,7 @@ function bindProviderEvents() {
                         const last = (res && res.attempts && res.attempts[res.attempts.length - 1]) || {};
                         let tip = t(`❌ 内置密钥不可用 (${last.error || last.status || '未知错误'})`, `❌ Built-in keys unavailable (${last.error || last.status || 'unknown'})`, `❌ 內置金鑰不可用 (${last.error || last.status || '未知錯誤'})`);
                         if (res && (res.networkHint === 'direct_timeout' || res.networkHint === 'proxy_or_upstream_timeout')) {
-                            tip = t('❌ 网络超时：当前连不上上游（与是否开 Clash 无关时也可先重试）', '❌ Network timeout: cannot reach upstream (retry first; Clash is optional)', '❌ 網路超時：當前連不上上游（與是否開 Clash 無關時也可先重試）');
+                            tip = t('❌ 网络超时：当前连不上上游（与是否开网络中转无关时也可先重试）', '❌ Network timeout: cannot reach upstream (retry first; Network Relay is optional)', '❌ 網路超時：當前連不上上游（與是否開網路中轉無關時也可先重試）');
                         }
                         resultSpan.textContent = tip;
                         resultSpan.style.color = '#ff5252';
@@ -7559,17 +7559,17 @@ const SIDEBAR_NAV_ORDER_KEY = 'setting_sidebar_nav_order';
 const SIDEBAR_NAV_DEFAULT_ORDER = [
     'console-view',
     'acceleration-view',
-    'data-center-view',
-    'chat-view',
-    'session-archive-view',
-    'config-view',
     'communication-view',
+    'config-view',
     'roles-view',
+    'chat-view',
     'openclaw-panel-view',
     'dashboard-view',
     'plugins-view',
     'skills-view',
     'voice-view',
+    'session-archive-view',
+    'data-center-view',
     'terminal-view',
     'syslogs-view',
     'settings-view'
@@ -7661,23 +7661,45 @@ function normalizeSidebarNavOrder(preferred) {
         }
         out.splice(insertAt, 0, tab);
     }
-    // 默认：Nexora Agent 在「数据中心」之上（纠正早期嵌入时二者相邻反序）
+    // 顶部固定：控制面板 → 网络中转 → 通讯管理 → 模型配置 → 模型角色
     {
-        const iDc = out.indexOf('data-center-view');
-        const iCon = out.indexOf('console-view');
-        if (iDc >= 0 && iCon >= 0 && iDc === iCon - 1) {
-            out[iDc] = 'console-view';
-            out[iCon] = 'data-center-view';
+        const topSeq = [
+            'console-view',
+            'acceleration-view',
+            'communication-view',
+            'config-view',
+            'roles-view'
+        ];
+        const picked = [];
+        for (const tab of topSeq) {
+            const idx = out.indexOf(tab);
+            if (idx >= 0) {
+                out.splice(idx, 1);
+                picked.push(tab);
+            }
+        }
+        for (let i = picked.length - 1; i >= 0; i--) {
+            out.unshift(picked[i]);
         }
     }
-    // Clash 固定紧跟 Agent 下方
+    // 会话归档固定紧跟「语音服务」下方
     {
-        const iCon = out.indexOf('console-view');
-        const iAcc = out.indexOf('acceleration-view');
-        if (iCon >= 0 && iAcc >= 0 && iAcc !== iCon + 1) {
-            out.splice(iAcc, 1);
-            const insertAt = out.indexOf('console-view') + 1;
-            out.splice(insertAt, 0, 'acceleration-view');
+        const iVoice = out.indexOf('voice-view');
+        const iArch = out.indexOf('session-archive-view');
+        if (iVoice >= 0 && iArch >= 0 && iArch !== iVoice + 1) {
+            out.splice(iArch, 1);
+            const insertAt = out.indexOf('voice-view') + 1;
+            out.splice(insertAt, 0, 'session-archive-view');
+        }
+    }
+    // 数据总览固定紧贴「内置终端」上方
+    {
+        const iDc = out.indexOf('data-center-view');
+        const iTerm = out.indexOf('terminal-view');
+        if (iDc >= 0 && iTerm >= 0 && iDc !== iTerm - 1) {
+            out.splice(iDc, 1);
+            const insertAt = out.indexOf('terminal-view');
+            out.splice(insertAt, 0, 'data-center-view');
         }
     }
     return out;
@@ -8015,7 +8037,7 @@ function setupTabSwitching() {
                 }
                 if (nextTab === 'data-center-view') {
                     const token = ++pageLoadMaskToken;
-                    showPageLoadMask(t('正在刷新数据中心…', 'Refreshing Data Center…', '正在重新整理數據中心…'));
+                    showPageLoadMask(t('正在刷新数据总览…', 'Refreshing Data Overview…', '正在重新整理數據總覽…'));
                     Promise.resolve()
                         .then(() => loadDataCenterUi(false))
                         .catch((err) => console.error(err))
@@ -8080,8 +8102,8 @@ function setupTabSwitching() {
             const token = ++pageLoadMaskToken;
             const maskLabel =
                 nextTab === 'openclaw-panel-view' ? t('正在加载 OpenClaw…', 'Loading OpenClaw…', '正在載入 OpenClaw…')
-                : nextTab === 'data-center-view' ? t('正在加载数据中心…', 'Loading Data Center…', '正在載入數據中心…')
-                : nextTab === 'acceleration-view' ? t('正在加载 Nexora Clash…', 'Loading Nexora Clash…', '正在載入 Nexora Clash…')
+                : nextTab === 'data-center-view' ? t('正在加载数据总览…', 'Loading Data Overview…', '正在載入數據總覽…')
+                : nextTab === 'acceleration-view' ? t('正在加载网络中转…', 'Loading Network Relay…', '正在載入網路中轉…')
                 : t('正在加载…', 'Loading…', '正在載入…');
             showPageLoadMask(maskLabel);
 
@@ -9545,6 +9567,11 @@ function applyLanguage(lang) {
             renderSessionArchiveView();
         }
     } catch (e) {}
+
+    // 数据总览 iframe 标题随语言刷新
+    try {
+        if (typeof pushDataCenterTheme === 'function') pushDataCenterTheme();
+    } catch (e) {}
 }
 
 // 发送系统桌面横幅通知
@@ -10505,6 +10532,46 @@ function renderChatMediaHtml(content) {
 }
 
 // 往聊天窗口追加气泡消息
+/** 模型会话气泡头像：AI 用应用图标，用户仍用 ME */
+function createChatAvatarEl(sender) {
+    const avatar = document.createElement('div');
+    avatar.className = sender === 'user' ? 'chat-avatar chat-avatar-user' : 'chat-avatar chat-avatar-ai';
+    avatar.style.cssText = `
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        overflow: hidden;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    `;
+    if (sender === 'user') {
+        avatar.style.background = 'linear-gradient(135deg, #00d2ff, #0055ff)';
+        avatar.style.fontSize = '13px';
+        avatar.style.fontWeight = '800';
+        avatar.style.color = 'white';
+        avatar.innerText = 'ME';
+    } else {
+        avatar.style.background = 'transparent';
+        const img = document.createElement('img');
+        img.src = 'config/icon.png';
+        img.alt = 'Nexora Agent';
+        img.draggable = false;
+        img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; display: block;';
+        img.onerror = () => {
+            avatar.style.background = 'linear-gradient(135deg, #8c52ff, #00d2ff)';
+            avatar.style.fontSize = '13px';
+            avatar.style.fontWeight = '800';
+            avatar.style.color = 'white';
+            avatar.textContent = 'AI';
+        };
+        avatar.appendChild(img);
+    }
+    return avatar;
+}
+
 function appendChatMessage(sender, content, attachment = null, isHTML = false) {
     // 隐藏底层系统失败横幅（⚠️ ✉️ Message: ... failed / Exec failed 等），不进会话气泡
     if (typeof content === 'string') {
@@ -10545,22 +10612,7 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
         flex-direction: ${sender === 'user' ? 'row-reverse' : 'row'};
     `;
 
-    const avatar = document.createElement('div');
-    avatar.style.cssText = `
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        background: ${sender === 'user' ? 'linear-gradient(135deg, #00d2ff, #0055ff)' : 'linear-gradient(135deg, #8c52ff, #00d2ff)'};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 800;
-        color: white;
-        flex-shrink: 0;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-    `;
-    avatar.innerText = sender === 'user' ? 'ME' : 'AI';
+    const avatar = createChatAvatarEl(sender);
 
     const bubble = document.createElement('div');
     bubble.style.cssText = `
@@ -10638,7 +10690,9 @@ function clearChatHistory(options = {}) {
     // 重置为初始欢迎语
     const welcomeHtml = `
         <div id="welcome-message-row" style="display: flex; gap: 12px; max-width: 80%; align-self: flex-start;">
-            <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #8c52ff, #00d2ff); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: white; flex-shrink: 0; box-shadow: 0 0 10px rgba(140,82,255,0.3);">AI</div>
+            <div class="chat-avatar chat-avatar-ai" style="width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; overflow: hidden; box-shadow: 0 0 10px rgba(140,82,255,0.3); background: transparent;">
+              <img src="config/icon.png" alt="Nexora Agent" draggable="false" style="width: 100%; height: 100%; object-fit: cover; display: block;" onerror="this.parentElement.style.background='linear-gradient(135deg,#8c52ff,#00d2ff)';this.parentElement.style.color='white';this.parentElement.style.fontWeight='800';this.parentElement.style.fontSize='14px';this.parentElement.style.display='flex';this.parentElement.style.alignItems='center';this.parentElement.style.justifyContent='center';this.replaceWith(document.createTextNode('AI'));">
+            </div>
             <div id="welcome-message-bubble" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 12px 16px; color: var(--text-primary); font-size: 13px; line-height: 1.5; border-top-left-radius: 2px;">
                 <span data-i18n="chat.welcome.greeting">您好！我是您的智能助手。</span><span id="gateway-connection-status-text" style="color: #ff9800;">当前本地的 OpenClaw Nexora Agent未启动，请前往【控制台】启动Nexora Agent。</span>
                 <br><br>
@@ -11184,9 +11238,9 @@ async function handleSendMessage() {
 5. **微信、QQ、飞书、Slack 等各个渠道机器人掉线或无法连接怎么解决？**
    - **版本匹配（微信/QQ等注入式通道）**：部分渠道采用注入挂钩机制。必须确保你电脑上安装运行的对应 PC 客户端版本，与当前使用的机器人通道插件（如 Weixin Provider）所支持的版本严格一致。
    - **配置校验（飞书/Slack/Matrix等API通道）**：请仔细确认你的 App ID、App Secret、Token 以及服务器端点配置是否正确，任何一个参数填错都会导致无法与平台建立握手连接。
-   - **网络长连与代理（国内与境外平台差异）**：
-     - 若使用的是境内长连渠道（如微信、飞书、QQ），由于 Clash/Surge 等代理软件的增强/TUN 模式可能会劫持域名（解析为 198.18.x.x 的 Fake-IP）导致断线，应用已内置了 HTTPDNS 解析直连技术。如果依然频繁断开，请将对应的域名（如 \`*.weixin.qq.com\`、\`*.feishu.cn\`）加入你代理软件的直连（Bypass）白名单。
-     - 若使用的是境外渠道（如 Slack、Telegram、WhatsApp、Matrix），请确保你的本地网络代理已经正确开启，并且应用能够通过你的代理建立公网连接。
+   - **网络长连与本地转发（不同渠道差异）**：
+     - 若使用的是境内长连渠道（如微信、飞书、QQ），由于 本机网络转发/虚拟网卡转发可能会劫持域名（解析为 198.18.x.x 的 Fake-IP）导致断线，应用已内置了 HTTPDNS 解析直连技术。如果依然频繁断开，请将对应的域名（如 \`*.weixin.qq.com\`、\`*.feishu.cn\`）加入本机转发的直连（Bypass）白名单。
+     - 若使用的是需公网可达的渠道（如 Slack、Telegram、WhatsApp、Matrix），请确保本机网络转发已正确开启，并且应用能够经本地转发建立连接。
    - **防休眠与常驻**：如果电脑频繁进入睡眠状态或断网，会导致长连断开。建议在对应的客户端设置中关闭“自动休眠”，或尝试在电脑系统设置中防止网卡进入节电模式。
 
 6. **界面菜单点不动或侧边栏收起问题**：
@@ -12956,10 +13010,19 @@ function collectDataCenterThemeVars() {
 function pushDataCenterTheme(frame) {
     const target = frame || document.getElementById('data-center-iframe');
     if (!target || !target.contentWindow) return;
+    const lang = localStorage.getItem('setting_language') || 'zh-CN';
+    const title = t('nav.data_center');
+    try {
+        target.title = title;
+        target.setAttribute('title', title);
+    } catch (_) {}
     try {
         target.contentWindow.postMessage({
             type: 'nexora-theme',
             vars: collectDataCenterThemeVars(),
+            lang,
+            title: 'Nexora ' + title,
+            statusRunning: t('系统运行中', 'System running', '系統運行中'),
         }, '*');
     } catch (_) {}
 }
@@ -13018,8 +13081,8 @@ async function loadDataCenterUi(forceReload = false) {
             const detail = (err && err.message) ? String(err.message) : '';
             showToast(
                 detail
-                    ? t('数据中心启动失败：', 'Data Center failed: ', '數據中心啟動失敗：') + detail
-                    : t('数据中心启动失败', 'Data Center failed to start', '數據中心啟動失敗')
+                    ? t('数据总览启动失败：', 'Data Overview failed: ', '數據總覽啟動失敗：') + detail
+                    : t('数据总览启动失败', 'Data Overview failed to start', '數據總覽啟動失敗')
             );
         } catch (_) {}
     }
@@ -13862,10 +13925,10 @@ function paintAccelerationProxyNowDelay(latency, testing) {
         strong.textContent = `${latency} ms`;
         strong.classList.add(getAccelerationLatencyClass(latency));
     } else if (latency === 0) {
-        strong.textContent = '超时';
+        strong.textContent = t('acc.proxy.stat_bad');
         strong.classList.add('latency-bad');
     } else {
-        strong.textContent = '未测';
+        strong.textContent = t('acc.proxy.stat_pending');
         strong.classList.add('latency-none');
     }
 }
@@ -13900,7 +13963,7 @@ function endAccelerationDelayUi() {
 
 function updateAccelerationBusyUi() {
     const busy = accelerationBusy;
-    const msg = accelerationBusyMessage || '处理中...';
+    const msg = accelerationBusyMessage || t('处理中...', 'Processing...', '處理中...');
     const isDelay = busy && isAccelerationDelayBusyMessage(msg);
 
     const delayBtn = document.getElementById('acc-delay-btn');
@@ -13928,7 +13991,7 @@ function updateAccelerationBusyUi() {
     [pageToggle, controlsToggle, dashEnabledToggle].forEach(el => {
         if (el) el.disabled = shouldDisable;
     });
-    // 系统代理 / TUN：未启用时始终不可点；启用后仅在忙碌时禁用
+    // 本机转发 / 虚拟网卡转发：未启用时始终不可点；启用后仅在忙碌时禁用
     [systemProxyToggle, tunToggle, dashSystemProxyToggle, dashTunToggle].forEach(el => {
         if (el) el.disabled = !channelRunning || shouldDisable;
     });
@@ -13965,7 +14028,7 @@ function updateAccelerationBusyUi() {
 
 function setAccelerationBusy(busy, message) {
     accelerationBusy = !!busy;
-    accelerationBusyMessage = busy ? String(message || '处理中...') : '';
+    accelerationBusyMessage = busy ? String(message || t('处理中...', 'Processing...', '處理中...')) : '';
     updateAccelerationBusyUi();
 }
 
@@ -14119,15 +14182,17 @@ async function runAccelerationDelayTest(options = {}) {
     const successText = options.silent
         ? null
         : (wasEnabled
-            ? '延迟测试完成'
-            : '延迟测试完成（临时测速，空闲后自动关闭内核）');
+            ? t('延迟测试完成', 'Latency test finished', '延遲測試完成')
+            : t('延迟测试完成（临时测速，空闲后自动关闭内核）', 'Latency test finished (temporary probe; core auto-stops when idle)', '延遲測試完成（臨時測速，空閒後自動關閉核心）'));
     const pid = accelerationState && accelerationState.activeProfileId;
     if (pid) proxiesAutoDelayDoneIds.add(pid);
     const res = await handleAccelerationResult(
         window.api.delayTestAcceleration(),
         successText,
         {
-            busyMessage: wasEnabled ? '正在测速节点延迟…' : '正在启动临时内核并测速…'
+            busyMessage: wasEnabled
+                ? t('正在测速节点延迟…', 'Testing node latency…', '正在測速節點延遲…')
+                : t('正在启动临时内核并测速…', 'Starting temporary core and testing…', '正在啟動臨時核心並測速…')
         }
     );
     // 自动选择：只在当前地区标签里挑最低延迟
@@ -14408,10 +14473,10 @@ window.closeSingleConnection = async function(id) {
     if (!window.api || !window.api.closeAccelerationConnection) return;
     const res = await window.api.closeAccelerationConnection(id);
     if (res && res.success) {
-        showToast('已断开网络连接');
+        showToast(t('已断开网络连接', 'Connection closed', '已斷開網路連線'));
         refreshConnections();
     } else {
-        showToast('断开连接失败: ' + (res.error || '未知错误'));
+        showToast(t('断开连接失败: ', 'Failed to close connection: ', '斷開連線失敗: ') + (res.error || t('未知错误', 'Unknown error', '未知錯誤')));
     }
 };
 
@@ -14429,14 +14494,14 @@ function setAccelerationImportMode(mode) {
     if (qrFields) qrFields.hidden = accelerationUi.importMode !== 'qr';
     if (fileFields) fileFields.hidden = accelerationUi.importMode !== 'file';
     if (accelerationUi.importMode === 'qr') {
-        if (title) title.textContent = '通过二维码添加配置';
-        if (help) help.textContent = '粘贴扫码结果（订阅链接或 YAML）。';
+        if (title) title.textContent = t('通过二维码添加配置', 'Add config via QR', '透過二維碼添加配置');
+        if (help) help.textContent = t('粘贴扫码结果（配置链接或 YAML）。', 'Paste scan result (config link or YAML).', '貼上掃碼結果（配置連結或 YAML）。');
     } else if (accelerationUi.importMode === 'file') {
-        if (title) title.textContent = '通过文件添加配置';
-        if (help) help.textContent = '选择本地 Clash/Mihomo 配置文件。';
+        if (title) title.textContent = t('通过文件添加配置', 'Add config via file', '透過檔案添加配置');
+        if (help) help.textContent = t('选择本地转发配置文件。', 'Choose a local forwarding config file.', '選擇本地轉發配置檔案。');
     } else {
-        if (title) title.textContent = '通过 URL 添加配置';
-        if (help) help.textContent = '填写加速厂商提供的 Clash/Mihomo 订阅地址。';
+        if (title) title.textContent = t('通过 URL 添加配置', 'Add config via URL', '透過 URL 添加配置');
+        if (help) help.textContent = t('填写本地网络中转配置地址。', 'Enter a local network relay config URL.', '填寫本地網路中轉配置地址。');
     }
 }
 
@@ -14457,15 +14522,48 @@ function getAccelerationLatencyClass(latency) {
     return 'latency-medium';
 }
 
+
+/** 仅仪表盘/控制页展示脱敏；通道页仍用真实节点名与国旗。不改订阅/内核真实节点名。 */
+function sanitizeAccelerationNodeDisplayName(name) {
+    let out = String(name || '');
+    if (!out) return out;
+    const line = t('线路', 'Line', '線路');
+    const lanRelay = t('内网中转', 'LAN Relay', '內網中轉');
+    const localCh = t('本地通道', 'Local Channel', '本地通道');
+    const localFwd = t('本地转发', 'Local Forward', '本地轉發');
+    const channel = t('通道', 'Channel', '通道');
+    const fallback = t('内网中转通道', 'LAN Relay Channel', '內網中轉通道');
+    const rules = [
+        [/香港专线|港专线/gi, lanRelay],
+        [/国际专线|境外专线|海外专线|全球专线/gi, localCh],
+        [/境外节点|海外节点|国际节点|跨境节点/gi, localCh],
+        [/科学上网|翻墙|梯子|跨境加速|海外加速|国际加速/g, localFwd],
+        [/香港|澳门|台灣|台湾|日本|新加坡|美国|韓國|韩国|英国|德国|法国|荷兰|俄罗斯|土耳其|越南|泰国|马来|菲律宾|印度|加拿大|澳洲|澳大利亚/g, line],
+        [/\b(HK|TW|JP|SG|US|KR|UK|GB|DE|FR|NL|RU|TR|VN|TH|MY|PH|IN|CA|AU)\b/gi, 'LN'],
+        // 同一段里的多标签（如 BGP|住宅IP）统一收成一次「通道」，避免「通道通道」
+        [/(?:专线|BGP|住宅\s*IP|家宽|IEPL|IPLC)(?:\s*[|／/]\s*(?:专线|BGP|住宅\s*IP|家宽|IEPL|IPLC))*/gi, channel],
+    ];
+    for (const [re, to] of rules) out = out.replace(re, to);
+    const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const tok of [channel, lanRelay, localCh, localFwd, line, 'LN']) {
+        if (!tok) continue;
+        const e = escapeRe(tok);
+        out = out.replace(new RegExp(`(?:${e}\\s*[|／/]\\s*)+${e}`, 'g'), tok);
+        out = out.replace(new RegExp(`${e}{2,}`, 'g'), tok);
+    }
+    out = out.replace(/\|\s*\| /g, '|').replace(/\|\s*\|/g, '|').replace(/^\||\|$/g, '').replace(/\s{2,}/g, ' ').trim();
+    return out || fallback;
+}
+
 function parseAccelerationInfoNode(name) {
     const raw = String(name || '').trim();
     const m = raw.match(/^(.+?)\s*[：:]\s*(.+)$/);
     if (m) {
         return { label: m[1].trim(), value: m[2].trim() };
     }
-    if (/^reject/i.test(raw)) return { label: '拦截规则', value: raw };
-    if (/^direct$/i.test(raw)) return { label: '直连', value: raw };
-    return { label: '订阅信息', value: raw };
+    if (/^reject/i.test(raw)) return { label: t('拦截规则', 'Block rule', '攔截規則'), value: raw };
+    if (/^direct$/i.test(raw)) return { label: t('直连', 'Direct', '直連'), value: raw };
+    return { label: t('配置信息', 'Profile info', '配置資訊'), value: raw };
 }
 
 function getFilteredAccelerationNodes(data) {
@@ -14501,17 +14599,17 @@ function isAccelerationAutoSelectEnabled() {
 }
 
 function accelerationCountryFilterLabel(filter) {
-    const map = {
-        all: '全部',
-        hk: '香港',
-        jp: '日本',
-        sg: '新加坡',
-        us: '美国',
-        tw: '台湾',
-        other: '其他'
-    };
     const key = filter || 'all';
-    return map[key] || key;
+    const i18nKey = ({
+        all: 'acc.proxy.country_all',
+        hk: 'acc.proxy.country_hk',
+        jp: 'acc.proxy.country_jp',
+        sg: 'acc.proxy.country_sg',
+        us: 'acc.proxy.country_us',
+        tw: 'acc.proxy.country_tw',
+        other: 'acc.proxy.country_other',
+    })[key];
+    return i18nKey ? t(i18nKey) : key;
 }
 
 function getNodeCountryCode(n) {
@@ -14580,12 +14678,12 @@ async function applyAccelerationAutoSelect(options = {}) {
     const best = pickLowestLatencyNodeInCountryFilter(pool, filter);
     const tag = accelerationCountryFilterLabel(filter);
     if (!best) {
-        if (!silent) showToast(`「${tag}」标签下暂无可用延迟，无法自动选择`);
+        if (!silent) showToast(t('「{tag}」下暂无可用延迟，无法自动选择', 'No usable latency under "{tag}" for auto-select', '「{tag}」下暫無可用延遲，無法自動選擇').replace('{tag}', tag));
         return null;
     }
     if (accelerationState.selectedProxy === best.name) {
         if (notifyKeep || !silent) {
-            showToast(`自动测速完成 · 已是最低延迟 [${best.latency}ms]`);
+            showToast(t('自动测速完成 · 已是最低延迟 [{ms}ms]', 'Auto test done · already lowest latency [{ms}ms]', '自動測速完成 · 已是最低延遲 [{ms}ms]').replace('{ms}', String(best.latency)));
         }
         return null;
     }
@@ -14596,7 +14694,7 @@ async function applyAccelerationAutoSelect(options = {}) {
         && typeof best.latency === 'number' && best.latency > 0
         && (current.latency - best.latency) < hysteresis) {
         if (notifyKeep) {
-            showToast(`自动测速完成 · 保持当前节点（差距 < ${hysteresis}ms）`);
+            showToast(t('自动测速完成 · 保持当前通道（差距 < {ms}ms）', 'Auto test done · keep current channel (gap < {ms}ms)', '自動測速完成 · 保持當前通道（差距 < {ms}ms）').replace('{ms}', String(hysteresis)));
         }
         return null;
     }
@@ -14607,16 +14705,16 @@ async function applyAccelerationAutoSelect(options = {}) {
         showToast(`已自动切换「${tag}」最低延迟 → ${best.name} [${best.latency}ms]`);
         return selectRes;
     }
-    if (!silent) showToast('自动选择失败: ' + ((selectRes && selectRes.error) || '未知错误'));
+    if (!silent) showToast(t('自动选择失败: ', 'Auto-select failed: ', '自動選擇失敗: ') + ((selectRes && selectRes.error) || t('未知错误', 'Unknown error', '未知錯誤')));
     return null;
 }
 
 function sourceLabel(profile) {
     if (!profile) return '';
-    if (profile.url) return 'URL 订阅';
-    if (profile.source === 'file') return '本地文件';
-    if (profile.source === 'qr') return '二维码导入';
-    return '手动导入';
+    if (profile.url) return t('配置链接', 'Config URL', '配置連結');
+    if (profile.source === 'file') return t('本地文件', 'Local file', '本地檔案');
+    if (profile.source === 'qr') return t('二维码导入', 'QR import', '二維碼匯入');
+    return t('手动导入', 'Manual import', '手動匯入');
 }
 
 function formatTrafficBytes(bytes) {
@@ -14647,7 +14745,7 @@ function formatExpireDate(expireSec) {
 function buildProfileTrafficHtml(profile) {
     const info = profile && profile.userInfo;
     if (!info) {
-        return `<div class="acc-profile-traffic acc-profile-traffic-empty"><span class="acc-muted">暂无流量信息，点击「更新订阅」获取</span></div>`;
+        return `<div class="acc-profile-traffic acc-profile-traffic-empty"><span class="acc-muted">${t('暂无流量信息，点击「更新配置」获取', 'No traffic info yet; tap Update to refresh', '暫無流量資訊，點擊「更新配置」獲取')}</span></div>`;
     }
 
     const total = Number(info.total) || 0;
@@ -14661,29 +14759,29 @@ function buildProfileTrafficHtml(profile) {
 
     const expireText = formatExpireDate(info.expire);
     const resetText = (info.resetDays != null && Number.isFinite(Number(info.resetDays)))
-        ? `${info.resetDays} 天后重置`
+        ? t('{n} 天后重置', 'Resets in {n} days', '{n} 天後重置').replace('{n}', String(info.resetDays))
         : '';
 
     const remainText = remain != null ? formatTrafficBytes(remain) : '--';
     const usedText = total > 0
         ? `${formatTrafficBytes(used)} / ${formatTrafficBytes(total)}`
-        : (remain != null ? '总额待更新' : '--');
+        : (remain != null ? t('总额待更新', 'Total pending', '總額待更新') : '--');
     const barClass = percent >= 90 ? 'danger' : (percent >= 70 ? 'warn' : 'ok');
     const barWidth = total > 0 ? percent.toFixed(1) : '0';
 
     return `
         <div class="acc-profile-traffic">
             <div class="acc-profile-traffic-top">
-                <span class="acc-profile-traffic-remain">剩余 ${escapeHtml(remainText)}</span>
+                <span class="acc-profile-traffic-remain">${t('剩余', 'Left', '剩餘')} ${escapeHtml(remainText)}</span>
                 <span class="acc-profile-traffic-used">${escapeHtml(usedText)}</span>
             </div>
-            <div class="acc-profile-progress" title="${total > 0 ? `已用 ${percent.toFixed(1)}%` : '正在读取订阅用量，或点击「更新订阅」'}">
+            <div class="acc-profile-progress" title="${total > 0 ? t('已用 {p}%', 'Used {p}%', '已用 {p}%').replace('{p}', percent.toFixed(1)) : t('正在读取用量，或点击「更新配置」', 'Reading usage, or tap Update', '正在讀取用量，或點擊「更新配置」')}">
                 <div class="acc-profile-progress-bar ${barClass}" style="width: ${barWidth}%"></div>
             </div>
             <div class="acc-profile-traffic-meta">
-                ${expireText ? `<span>到期 ${escapeHtml(expireText)}</span>` : ''}
+                ${expireText ? `<span>${t('到期', 'Expires', '到期')} ${escapeHtml(expireText)}</span>` : ''}
                 ${resetText ? `<span>${escapeHtml(resetText)}</span>` : ''}
-                ${!expireText && !resetText ? '<span class="acc-muted">订阅流量</span>' : ''}
+                ${!expireText && !resetText ? `<span class="acc-muted">${t('配置流量', 'Profile traffic', '配置流量')}</span>` : ''}
             </div>
         </div>
     `;
@@ -14697,7 +14795,7 @@ async function refreshAccelerationChannel() {
             accelerationState = data;
             renderAccelerationChannel(data);
         } else if (data && data.error) {
-            showToast('Nexora Clash 状态读取失败: ' + data.error);
+            showToast(t('网络中转状态读取失败: ', 'Network Relay status failed: ', '網路中轉狀態讀取失敗: ') + data.error);
         }
     } catch (err) {
         console.warn('[Acceleration] refresh failed:', err);
@@ -14717,13 +14815,13 @@ function renderAccelerationChannel(data) {
     if (settingToggle) settingToggle.checked = !!(data && data.autoStart);
     if (pageToggle) pageToggle.checked = channelOn;
     if (controlsToggle) controlsToggle.checked = channelOn;
-    // 总开关未运行时，系统代理 / TUN 界面显示未生效（偏好仍保留，重启后自动恢复）
+    // 总开关未运行时，本机转发 / 虚拟网卡转发界面显示未生效（偏好仍保留，重启后自动恢复）
     const systemProxyOn = !!(running && data && data.systemProxy);
     const tunOn = !!(running && data && data.virtualNic);
     if (systemProxyToggle) systemProxyToggle.checked = systemProxyOn;
     if (tunToggle) tunToggle.checked = tunOn;
 
-    // 未启用时：系统代理 / TUN 不可操作，并提示先开总开关
+    // 未启用时：本机转发 / 虚拟网卡转发不可操作，并提示先开总开关
     const subToggles = document.getElementById('acc-ctrl-sub-toggles');
     if (subToggles) subToggles.classList.toggle('is-disabled', !running);
     [systemProxyToggle, tunToggle].forEach((el) => {
@@ -14800,7 +14898,7 @@ function renderAccelerationChannel(data) {
         }
     }
 
-    // 仪表盘出站模式同步
+    // 仪表盘分流规则同步
     const mode = data.mode || 'rule';
     document.querySelectorAll('.acc-dash-mode-btn').forEach((btn) => {
         btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
@@ -14818,11 +14916,13 @@ function renderAccelerationChannel(data) {
     }
     const controlsModeHint = document.getElementById('acc-controls-mode-hint');
     if (controlsModeHint) {
-        controlsModeHint.textContent = mode === 'global'
-            ? '全局模式：所有流量都走当前节点，适合临时需要全代理的场景。'
+        const controlsHintKey = mode === 'global'
+            ? 'acc.controls.mode_hint.global'
             : mode === 'direct'
-                ? '直连模式：不走代理，相当于临时关闭加速分流。'
-                : '日常上网推荐「规则」：国内直连、境外走节点。';
+                ? 'acc.controls.mode_hint.direct'
+                : 'acc.controls.mode_hint.rule';
+        controlsModeHint.setAttribute('data-i18n', controlsHintKey);
+        controlsModeHint.textContent = t(controlsHintKey);
     }
 
     // 仪表盘内存同步
@@ -14896,12 +14996,12 @@ function renderAccelerationChannel(data) {
     if (current || dashCurrent || dashDelay) {
         if (data.selectedProxy) {
             matchedSelectedNode = (data.nodes || []).find(n => n.name === data.selectedProxy);
-            const flagHtml = matchedSelectedNode ? renderFlag(matchedSelectedNode.flag) : '🌐';
-            const htmlContent = `<span style="display: inline-flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">${flagHtml} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;">${escapeHtml(data.selectedProxy)}</span></span>`;
+            const displayName = sanitizeAccelerationNodeDisplayName(data.selectedProxy);
+            const htmlContent = `<span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: block;">${escapeHtml(displayName)}</span>`;
             if (current) current.innerHTML = htmlContent;
             if (dashCurrent) {
                 dashCurrent.innerHTML = htmlContent;
-                dashCurrent.title = data.selectedProxy;
+                dashCurrent.title = displayName;
             }
         } else {
             if (current) current.textContent = '--';
@@ -14914,10 +15014,10 @@ function renderAccelerationChannel(data) {
                 dashDelay.textContent = `${latency} ms`;
                 dashDelay.classList.add(getAccelerationLatencyClass(latency));
             } else if (latency === 0) {
-                dashDelay.textContent = '超时';
+                dashDelay.textContent = t('acc.proxy.stat_bad');
                 dashDelay.classList.add('latency-bad');
             } else {
-                dashDelay.textContent = '未测';
+                dashDelay.textContent = t('acc.proxy.stat_pending');
                 dashDelay.classList.add('latency-none');
             }
         }
@@ -14932,19 +15032,19 @@ function renderAccelerationChannel(data) {
     if (select) {
         select.innerHTML = profiles.length
             ? profiles.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === data.activeProfileId ? ' selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('')
-            : '<option value="">暂无配置</option>';
+            : '<option value="">' + t('暂无配置', 'No profile', '暫無配置') + '</option>';
         select.disabled = profiles.length === 0;
     }
 
     const active = profiles.find((p) => p.id === data.activeProfileId);
     const summary = document.getElementById('acc-profile-summary');
     if (summary) {
-        if (!active) summary.textContent = '请先添加加速厂商配置';
+        if (!active) summary.textContent = (typeof t === 'function' ? t('acc.profile.list_empty_hint') : '请先添加本地中转配置');
         else summary.textContent = `当前：${active.name || active.id} · ${sourceLabel(active)}`;
     }
     const dashActiveProfile = document.getElementById('acc-dash-active-profile');
     if (dashActiveProfile) {
-        dashActiveProfile.textContent = active ? (active.name || active.id) : '暂无配置';
+        dashActiveProfile.textContent = active ? (active.name || active.id) : t('暂无配置', 'No profile', '暫無配置');
         dashActiveProfile.title = active ? (active.name || active.id) : '';
     }
     const proxyLabel = document.getElementById('acc-proxy-active-label');
@@ -14956,7 +15056,9 @@ function renderAccelerationChannel(data) {
         : null;
 
     if (proxyNowName) {
-        proxyNowName.textContent = data.selectedProxy || (active ? '未选择节点' : '暂无配置');
+        proxyNowName.textContent = data.selectedProxy
+            ? data.selectedProxy
+            : (active ? t('acc.proxy.unselected') : t('暂无配置', 'No profile', '暫無配置'));
         proxyNowName.title = data.selectedProxy || '';
     }
     if (proxyNowFlag) {
@@ -14972,24 +15074,24 @@ function renderAccelerationChannel(data) {
                 strong.textContent = `${matchedSelected.latency} ms`;
                 strong.classList.add(getAccelerationLatencyClass(matchedSelected.latency));
             } else if (matchedSelected && matchedSelected.latency === 0) {
-                strong.textContent = '超时';
+                strong.textContent = t('acc.proxy.stat_bad');
                 strong.classList.add('latency-bad');
             } else {
-                strong.textContent = '未测';
+                strong.textContent = t('acc.proxy.stat_pending');
                 strong.classList.add('latency-none');
             }
         }
     }
 
     if (proxyLabel && !(accelerationBusy && isAccelerationDelayBusyMessage(accelerationBusyMessage))) {
-        if (!active) proxyLabel.textContent = '请先到「配置」页添加加速厂商';
+        if (!active) proxyLabel.textContent = t('请先到「配置」页添加本地中转配置', 'Add a local relay profile on Profiles first', '請先到「配置」頁添加本地中轉配置');
         else if (data.selectedProxy) {
             const proto = matchedSelected && matchedSelected.type ? String(matchedSelected.type).toUpperCase() : '';
             proxyLabel.textContent = proto
-                ? `${proto} · 点击下方节点可切换出站`
-                : '点击下方节点可切换出站';
+                ? `${proto} · ${t('点击下方通道可切换中转', 'Tap a channel below to switch', '點擊下方通道可切換中轉')}`
+                : t('点击下方通道可切换中转', 'Tap a channel below to switch', '點擊下方通道可切換中轉');
         }
-        else proxyLabel.textContent = `配置「${active.name || active.id}」· 点击节点即可选用`;
+        else proxyLabel.textContent = t('配置「{name}」· 点击通道即可选用', 'Profile "{name}" · tap a channel to use', '配置「{name}」· 點擊通道即可選用').replace('{name}', active.name || active.id);
     }
 
     const statProfile = document.getElementById('acc-proxy-stat-profile');
@@ -15006,7 +15108,7 @@ function renderAccelerationChannel(data) {
         else pendingCount += 1;
     });
     if (statProfile) {
-        statProfile.textContent = active ? (active.name || active.id) : '暂无';
+        statProfile.textContent = active ? (active.name || active.id) : t('暂无', 'N/A', '暫無');
         statProfile.title = active ? (active.name || active.id) : '';
     }
     if (statOk) statOk.textContent = String(okCount);
@@ -15023,7 +15125,7 @@ function renderAccelerationChannel(data) {
     const list = document.getElementById('acc-profile-list');
     if (list) {
         if (!profiles.length) {
-            list.innerHTML = '<div class="acc-empty">暂无配置。请用上方二维码、文件或 URL 添加。</div>';
+            list.innerHTML = '<div class="acc-empty">' + t('acc.profile.list_empty') + '</div>';
         } else {
             list.innerHTML = profiles.map((p) => `
                 <div class="acc-profile-item ${p.id === data.activeProfileId ? 'active' : ''}" data-profile-id="${escapeHtml(p.id)}">
@@ -15033,7 +15135,7 @@ function renderAccelerationChannel(data) {
                                 <strong>${escapeHtml(p.name || p.id)}</strong>
                                 <small>${escapeHtml(sourceLabel(p))}${p.url ? ' · ' + escapeHtml(p.url) : ''}</small>
                             </div>
-                            <span class="acc-muted acc-profile-badge">${p.id === data.activeProfileId ? '使用中' : '点击选用'}</span>
+                            <span class="acc-muted acc-profile-badge">${p.id === data.activeProfileId ? t('使用中', 'Active', '使用中') : t('点击选用', 'Tap to use', '點擊選用')}</span>
                         </div>
                         ${buildProfileTrafficHtml(p)}
                     </div>
@@ -15046,7 +15148,7 @@ function renderAccelerationChannel(data) {
     if (protocolFilter) {
         const types = Array.from(new Set((data.nodes || []).map((n) => String(n.type || '').toLowerCase()).filter(Boolean))).sort();
         const prev = accelerationUi.protocol;
-        protocolFilter.innerHTML = '<option value="">全部协议</option>' + types.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+        protocolFilter.innerHTML = '<option value="">' + t('acc.proxy.filter_all_protocols') + '</option>' + types.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
         protocolFilter.value = types.includes(prev) ? prev : '';
         accelerationUi.protocol = protocolFilter.value;
     }
@@ -15056,7 +15158,7 @@ function renderAccelerationChannel(data) {
     const count = document.getElementById('acc-node-count');
     if (count) {
         const totalNonInfo = (data.nodes || []).filter(node => !isAccelerationInfoNode(node)).length;
-        count.textContent = `${finalNodes.length}/${totalNonInfo} 个节点`;
+        count.textContent = `${finalNodes.length}/${totalNonInfo} ${t('个通道', 'channels', '個通道')}`;
     }
     // 渲染后保持地区标签高亮/可见（避免被其它逻辑盖掉）
     syncAccelerationCountryFilterUi();
@@ -15064,9 +15166,9 @@ function renderAccelerationChannel(data) {
     const grid = document.getElementById('acc-node-grid');
     if (grid) {
         if (!(data.nodes || []).length) {
-            grid.innerHTML = '<div class="acc-empty">暂无节点。请先到「配置」页添加加速厂商。</div>';
+            grid.innerHTML = '<div class="acc-empty">' + (typeof t === 'function' ? t('acc.proxy.list_empty') : '暂无中转通道。请先到「配置」页添加本地中转配置。') + '</div>';
         } else if (!finalNodes.length) {
-            grid.innerHTML = '<div class="acc-empty">没有匹配当前筛选条件的节点。</div>';
+            grid.innerHTML = '<div class="acc-empty">' + (typeof t === 'function' ? t('acc.proxy.no_match') : '没有匹配当前筛选条件的通道。') + '</div>';
         } else {
             grid.innerHTML = finalNodes.map((node) => {
                 const isInfo = isAccelerationInfoNode(node);
@@ -15080,7 +15182,7 @@ function renderAccelerationChannel(data) {
                     `;
                 }
                 let latencyClass = 'latency-none';
-                let latencyText = '未测';
+                let latencyText = t('acc.proxy.stat_pending');
                 let latencyHtml = '';
                 const isTestingThis = accelerationDelayUiActive && !accelerationDelayDoneNames.has(node.name);
                 if (isTestingThis) {
@@ -15091,7 +15193,7 @@ function renderAccelerationChannel(data) {
                     latencyClass = getAccelerationLatencyClass(node.latency);
                     latencyHtml = latencyText;
                 } else if (node.latency === 0) {
-                    latencyText = '超时';
+                    latencyText = t('acc.proxy.stat_bad');
                     latencyClass = 'latency-bad';
                     latencyHtml = latencyText;
                 } else {
@@ -15101,7 +15203,7 @@ function renderAccelerationChannel(data) {
                     <div class="acc-node-card ${node.selected ? 'selected' : ''}${isTestingThis ? ' is-delay-testing' : ''}" data-proxy-name="${escapeHtml(node.name)}">
                         <div class="acc-node-main">
                             <div class="acc-node-name">${renderFlag(node.flag)} ${escapeHtml(node.name)}</div>
-                            <div class="acc-node-type">${escapeHtml(node.type || 'proxy')}</div>
+                            <div class="acc-node-type">${escapeHtml(node.type || 'relay')}</div>
                         </div>
                         <div class="acc-node-meta">
                             <div class="acc-node-delay ${latencyClass}">${latencyHtml}</div>
@@ -15117,7 +15219,7 @@ function renderAccelerationChannel(data) {
     if (groupsContainer) {
         const groups = Array.isArray(data.groups) ? data.groups : [];
         if (!groups.length) {
-            groupsContainer.innerHTML = '<div class="acc-empty">暂无策略组。请先到「配置」页添加配置并启用通道。</div>';
+            groupsContainer.innerHTML = '<div class="acc-empty">' + t('acc.proxy.groups_empty') + '</div>';
         } else {
             groupsContainer.innerHTML = groups.map((g) => {
                 const isExpanded = expandedGroups.has(g.name);
@@ -15167,10 +15269,10 @@ function renderAccelerationChannel(data) {
                                     nodeDelayStr = ` (${nodeObj.latency}ms)`;
                                     latencyClass = getAccelerationLatencyClass(nodeObj.latency);
                                 } else if (nodeObj.latency === 0) {
-                                    nodeDelayStr = ' (超时)';
+                                    nodeDelayStr = ` (${t('超时', 'Timeout', '超時')})`;
                                     latencyClass = 'latency-bad';
                                 } else {
-                                    nodeDelayStr = ' (未测)';
+                                    nodeDelayStr = ` (${t('未测', 'Untested', '未測')})`;
                                 }
 
                                 return `
@@ -15201,12 +15303,12 @@ function renderAccelerationChannel(data) {
                                    <span style="font-size: 10px; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 1px 4px; border-radius: 4px; text-transform: uppercase;">${escapeHtml(g.type)}</span>
                                </div>
                                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                                   <span>当前：</span>
-                                   <strong style="color: #c084fc; display: inline-flex; align-items: center; gap: 4px;">${renderFlag(flag)} ${escapeHtml(g.now)}</strong>
+                                   <span>${t('当前：', 'Now: ', '目前：')}</span>
+                                   <strong style="color: #c084fc; display: inline-flex; align-items: center; gap: 4px;">${renderFlag(flag)} ${escapeHtml(g.now || '')}</strong>
                                </div>
                            </div>
                            <div style="color: var(--text-secondary); font-size: 11px; display: flex; align-items: center; gap: 4px;">
-                               <span>${(g.all || []).length} 个成员</span>
+                               <span>${(g.all || []).length} ${t('个成员', 'members', '個成員')}</span>
                                <span style="transform: rotate(${isExpanded ? '90deg' : '0deg'}); transition: transform 0.2s; font-size: 12px; display: inline-block;">➔</span>
                            </div>
                         </div>
@@ -15278,10 +15380,10 @@ function paintAccelerationNodeLatency(name, latency, testing) {
             el.textContent = ` (${latency}ms)`;
             el.classList.add(getAccelerationLatencyClass(latency));
         } else if (latency === 0) {
-            el.textContent = ' (超时)';
+            el.textContent = ' (' + t('acc.proxy.stat_bad') + ')';
             el.classList.add('latency-bad');
         } else {
-            el.textContent = ' (未测)';
+            el.textContent = ' (' + t('acc.proxy.stat_pending') + ')';
             el.classList.add('latency-none');
         }
     });
@@ -15366,10 +15468,10 @@ async function refreshAccelerationNodesAndLatency(options = {}) {
             }
             return res;
         }
-        if (!silent) showToast('延迟刷新失败: ' + ((res && res.error) || '未知错误'));
+        if (!silent) showToast(t('延迟刷新失败: ', 'Latency refresh failed: ', '延遲重新整理失敗: ') + ((res && res.error) || t('未知错误', 'Unknown error', '未知錯誤')));
         return null;
     } catch (err) {
-        if (!silent) showToast('刷新失败: ' + (err.message || String(err)));
+        if (!silent) showToast(t('刷新失败: ', 'Refresh failed: ', '重新整理失敗: ') + (err.message || String(err)));
         return null;
     } finally {
         if (!silent) setAccelerationBusy(false);
@@ -15383,13 +15485,13 @@ async function setAccelerationEnabledFromUi(enabled) {
         setAccelerationBusy(true, enabled ? '启动中...' : '关闭中...');
         const res = await window.api.setAccelerationEnabled(!!enabled, accelerationState && accelerationState.activeProfileId);
         if (!res || !res.success) {
-            showToast((enabled ? '开启' : '关闭') + ' Nexora Clash 失败: ' + ((res && res.error) || '未知错误'));
+            showToast((enabled ? t('开启', 'Enable', '開啟') : t('关闭', 'Disable', '關閉')) + t(' 网络中转失败: ', ' Network Relay failed: ', ' 網路中轉失敗: ') + ((res && res.error) || t('未知错误', 'Unknown error', '未知錯誤')));
             await refreshAccelerationChannel();
             return;
         }
         accelerationState = res;
         renderAccelerationChannel(res);
-        showToast(enabled ? 'Nexora Clash 已开启' : 'Nexora Clash 已关闭');
+        showToast(enabled ? t('网络中转已开启', 'Network Relay enabled', '網路中轉已開啟') : t('网络中转已关闭', 'Network Relay disabled', '網路中轉已關閉'));
 
         if (enabled) {
             // 出口 IP 与节点测速并行：不要等测速结束才检测（否则仪表盘会长时间停在「未启用/检测中」）
@@ -15406,25 +15508,58 @@ async function setAccelerationEnabledFromUi(enabled) {
             runAccelerationIpDetect({ force: true }).catch(() => {});
         }, 400);
     } catch (err) {
-        showToast('Nexora Clash 操作失败: ' + err.message);
+        showToast(t('网络中转操作失败: ', 'Network Relay operation failed: ', '網路中轉操作失敗: ') + err.message);
         await refreshAccelerationChannel();
     } finally {
         setAccelerationBusy(false);
     }
 }
 
+function localizeAccelerationErrorMessage(raw) {
+    const msg = String(raw || '').trim();
+    if (!msg) return t('未知错误', 'Unknown error', '未知錯誤');
+    if (msg.includes('429')) {
+        return t('接口请求过于频繁 (HTTP 429)，请稍后再试', 'Too many requests (HTTP 429). Please try again later.', '介面請求過於頻繁 (HTTP 429)，請稍後再試');
+    }
+    const map = [
+        ['本地转发不可用，请先启动网络中转核心', t('本地转发不可用，请先启动网络中转核心', 'Local relay unavailable. Start the Network Relay core first.', '本機轉發不可用，請先啟動網路中轉核心')],
+        ['配置内容不是有效的本地转发配置', t('配置内容不是有效的本地转发配置', 'Config is not a valid local forwarding profile.', '設定內容不是有效的本地轉發設定')],
+        ['配置内容不是有效的订阅或配置', t('配置内容不是有效的订阅或配置', 'Config is not a valid subscription or profile.', '設定內容不是有效的訂閱或設定')],
+        ['未找到可用节点', t('未找到可用节点', 'No available nodes found.', '未找到可用節點')],
+        ['订阅为空', t('订阅为空', 'Subscription is empty.', '訂閱為空')],
+        ['配置不存在', t('配置不存在', 'Profile does not exist.', '設定不存在')],
+        ['该配置不是 URL 订阅，无法在线更新', t('该配置不是 URL 订阅，无法在线更新', 'This profile is not a URL subscription and cannot be updated online.', '該設定不是 URL 訂閱，無法線上更新')],
+        ['请先添加加速厂商订阅', t('请先添加中转配置订阅', 'Add a relay config subscription first.', '請先添加中轉設定訂閱')],
+        ['订阅配置文件不存在', t('订阅配置文件不存在', 'Subscription config file is missing.', '訂閱設定檔不存在')],
+        ['请先在「配置」页选择一份加速订阅', t('请先在「配置」页选择一份中转订阅', 'Select a relay subscription on the Profiles tab first.', '請先在「設定」頁選擇一份中轉訂閱')],
+        ['当前订阅配置文件缺失，请到「配置」页重新导入', t('当前订阅配置文件缺失，请到「配置」页重新导入', 'Subscription file missing. Re-import it on the Profiles tab.', '目前訂閱設定檔缺失，請到「設定」頁重新匯入')],
+        ['网络中转核心未运行', t('网络中转核心未运行', 'Network Relay core is not running.', '網路中轉核心未執行')],
+        ['网络中转核心启动失败', t('网络中转核心启动失败', 'Failed to start Network Relay core.', '網路中轉核心啟動失敗')],
+        ['测速内核启动失败', t('测速内核启动失败', 'Failed to start latency-test core.', '測速核心啟動失敗')],
+        ['系统代理设置失败', t('系统代理设置失败', 'Failed to apply system proxy.', '系統代理設定失敗')],
+        ['TUN 需要管理员权限', t('TUN 需要管理员权限：请关闭应用后，右键「以管理员身份运行」Nexora Agent，再开启虚拟网卡', 'TUN requires admin rights: quit the app, right-click Nexora Agent → Run as administrator, then enable Virtual NIC.', 'TUN 需要系統管理員權限：請關閉應用後，右鍵「以系統管理員身分執行」Nexora Agent，再開啟虛擬網卡')],
+        ['TUN 模式需要管理员权限', t('TUN 模式需要管理员权限', 'TUN mode requires administrator privileges.', 'TUN 模式需要系統管理員權限')],
+        ['内核文件不存在', t('内核文件不存在', 'Core binary is missing.', '核心檔案不存在')],
+        ['内核文件损坏', t('内核文件损坏', 'Core binary is corrupted.', '核心檔案損壞')],
+        ['代理内核不可用', t('代理内核不可用', 'Relay core is unavailable.', '中轉核心不可用')],
+        ['内核不可用', t('内核不可用', 'Core is unavailable.', '核心不可用')],
+        ['检测超时', t('检测超时', 'Detection timeout', '檢測超時')],
+    ];
+    for (const [zh, localized] of map) {
+        if (msg.includes(zh) || msg === zh) return localized;
+    }
+    return msg;
+}
+
 async function handleAccelerationResult(promise, successText, options = {}) {
     try {
-        setAccelerationBusy(true, options.busyMessage || '处理中...');
+        setAccelerationBusy(true, options.busyMessage || t('处理中...', 'Processing...', '處理中...'));
         const res = await promise;
         if (!res || !res.success) {
             if (!(res && res.canceled)) {
-                let msg = (res && res.error) || '未知错误';
-                if (msg.includes('429')) {
-                    msg = '接口请求过于频繁 (HTTP 429)，请稍后再试';
-                }
+                let msg = localizeAccelerationErrorMessage((res && res.error) || '');
                 setAccelerationImportFeedback(msg, 'error');
-                showToast('Nexora Clash 操作失败: ' + msg);
+                showToast(t('网络中转操作失败: ', 'Network Relay operation failed: ', '網路中轉操作失敗: ') + msg);
             }
             return null;
         }
@@ -15444,8 +15579,9 @@ async function handleAccelerationResult(promise, successText, options = {}) {
         }
         return res;
     } catch (err) {
-        setAccelerationImportFeedback(err.message || String(err), 'error');
-        showToast('Nexora Clash 操作失败: ' + err.message);
+        const msg = localizeAccelerationErrorMessage(err && err.message ? err.message : String(err || ''));
+        setAccelerationImportFeedback(msg, 'error');
+        showToast(t('网络中转操作失败: ', 'Network Relay operation failed: ', '網路中轉操作失敗: ') + msg);
         return null;
     } finally {
         setAccelerationBusy(false);
@@ -15536,7 +15672,7 @@ function startAccelerationAutoSelectCountdown(sec, generation) {
             return;
         }
         if (!(accelerationState && accelerationState.enabled)) {
-            setAccelerationAutoSelectStatus(t('需先启用加速', 'Enable acceleration first', '需先啟用加速'));
+            setAccelerationAutoSelectStatus(t('需先启用本地转发', 'Enable local forwarding first', '需先啟用本地轉發'));
             return;
         }
         if (autoSelectRunInFlight || accelerationBusy) {
@@ -15554,7 +15690,7 @@ async function runBackgroundAutoSelect() {
     if (autoSelectRunInFlight || accelerationBusy) return;
     if (!isAccelerationAutoSelectEnabled()) return;
     if (!(accelerationState && accelerationState.enabled)) {
-        setAccelerationAutoSelectStatus(t('需先启用加速', 'Enable acceleration first', '需先啟用加速'));
+        setAccelerationAutoSelectStatus(t('需先启用本地转发', 'Enable local forwarding first', '需先啟用本地轉發'));
         return;
     }
     autoSelectRunInFlight = true;
@@ -15563,7 +15699,7 @@ async function runBackgroundAutoSelect() {
         await runAccelerationDelayTest({ force: true, silent: true, fromAuto: true });
     } catch (err) {
         console.error('Auto select background run failed:', err);
-        showToast('自动测速失败: ' + (err.message || String(err)));
+        showToast(t('自动测速失败: ', 'Auto speed test failed: ', '自動測速失敗: ') + (err.message || String(err)));
     } finally {
         autoSelectRunInFlight = false;
     }
@@ -15672,14 +15808,14 @@ function initAccelerationChannel() {
             accelerationState = { ...(accelerationState || {}), ...payload };
             try { renderAccelerationChannel(accelerationState); } catch (_) {}
             if (payload.reason === 'core-exit' && payload.restarting) {
-                showToast(t('加速内核异常退出，正在自动重启…', 'Acceleration core crashed, restarting…', '加速核心異常退出，正在自動重啟…'));
+                showToast(t('网络中转核心异常退出，正在自动重启…', 'Network Relay core crashed, restarting…', '網路中轉核心異常退出，正在自動重啟…'));
             } else if (payload.reason === 'core-restarted') {
-                showToast(t('加速内核已自动恢复', 'Acceleration core restored', '加速核心已自動恢復'));
+                showToast(t('网络中转核心已自动恢复', 'Network Relay core restored', '網路中轉核心已自動恢復'));
                 setTimeout(() => {
                     runAccelerationIpDetect({ force: true, reason: 'auto-restart' }).catch(() => {});
                 }, 800);
             } else if (payload.reason === 'core-exit-gave-up') {
-                showToast(t('加速内核多次重启失败，已关闭通道', 'Acceleration core failed to restart, channel disabled', '加速核心多次重啟失敗，已關閉通道'));
+                showToast(t('网络中转核心多次重启失败，已关闭通道', 'Network Relay core failed to restart; channel disabled', '網路中轉核心多次重啟失敗，已關閉通道'));
             }
             updateAccelerationBusyUi();
         });
@@ -15724,18 +15860,18 @@ function initAccelerationChannel() {
             const port = accelerationState && accelerationState.mixedPort;
             const text = port ? `127.0.0.1:${port}` : '';
             if (!text) {
-                showToast('当前没有可用的本地代理地址');
+                showToast(t('当前没有可用的本地转发地址', 'No local forwarding address available', '當前沒有可用的本地轉發地址'));
                 return;
             }
             try {
                 const ok = await copyToClipboard(text);
                 if (ok) {
-                    showToast('已复制本地代理：' + text);
+                    showToast(t('已复制本地转发地址：', 'Copied local forwarding address: ', '已複製本地轉發地址：') + text);
                 } else {
-                    showToast('复制失败：剪贴板写入受限');
+                    showToast(t('复制失败：剪贴板写入受限', 'Copy failed: clipboard restricted', '複製失敗：剪貼簿寫入受限'));
                 }
             } catch (e) {
-                showToast('复制失败：' + (e.message || String(e)));
+                showToast(t('复制失败：', 'Copy failed: ', '複製失敗：') + (e.message || String(e)));
             }
         });
     }
@@ -15755,7 +15891,7 @@ function initAccelerationChannel() {
             if (accelerationState && accelerationState.enabled) {
                 runAccelerationIpDetect({ force: true }).catch(() => {});
             }
-            showToast('状态已刷新');
+            showToast(t('状态已刷新', 'Status refreshed', '狀態已重新整理'));
         });
     }
 
@@ -15772,14 +15908,14 @@ function initAccelerationChannel() {
             const url = (document.getElementById('acc-import-url') || {}).value || '';
             const name = (document.getElementById('acc-import-name') || {}).value || '';
             if (!String(url).trim()) {
-                setAccelerationImportFeedback('请先填写订阅 URL', 'error');
+                setAccelerationImportFeedback(t('请先填写配置 URL', 'Enter a config URL first', '請先填寫配置 URL'), 'error');
                 return;
             }
-            setAccelerationImportFeedback('正在拉取订阅，请稍候…', 'success');
+            setAccelerationImportFeedback(t('正在拉取订阅，请稍候…', 'Fetching subscription, please wait…', '正在拉取訂閱，請稍候…'), 'success');
             const res = await handleAccelerationResult(
                 window.api.addAccelerationUrl(String(url).trim(), String(name).trim()),
-                '已添加加速配置',
-                { busyMessage: '正在拉取订阅…' }
+                t('已添加中转配置', 'Relay profile added', '已添加中轉設定'),
+                { busyMessage: t('正在拉取订阅…', 'Fetching subscription…', '正在拉取訂閱…') }
             );
             if (res && res.success) {
                 const urlInput = document.getElementById('acc-import-url');
@@ -15794,7 +15930,7 @@ function initAccelerationChannel() {
     const fileSubmit = document.getElementById('acc-import-file-submit');
     if (fileSubmit) {
         fileSubmit.addEventListener('click', async () => {
-            await handleAccelerationResult(window.api.pickAccelerationFile(), '已导入配置文件');
+            await handleAccelerationResult(window.api.pickAccelerationFile(), t('已导入配置文件', 'Config file imported', '已匯入設定檔'));
         });
     }
 
@@ -15802,16 +15938,16 @@ function initAccelerationChannel() {
     if (qrSubmit) {
         qrSubmit.addEventListener('click', async () => {
             const content = String((document.getElementById('acc-qr-content') || {}).value || '').trim();
-            const name = String((document.getElementById('acc-qr-name') || {}).value || '').trim() || '二维码配置';
+            const name = String((document.getElementById('acc-qr-name') || {}).value || '').trim() || t('二维码配置', 'QR config', '二維碼設定');
             if (!content) {
-                setAccelerationImportFeedback('请粘贴二维码解析结果或订阅内容', 'error');
+                setAccelerationImportFeedback(t('请粘贴二维码解析结果或订阅内容', 'Paste QR decode result or subscription content', '請貼上二維碼解析結果或訂閱內容'), 'error');
                 return;
             }
             let res = null;
             if (/^https?:\/\//i.test(content)) {
-                res = await handleAccelerationResult(window.api.addAccelerationUrl(content, name), '已添加二维码订阅');
+                res = await handleAccelerationResult(window.api.addAccelerationUrl(content, name), t('已添加二维码订阅', 'QR subscription added', '已添加二維碼訂閱'));
             } else {
-                res = await handleAccelerationResult(window.api.addAccelerationContent(content, name), '已添加二维码配置');
+                res = await handleAccelerationResult(window.api.addAccelerationContent(content, name), t('已添加二维码配置', 'QR config added', '已添加二維碼設定'));
             }
             if (res && res.success) {
                 const box = document.getElementById('acc-qr-content');
@@ -15827,9 +15963,14 @@ function initAccelerationChannel() {
                 const text = await navigator.clipboard.readText();
                 const box = document.getElementById('acc-qr-content');
                 if (box) box.value = text || '';
-                setAccelerationImportFeedback(text ? '已从剪贴板粘贴内容，点击“添加配置”即可' : '剪贴板为空', text ? 'success' : 'error');
+                setAccelerationImportFeedback(
+                    text
+                        ? t('已从剪贴板粘贴内容，点击“添加配置”即可', 'Pasted from clipboard. Click Add Profile to import.', '已從剪貼簿貼上內容，點擊「添加設定」即可')
+                        : t('剪贴板为空', 'Clipboard is empty', '剪貼簿為空'),
+                    text ? 'success' : 'error'
+                );
             } catch (err) {
-                setAccelerationImportFeedback('无法读取剪贴板，请手动粘贴', 'error');
+                setAccelerationImportFeedback(t('无法读取剪贴板，请手动粘贴', 'Cannot read clipboard; paste manually', '無法讀取剪貼簿，請手動貼上'), 'error');
             }
         });
     }
@@ -15870,17 +16011,17 @@ function initAccelerationChannel() {
                                 } catch(ex) {}
                             }
                             
-                            setAccelerationImportFeedback('图片二维码识别成功！点击“添加配置”即可导入', 'success');
+                            setAccelerationImportFeedback(t('图片二维码识别成功！点击“添加配置”即可导入', 'QR code recognized. Click Add Profile to import.', '圖片二維碼識別成功！點擊「添加設定」即可匯入'), 'success');
                         } else {
-                            setAccelerationImportFeedback('未在图片中检测到有效的二维码，请确保图片清晰且为二维码', 'error');
+                            setAccelerationImportFeedback(t('未在图片中检测到有效的二维码，请确保图片清晰且为二维码', 'No valid QR code found. Use a clear QR image.', '未在圖片中檢測到有效的二維碼，請確保圖片清晰且為二維碼'), 'error');
                         }
                     } catch (ex) {
-                        setAccelerationImportFeedback('图片解码失败，可能是跨域或格式不支持', 'error');
+                        setAccelerationImportFeedback(t('图片解码失败，可能是跨域或格式不支持', 'Image decode failed; format may be unsupported.', '圖片解碼失敗，可能是跨域或格式不支援'), 'error');
                     }
                     qrFileInput.value = '';
                 };
                 img.onerror = () => {
-                    setAccelerationImportFeedback('图片加载失败，请确保文件格式正确', 'error');
+                    setAccelerationImportFeedback(t('图片加载失败，请确保文件格式正确', 'Failed to load image; check the file format.', '圖片載入失敗，請確保檔案格式正確'), 'error');
                     qrFileInput.value = '';
                 };
                 img.src = event.target.result;
@@ -15904,7 +16045,7 @@ function initAccelerationChannel() {
     if (profileSelect) {
         profileSelect.addEventListener('change', async (e) => {
             if (!e.target.value) return;
-            const res = await handleAccelerationResult(window.api.setAccelerationActiveProfile(e.target.value), '已切换配置');
+            const res = await handleAccelerationResult(window.api.setAccelerationActiveProfile(e.target.value), t('已切换配置', 'Profile switched', '已切換配置'));
             await onAccelerationProfileSwitched(res);
         });
     }
@@ -15916,7 +16057,7 @@ function initAccelerationChannel() {
             if (!item) return;
             const id = item.getAttribute('data-profile-id');
             if (!id) return;
-            const res = await handleAccelerationResult(window.api.setAccelerationActiveProfile(id), '已切换配置');
+            const res = await handleAccelerationResult(window.api.setAccelerationActiveProfile(id), t('已切换配置', 'Profile switched', '已切換配置'));
             await onAccelerationProfileSwitched(res);
         });
     }
@@ -15929,16 +16070,21 @@ function initAccelerationChannel() {
             const activeProfile = (accelerationState.profiles || []).find((p) => p.id === id);
             const currentName = activeProfile ? (activeProfile.name || activeProfile.id) : '';
             const fields = [
-                { key: 'name', label: '配置备注名称', value: currentName, placeholder: '请输入备注名称' }
+                { key: 'name', label: t('配置备注名称', 'Profile display name', '設定備註名稱'), value: currentName, placeholder: t('请输入备注名称', 'Enter a display name', '請輸入備註名稱') }
             ];
-            const values = await window.promptFields('修改配置备注', fields, '修改此配置在本地显示的备注名称。', '确认修改');
+            const values = await window.promptFields(
+                t('修改配置备注', 'Rename profile', '修改設定備註'),
+                fields,
+                t('修改此配置在本地显示的备注名称。', 'Change the local display name for this profile.', '修改此設定在本地顯示的備註名稱。'),
+                t('确认修改', 'Confirm', '確認修改')
+            );
             if (!values) return;
             const name = String(values.name || '').trim();
             if (!name) {
-                alert('备注名称不能为空');
+                alert(t('备注名称不能为空', 'Display name cannot be empty', '備註名稱不能為空'));
                 return;
             }
-            await handleAccelerationResult(window.api.renameAccelerationProfile(id, name), '备注已更新');
+            await handleAccelerationResult(window.api.renameAccelerationProfile(id, name), t('备注已更新', 'Display name updated', '備註已更新'));
         });
     }
 
@@ -15947,7 +16093,7 @@ function initAccelerationChannel() {
         updateBtn.addEventListener('click', async () => {
             const id = accelerationState && accelerationState.activeProfileId;
             if (!id) return;
-            await handleAccelerationResult(window.api.updateAccelerationProfile(id), '订阅已更新');
+            await handleAccelerationResult(window.api.updateAccelerationProfile(id), t('订阅已更新', 'Subscription updated', '訂閱已更新'));
         });
     }
 
@@ -15956,9 +16102,9 @@ function initAccelerationChannel() {
         deleteBtn.addEventListener('click', async () => {
             const id = accelerationState && accelerationState.activeProfileId;
             if (!id) return;
-            const ok = await confirm('确定删除当前加速配置吗？');
+            const ok = await confirm(t('确定删除当前中转配置吗？', 'Delete the current relay profile?', '確定刪除當前中轉設定嗎？'));
             if (!ok) return;
-            await handleAccelerationResult(window.api.removeAccelerationProfile(id), '已删除配置');
+            await handleAccelerationResult(window.api.removeAccelerationProfile(id), t('已删除配置', 'Profile deleted', '已刪除設定'));
         });
     }
 
@@ -15994,7 +16140,7 @@ function initAccelerationChannel() {
             const name = card.getAttribute('data-proxy-name');
             if (!name) return;
             // 自动模式下也允许手动点选；切标签 / 下个周期会按标签重选
-            await handleAccelerationResult(window.api.selectAccelerationProxy({ name, group: 'GLOBAL' }), '已切换代理节点');
+            await handleAccelerationResult(window.api.selectAccelerationProxy({ name, group: 'GLOBAL' }), t('已切换中转通道', 'Relay channel switched', '已切換中轉通道'));
         });
     }
 
@@ -16014,14 +16160,14 @@ function initAccelerationChannel() {
             if (nextState) {
                 const sec = getAccelerationAutoSelectIntervalSec();
                 if (!(accelerationState && accelerationState.enabled)) {
-                    showToast('请先启用加速通道，再开自动选择');
+                    showToast(t('请先启用本地转发通道，再开自动选择', 'Enable local forwarding first, then auto-select', '請先啟用本地轉發通道，再開自動選擇'));
                 } else {
                     showToast(`已开启自动选择：测完后每 ${sec} 秒再测一轮`);
                 }
                 setupAutoSelectTimer({ runNow: true });
             } else {
                 setupAutoSelectTimer();
-                showToast('已关闭自动选择，可手动点击节点切换');
+                showToast(t('已关闭自动选择，可手动点击通道切换', 'Auto-select off; tap a channel to switch', '已關閉自動選擇，可手動點擊通道切換'));
             }
         });
     }
@@ -16097,7 +16243,7 @@ function initAccelerationChannel() {
     }
 
     async function setAccelerationProxyMode(kind, on) {
-        // 系统代理 / TUN 依赖内核已启动
+        // 本机转发 / 虚拟网卡转发依赖内核已启动
         if ((kind === 'system' || kind === 'tun' || kind === 'virtualNic')
             && !(accelerationState && accelerationState.running)) {
             showToast(t('acc.control.need_enable'));
@@ -16107,16 +16253,16 @@ function initAccelerationChannel() {
         let payload, okText;
         if (kind === 'system') {
             payload = { systemProxy: on };
-            okText = on ? '系统代理已开启' : '系统代理已关闭';
+            okText = on ? t('本机转发已开启', 'Host forwarding enabled', '本機轉發已開啟') : t('本机转发已关闭', 'Host forwarding disabled', '本機轉發已關閉');
         } else if (kind === 'tun' || kind === 'virtualNic') {
             payload = { virtualNic: on };
-            okText = on ? 'TUN 已开启' : '虚拟网卡已关闭';
+            okText = on ? t('虚拟网卡转发已开启', 'Virtual NIC forwarding enabled', '虛擬網卡轉發已開啟') : t('虚拟网卡转发已关闭', 'Virtual NIC forwarding disabled', '虛擬網卡轉發已關閉');
         } else {
             payload = { autoStart: on };
-            okText = on ? '自启动已开启' : '自启动已关闭';
+            okText = on ? t('自启动已开启', 'Auto-start enabled', '自啟動已開啟') : t('自启动已关闭', 'Auto-start disabled', '自啟動已關閉');
         }
         const res = await handleAccelerationResult(window.api.setAccelerationOptions(payload), okText);
-        if (res && res.warning) showToast(res.warning);
+        if (res && res.warning) showToast(localizeAccelerationErrorMessage(res.warning) || res.warning);
         if (res && res.success && accelerationState) renderAccelerationChannel(res);
         else await refreshAccelerationChannel();
         return res;
@@ -16139,11 +16285,11 @@ function initAccelerationChannel() {
     document.querySelectorAll('input[name="acc-mode"]').forEach((input) => {
         input.addEventListener('change', async (e) => {
             if (!e.target.checked) return;
-            await handleAccelerationResult(window.api.setAccelerationOptions({ mode: e.target.value }), '出站模式已更新');
+            await handleAccelerationResult(window.api.setAccelerationOptions({ mode: e.target.value }), t('分流规则已更新', 'Routing rules updated', '分流規則已更新'));
         });
     });
 
-    // 仪表盘开关：启用加速通道
+    // 仪表盘开关：启用本地转发通道
     const dashEnabledToggle = document.getElementById('acc-dash-enabled-toggle');
     if (dashEnabledToggle) {
         dashEnabledToggle.addEventListener('change', (e) => {
@@ -16151,7 +16297,7 @@ function initAccelerationChannel() {
         });
     }
 
-    // 仪表盘开关：系统代理
+    // 仪表盘开关：本机转发
     const dashSystemProxyToggle = document.getElementById('acc-dash-system-proxy-toggle');
     if (dashSystemProxyToggle) {
         dashSystemProxyToggle.addEventListener('change', async (e) => {
@@ -16159,7 +16305,7 @@ function initAccelerationChannel() {
         });
     }
 
-    // 仪表盘开关：虚拟网卡 TUN
+    // 仪表盘开关：虚拟网卡转发
     const dashTunToggle = document.getElementById('acc-dash-tun-toggle');
     if (dashTunToggle) {
         dashTunToggle.addEventListener('change', async (e) => {
@@ -16167,13 +16313,13 @@ function initAccelerationChannel() {
         });
     }
 
-    // 仪表盘：出站模式按钮切换
+    // 仪表盘：分流规则按钮切换
     document.querySelectorAll('.acc-dash-mode-btn').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
             const mode = e.currentTarget.getAttribute('data-mode');
             const res = await handleAccelerationResult(
                 window.api.setAccelerationOptions({ mode: mode }),
-                '出站模式已更新'
+                t('分流规则已更新', 'Routing rules updated', '分流規則已更新')
             );
             if (res && res.success && accelerationState) renderAccelerationChannel(res);
         });
@@ -16257,15 +16403,15 @@ function initAccelerationChannel() {
     const closeAllConnsBtn = document.getElementById('acc-connections-close-all-btn');
     if (closeAllConnsBtn) {
         closeAllConnsBtn.addEventListener('click', async () => {
-            const ok = await confirm('确定断开当前所有网络连接吗？这可能会使正在进行的文件下载或API会话暂时中断。');
+            const ok = await confirm(t('确定断开当前所有网络连接吗？这可能会使正在进行的文件下载或API会话暂时中断。', 'Close all current network connections? Ongoing downloads or API sessions may be interrupted.', '確定斷開目前所有網路連線嗎？這可能會使正在進行的檔案下載或 API 工作階段暫時中斷。'));
             if (!ok) return;
             if (window.api && window.api.closeAccelerationConnection) {
                 const res = await window.api.closeAccelerationConnection(null);
                 if (res && res.success) {
-                    showToast('已断开所有网络连接');
+                    showToast(t('已断开所有网络连接', 'All network connections closed', '已斷開所有網路連線'));
                     refreshConnections();
                 } else {
-                    showToast('断开连接失败: ' + (res.error || '未知错误'));
+                    showToast(t('断开连接失败: ', 'Failed to close connection: ', '斷開連線失敗: ') + localizeAccelerationErrorMessage((res && res.error) || ''));
                 }
             }
         });
@@ -16470,7 +16616,7 @@ async function resetBuiltinTerminalToInitial() {
 })();
 
 // ==========================================
-// Nexora Clash Dashboard Helpers
+// Network Relay Dashboard Helpers
 // ==========================================
 
 // 网速历史缓存数据

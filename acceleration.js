@@ -818,7 +818,7 @@ function formatSubscriptionFetchError(err) {
         return '无法连接订阅服务器。请检查网络，或先启用已有加速配置后再添加';
     }
     if (/代理 CONNECT/i.test(msg)) {
-        return '本地代理不可用，无法拉取订阅。请先启用 Nexora Clash，或改用文件导入';
+        return '本地转发不可用，无法拉取配置。请先启用网络中转，或改用文件导入';
     }
     return msg || '拉取订阅失败';
 }
@@ -1414,7 +1414,7 @@ async function addProfileFromUrl(url, name) {
     const fetched = await fetchSubscription(String(url).trim());
     const content = fetched.content;
     if (!content || (!content.includes('proxies') && !content.includes('proxy-providers'))) {
-        throw new Error('订阅内容不是有效的 Clash/Mihomo 配置');
+        throw new Error('配置内容不是有效的本地转发配置');
     }
     return addProfileFromContent(content, name || guessNameFromUrl(url), {
         source: 'url',
@@ -1488,7 +1488,7 @@ async function updateProfileFromUrl(id) {
     const fetched = await fetchSubscription(String(profile.url).trim());
     const content = fetched.content;
     if (!content || (!content.includes('proxies') && !content.includes('proxy-providers'))) {
-        throw new Error('订阅内容不是有效的 Clash/Mihomo 配置');
+        throw new Error('配置内容不是有效的本地转发配置');
     }
     writeProfileYaml(id, content);
     profile.updatedAt = Date.now();

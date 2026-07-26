@@ -7266,11 +7266,23 @@ input:focus, select:focus, textarea:focus {
 }
 
 .acc-dash-toggle-primary {
-  padding: 10px 12px;
-  margin: 0 -4px;
+  padding: 10px 0;
+  margin: 0;
   border-radius: 10px;
   background: rgba(var(--accent-rgb), 0.1);
-  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  /* 用 inset 描边，避免 border 把文案/开关挤偏 */
+  border: none;
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22);
+  box-sizing: border-box;
+}
+
+/* 与主开关同一水平起点，保证文案与右侧开关对齐 */
+.acc-dash-unified-toggles > .acc-dash-toggle-row,
+.acc-dash-sub-toggles > .acc-dash-toggle-row {
+  padding-left: 12px;
+  padding-right: 12px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .acc-dash-sub-toggles {

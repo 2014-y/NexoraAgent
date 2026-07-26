@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nexora 数据中心</title>
+<title>Nexora 数据总览</title>
 <script src="./vendor/vue.global.prod.js"></script>
 <script src="./vendor/echarts.min.js"></script>
 <style>
@@ -208,9 +208,9 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
 <body>
 <div id="app">
   <header class="header">
-    <h1>⚔️ Nexora 数据中心</h1>
+    <h1 id="dc-page-title">⚔️ Nexora 数据总览</h1>
       <div style="display:flex;align-items:center;gap:20px">
-      <div><span class="status-dot"></span><span style="color:var(--ok)">系统运行中</span></div>
+      <div><span class="status-dot"></span><span id="dc-status-running" style="color:var(--ok)">系统运行中</span></div>
       <div class="time">{{ currentTime }}</div>
     </div>
   </header>
@@ -943,10 +943,25 @@ app.mount('#app');
       root.style.setProperty('--glow2', String(vars['--accent-color']));
     }
   }
+  function applyLang(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    const title = String(payload.title || '').trim();
+    const status = String(payload.statusRunning || '').trim();
+    if (title) {
+      try { document.title = title; } catch (_) {}
+      const h1 = document.getElementById('dc-page-title');
+      if (h1) h1.textContent = '⚔️ ' + title.replace(/^⚔️\s*/, '');
+    }
+    if (status) {
+      const el = document.getElementById('dc-status-running');
+      if (el) el.textContent = status;
+    }
+  }
   window.addEventListener('message', (evt) => {
     const data = evt && evt.data;
     if (!data || data.type !== 'nexora-theme') return;
     applyTheme(data.vars);
+    applyLang(data);
   });
   try {
     if (window.parent && window.parent !== window) {
