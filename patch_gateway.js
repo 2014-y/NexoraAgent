@@ -7,6 +7,23 @@ if (globalThis.__TOKENGUARD_PATCHED__) {
 }
 globalThis.__TOKENGUARD_PATCHED__ = true;
 
+// ─── 孤儿进程守卫 ───
+// 网关由 Electron fork（带 IPC 通道）。若 Electron 崩溃/被强杀而未走正常停网关流程，
+// 子进程会变成孤儿：继续占用 18789、微信/QQ 保持登录，下次启动又被强杀于半写状态。
+// IPC 通道断开（父进程消失）时主动退出，杜绝孤儿。仅在存在 IPC 通道时生效，不影响独立启动。
+(function installOrphanGuard() {
+    try {
+        if (globalThis.__NEXORA_ORPHAN_GUARD__) return;
+        globalThis.__NEXORA_ORPHAN_GUARD__ = true;
+        if (typeof process.send === 'function') {
+            process.on('disconnect', () => {
+                try { console.warn('[patch_gateway] parent IPC disconnected — exiting to avoid orphan'); } catch (_) {}
+                process.exit(0);
+            });
+        }
+    } catch (_) {}
+})();
+
 // ─── 自定义扩展插件：放行 gateway.request（否则 overflow-rollover 无法 sessions.reset）───
 (function patchTrustedOfficialPluginGatewayAccess() {
     try {
@@ -2214,6 +2231,8 @@ __tgInfo('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.
 const LLM_TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const LLM_TRANSIENT_MAX_ATTEMPTS = 30; // 含首次；连续失败 30 次才放弃本次请求
 const LLM_TRANSIENT_RETRY_DELAY_MS = 800;
+/** 网络层（UND_ERR_SOCKET 等）：含首次共 4 次，退避 1.5s / 2s / 3s */
+const LLM_NETWORK_RETRY_DELAYS_MS = [1500, 2000, 3000];
 
 function __tgSleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2361,15 +2380,23 @@ function wrapFetch(originalFetch) {
             }
             return await originalFetch.apply(this, arguments);
         } catch (e) {
-            // 网络层瞬时失败：短重试一次 completions
+            // 网络层瞬时失败：再重试最多 3 次（含首次共 4 次）后再交给 failover
             if (isCompletions) {
-                try {
-                    await __tgSleep(1500);
-                    console.log('[TokenGuard] LLM fetch network error — one-shot retry');
-                    return await originalFetch.apply(this, arguments);
-                } catch (e2) {
-                    throw e2;
+                const delays = LLM_NETWORK_RETRY_DELAYS_MS;
+                let lastErr = e;
+                for (let i = 0; i < delays.length; i++) {
+                    try {
+                        await __tgSleep(delays[i]);
+                        console.log(
+                            '[TokenGuard] LLM fetch network error — retry ' +
+                            (i + 1) + '/' + delays.length
+                        );
+                        return await originalFetch.apply(this, arguments);
+                    } catch (e2) {
+                        lastErr = e2;
+                    }
                 }
+                throw lastErr;
             }
             return await originalFetch.apply(this, arguments);
         }

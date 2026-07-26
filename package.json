@@ -40,6 +40,9 @@
     "voice:ensure": "node scripts/ensure-voice-release-asset.js",
     "voice:copy-dist": "node scripts/copy-voice-to-dist.js",
     "app:pack": "electron-packager . \"Nexora Agent\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "dist:prepare": "node scripts/prepare-dist.js",
+    "app:dist:mac": "npm run dist:prepare && electron-builder --mac",
+    "app:dist:linux": "npm run dist:prepare && electron-builder --linux",
     "pack:runtime": "node scripts/pack-gateway-runtime.js",
     "data-center:install": "npm --prefix data-center install --omit=dev"
   },
@@ -57,9 +60,15 @@
     "open-computer-use": "0.1.54",
     "openclaw": "2026.7.1-2",
     "sherpa-onnx-node": "^1.13.4",
-    "sherpa-onnx-win-x64": "^1.13.4",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0"
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-win-x64": "^1.13.4",
+    "sherpa-onnx-darwin-arm64": "^1.13.4",
+    "sherpa-onnx-darwin-x64": "^1.13.4",
+    "sherpa-onnx-linux-x64": "^1.13.4",
+    "sherpa-onnx-linux-arm64": "^1.13.4"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -78,10 +87,16 @@
       "**/node_modules/node-pty/**",
       "**/node_modules/sherpa-onnx-node/**",
       "**/node_modules/sherpa-onnx-win-x64/**",
+      "**/node_modules/sherpa-onnx-darwin-arm64/**",
+      "**/node_modules/sherpa-onnx-darwin-x64/**",
+      "**/node_modules/sherpa-onnx-linux-x64/**",
+      "**/node_modules/sherpa-onnx-linux-arm64/**",
       "**/data-center/node_modules/**",
       "**/tts-worker.js",
       "**/*.node",
-      "**/*.dll"
+      "**/*.dll",
+      "**/*.dylib",
+      "**/*.so"
     ],
     "icon": "config/icon.ico",
     "directories": {
@@ -100,13 +115,21 @@
         "AppImage",
         "deb"
       ],
-      "icon": "config/icon.png"
+      "icon": "config/icon.png",
+      "maintainer": "2014-y <yuan2014850884@gmail.com>",
+      "category": "Utility"
     },
     "win": {
       "icon": "config/icon.ico",
       "publisherName": "Nexora Agent",
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "build-resources/acceleration-core",
+          "to": "acceleration-core"
+        }
       ]
     },
     "nsis": {
@@ -125,10 +148,6 @@
       {
         "from": "build-resources/gateway-runtime.tar",
         "to": "gateway-runtime.tar"
-      },
-      {
-        "from": "build-resources/acceleration-core",
-        "to": "acceleration-core"
       }
     ],
     "files": [
@@ -173,6 +192,10 @@
       "node_modules/node-pty/**/*",
       "node_modules/sherpa-onnx-node/**/*",
       "node_modules/sherpa-onnx-win-x64/**/*",
+      "node_modules/sherpa-onnx-darwin-arm64/**/*",
+      "node_modules/sherpa-onnx-darwin-x64/**/*",
+      "node_modules/sherpa-onnx-linux-x64/**/*",
+      "node_modules/sherpa-onnx-linux-arm64/**/*",
       "node_modules/msedge-tts/**/*",
       "node_modules/axios/**/*",
       "node_modules/isomorphic-ws/**/*",

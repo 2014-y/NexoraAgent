@@ -236,7 +236,7 @@ export default function createPlugin(runtime) {
         }
 
         // 提取内容
-        const content = result?.content || result?.text || null;
+        let content = result?.content || result?.text || null;
         if (content && typeof content === 'string' && content.trim().length > 0) {
           // 记录 token 用量
           const usage = result?.usage;
@@ -252,7 +252,10 @@ export default function createPlugin(runtime) {
         if ((!content || content.trim().length === 0) && result && result.choices && result.choices[0]) {
           const choice = result.choices[0];
           const oc = choice.message && (choice.message.reasoning || choice.message.content);
-          if (oc && typeof oc === "string" && oc.trim().length > 0) content = oc;
+          if (oc && typeof oc === "string" && oc.trim().length > 0) {
+            content = oc;
+            return { success: true, content: sanitizeString(content), code: 'OK' };
+          }
         }
 
         // 如果拿到结果但没有 content，可能是结构化输出

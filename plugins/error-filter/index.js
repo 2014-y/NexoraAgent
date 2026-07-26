@@ -29,10 +29,14 @@ const BLOCK_SUBSTRINGS = [
 const RUN_OUTBOUND_TTL_MS = 180_000;
 /** @type {Map<string, { at: number, preview: string }>} */
 const recentTextOutboundByRun = new Map();
-/** 同会话近重复正文去重（跨 runId，防 silent-retry/rollover 第二轮） */
-const SESSION_TEXT_DEDUP_TTL_MS = 90_000;
+/** 同会话近重复正文去重（跨 runId，防 silent-retry/rollover 第二轮）——窗口收紧，避免误杀正常连续回复 */
+const SESSION_TEXT_DEDUP_TTL_MS = 15_000;
 /** @type {Map<string, { at: number, fp: string, prefix: string }>} */
 const recentTextOutboundBySession = new Map();
+/** reply_payload 已放行的正文指纹 → 微信 message_sending 即使无 runId 也放行（120s） */
+const CHANNEL_DELIVERY_APPROVE_TTL_MS = 120_000;
+/** @type {Map<string, number>} */
+const recentApprovedChannelDeliveryByFp = new Map();
 
 /** 系统诊断硬特征：仅短消息或警告气泡拦截，避免误伤正常长回复 */
 const DIAGNOSTIC_HARD_SUBSTRINGS = [
@@ -163,13 +167,30 @@ function looksLikeConversationalReply(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
   // 角色口吻 / 明确建议结构（微信人格回复常见）
-  if (/(主子|小的|奴才|臣妾|回主|建议|推荐|主用|备用|方案|双剑|我来帮|当然可以|以下是|已经帮你|完成了|代码如下|```|首先|步骤)/.test(raw)) {
+  if (/(启禀|主子|小的|奴才|臣妾|回主|建议|推荐|主用|备用|方案|双剑|我来帮|当然可以|以下是|已经帮你|完成了|代码如下|```|首先|步骤)/.test(raw)) {
     return true;
   }
   // 长 Markdown 结构（标题/列表）几乎不可能是系统横幅
   if (raw.length >= 220 && /(^|\n)\s*#{1,3}\s+|(^|\n)\s*[-*]\s+\*\*/m.test(raw)) return true;
   const cn = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
   if (cn >= 48 && raw.length >= 160) return true;
+  return false;
+}
+
+/** 真·系统诊断横幅形态（短气泡 / 机器字段）；角色口吻解释一律不算 */
+function isDiagnosticBannerShaped(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  // 机器可读诊断字段：一律当真横幅
+  if (/compaction-diag|diagId\s*=\s*ovf-|trigger\s*=\s*overflow|\[agent\/embedded\]|reserveTokensFloor/i.test(raw)) {
+    return true;
+  }
+  // 角色口吻（主子/启禀/建议…）：即使短文提到 overflow / failed 也不当系统横幅
+  if (looksLikeConversationalReply(raw)) return false;
+  if (/^\s*⚠️/.test(raw) && raw.length <= 400) return true;
+  if (raw.length <= 280) return true;
+  const cn = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (cn < 24 && raw.length <= 600) return true;
   return false;
 }
 
@@ -213,18 +234,79 @@ function hitAnyRe(list, raw) {
   return false;
 }
 
+/** 模型/中转网络失败：改写为短中文，避免静默不回复 */
+const NETWORK_FAILURE_USER_NOTICE =
+  '模型服务暂时不可用（中转连接失败）。请稍后重试，或在设置里确认备用模型为公网通道。';
+/** 限流/过载：改写为短中文，禁止纯 cancel 导致微信哑火 */
+const RATE_LIMIT_USER_NOTICE = '模型暂时繁忙或限流，请稍后再发一条。';
+
+function isUserFacingSubstituteNotice(text) {
+  const raw = String(text || '').trim();
+  return raw === NETWORK_FAILURE_USER_NOTICE || raw === RATE_LIMIT_USER_NOTICE;
+}
+
+function isNetworkFailureBanner(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  // 长对话里偶尔提到 connection 不改写
+  if (looksLikeConversationalReply(raw) && raw.length >= 160) return false;
+  if (/^LLM request failed\.?$/i.test(raw)) return true;
+  if (/Connection failed.*network or proxy/i.test(raw)) return true;
+  if (/LLM request failed:\s*network connection error/i.test(raw)) return true;
+  if (/network connection error/i.test(raw) && raw.length <= 280) return true;
+  if (/All models failed\s*\(/i.test(raw)) return true;
+  if (/Embedded agent failed before reply/i.test(raw)) return true;
+  if (/Something went wrong while processing your request/i.test(raw) && raw.length <= 280) return true;
+  if (/FailoverError:\s*LLM request failed/i.test(raw)) return true;
+  return false;
+}
+
+function isRateLimitBannerForRewrite(text) {
+  const raw = String(text || '').trim();
+  if (!raw || isUserFacingSubstituteNotice(raw)) return false;
+  if (!(hitAny(RATE_LIMIT_BANNER_SUBSTRINGS, raw) || hitAnyRe(RATE_LIMIT_BANNER_REGEXES, raw))) {
+    return false;
+  }
+  if (looksLikeConversationalReply(raw) && raw.length >= 160) return false;
+  if (looksLikeConversationalReply(raw) && !isRateLimitBannerShaped(raw)) return false;
+  return true;
+}
+
+function rewriteNetworkFailureOutbound(text) {
+  const raw = String(text || '').trim();
+  if (!raw || isUserFacingSubstituteNotice(raw)) return null;
+  if (!isNetworkFailureBanner(raw)) return null;
+  return NETWORK_FAILURE_USER_NOTICE;
+}
+
+/** 网络失败 / 限流横幅 → 短中文；其它诊断仍走 cancel */
+function rewriteSilentFailureOutbound(text) {
+  const net = rewriteNetworkFailureOutbound(text);
+  if (net) return net;
+  if (isRateLimitBannerForRewrite(text)) return RATE_LIMIT_USER_NOTICE;
+  return null;
+}
+
 function shouldBlockOutbound(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
-  if (/^LLM request failed\.?$/i.test(raw)) return true;
-  if (/Connection failed.*network or proxy/i.test(raw)) return true;
+  // 已改写的中文提示放行
+  if (isUserFacingSubstituteNotice(raw)) return false;
+  // 网络失败横幅：仍视为「应拦截英文原样」；投递路径会改写为中文提示
+  if (isNetworkFailureBanner(raw)) return true;
   if (isModelFallbackNoticeOnly(raw)) return true;
   if (isLeakedToolJsonOnly(raw)) return true;
   if (isSystemDiagnosticBannerOnly(raw)) return true;
-  if (/^\s*[!\[]?\s*(warning|error|failed)\b/i.test(raw)) return true;
+  // 仅短横幅；长回复以 Failed/Error 开头不误杀
+  if (/^\s*[!\[]?\s*(warning|error|failed)\b/i.test(raw) && isDiagnosticBannerShaped(raw)) {
+    return true;
+  }
 
-  // 结构性诊断：不论长短一律拦截（compaction-diag 等）
+  // 结构性诊断：短横幅/机器字段拦截；角色口吻技术解释放行（防误杀「讲 overflow」）
   if (hitAny(DIAGNOSTIC_HARD_SUBSTRINGS, raw) || hitAnyRe(DIAGNOSTIC_HARD_REGEXES, raw)) {
+    if (looksLikeConversationalReply(raw) && !isDiagnosticBannerShaped(raw)) {
+      return false;
+    }
     return true;
   }
 
@@ -235,7 +317,13 @@ function shouldBlockOutbound(text) {
     return true;
   }
 
-  if (hitAny(BLOCK_SUBSTRINGS, raw) || hitAnyRe(BLOCK_REGEXES, raw)) return true;
+  // BLOCK 子串：角色文夹带 "LLM request failed" / "Model Fallback" 等放行
+  if (hitAny(BLOCK_SUBSTRINGS, raw) || hitAnyRe(BLOCK_REGEXES, raw)) {
+    if (looksLikeConversationalReply(raw) && !isDiagnosticBannerShaped(raw)) {
+      return false;
+    }
+    return true;
+  }
   return false;
 }
 
@@ -291,8 +379,56 @@ function resolveSessionDedupeKey(event) {
   return '';
 }
 
+function pruneApprovedChannelDelivery(now = Date.now()) {
+  for (const [k, at] of recentApprovedChannelDeliveryByFp) {
+    if (!at || now - at > CHANNEL_DELIVERY_APPROVE_TTL_MS) {
+      recentApprovedChannelDeliveryByFp.delete(k);
+    }
+  }
+}
+
+/** reply_payload 放行后盖章，供无 runId 的微信二道门识别 */
+function markApprovedForChannelDelivery(text) {
+  const fp = textFingerprint(text);
+  if (!fp || fp.length < 16) return;
+  pruneApprovedChannelDelivery();
+  recentApprovedChannelDeliveryByFp.set(fp, Date.now());
+}
+
+function isApprovedForChannelDelivery(text) {
+  const fp = textFingerprint(text);
+  if (!fp) return false;
+  pruneApprovedChannelDelivery();
+  const at = recentApprovedChannelDeliveryByFp.get(fp);
+  return Boolean(at && Date.now() - at < CHANNEL_DELIVERY_APPROVE_TTL_MS);
+}
+
+/** reply_payload 是否已为本 run 记过纯文本（微信 message_sending 是第二道门，不得再 cancel） */
+function runAlreadyRecordedTextOutbound(event) {
+  const runKey = resolveOutboundRunKey(event);
+  if (!runKey) return false;
+  const prev = recentTextOutboundByRun.get(runKey);
+  return Boolean(prev && Date.now() - prev.at < RUN_OUTBOUND_TTL_MS);
+}
+
+/** reply_payload 是否已为本 run 占过媒体坑 */
+function runAlreadyClaimedMediaOutbound(event) {
+  const runKey = resolveOutboundRunKey(event);
+  if (!runKey) return false;
+  const prev = recentMediaOutboundByRun.get(runKey);
+  return Boolean(prev && prev.paths && prev.paths.size > 0);
+}
+
+/** 渠道层是否应视为「reply 已放行」 */
+function isChannelDeliveryAlreadyApproved(event, text) {
+  if (runAlreadyRecordedTextOutbound(event)) return true;
+  if (isApprovedForChannelDelivery(text)) return true;
+  return false;
+}
+
 /**
  * 同一轮已成功发出过纯文本后，再发一条纯文本 → 取消（防「问一句回两句」）。
+ * 仅应在 reply_payload_sending 使用；message_sending 再用会掐死微信唯一投递。
  * 带媒体的投递放行；极短 ACK / NO_REPLY 不参与。
  * 注意：无 runId 时不做「整 peer 封禁」，只按正文指纹去重近似复读。
  */
@@ -308,26 +444,23 @@ function shouldCancelDuplicateRunOutbound(event, text) {
   const runKey = resolveOutboundRunKey(event);
   if (runKey) {
     const prev = recentTextOutboundByRun.get(runKey);
-    if (prev && now - prev.at < RUN_OUTBOUND_TTL_MS) return true;
+    // 同 run 第二次：仅「正文指纹完全相同」才拦（防「问一句回两句」的重复投递）。
+    // 不再用前 160 字模糊匹配——那会把同一 run 里以相同开头起草的不同气泡误判为复读。
+    if (prev && now - prev.at < RUN_OUTBOUND_TTL_MS) {
+      const fp = textFingerprint(raw);
+      const prevFp = String(prev.fp || textFingerprint(prev.preview || '') || '');
+      if (fp && prevFp && fp === prevFp) return true;
+    }
   }
 
-  // 跨 run：仅取消「正文几乎完全相同」的复读，避免误伤正常连续对话
+  // 跨 run：仅取消「正文完全相同」且在短窗（15s）内的复读，避免误伤正常连续对话。
+  // 去掉前 160 字近似匹配——它会把「模板开头相同、内容不同」的合法连续回复整条丢弃。
   const sessKey = resolveSessionDedupeKey(event);
   if (sessKey && raw.length >= 24) {
     const fp = textFingerprint(raw);
     const prev = recentTextOutboundBySession.get(sessKey);
     if (prev && now - prev.at < SESSION_TEXT_DEDUP_TTL_MS) {
       if (prev.fp === fp) return true;
-      // 要求前 160 字相同且长度接近，才视为复读（防双回复），短问候/不同回答不拦
-      if (
-        prev.fp
-        && fp.length >= 160
-        && prev.fp.length >= 160
-        && fp.slice(0, 160) === prev.fp.slice(0, 160)
-        && Math.abs(fp.length - prev.fp.length) <= Math.max(40, prev.fp.length * 0.2)
-      ) {
-        return true;
-      }
     }
   }
   return false;
@@ -343,8 +476,10 @@ function rememberRunOutbound(event, text) {
   pruneRecentOutbound(now);
   const runKey = resolveOutboundRunKey(event);
   if (runKey) {
+    const fp = textFingerprint(raw);
     recentTextOutboundByRun.set(runKey, {
       at: now,
+      fp,
       preview: raw.replace(/\s+/g, ' ').slice(0, 80),
     });
   }
@@ -357,6 +492,8 @@ function rememberRunOutbound(event, text) {
       prefix: fp.slice(0, 120),
     });
   }
+  // 无论有无 runId：盖章给微信 message_sending 二道门
+  markApprovedForChannelDelivery(raw);
 }
 
 function stateDir() {
@@ -368,6 +505,10 @@ function stateDir() {
 function needsSessionRollover(text) {
   const t = String(text || '');
   if (!t) return false;
+  // 角色口吻解释 overflow 机制：绝不触发 rollover
+  if (looksLikeConversationalReply(t) && !isDiagnosticBannerShaped(t)) {
+    return false;
+  }
   return (
     /auto-compaction|context[_\s-]?overflow|prompt too large|compaction[-_ ]?diag|use \/compact|use \/new|\/new to start|Message ordering conflict|roles must alternate|incorrect role information|conversation state|reserveTokensFloor|上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new/i.test(
       t
@@ -437,9 +578,15 @@ async function runScreenCapture() {
   const suffix = Math.random().toString(36).slice(2, 8);
   const filepath = path.join(dir, `openclaw-screenshot-${stamp}-${suffix}.png`);
   const latest = path.join(dir, 'openclaw-screenshot-latest.png');
-  await execFileAsync('powershell.exe', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolveCaptureScriptPath(), '-OutPath', filepath,
-  ], { timeout: 30000, maxBuffer: 1024 * 1024 });
+  if (process.platform === 'darwin') {
+    await execFileAsync('screencapture', ['-x', filepath], { timeout: 30000, maxBuffer: 1024 * 1024 });
+  } else if (process.platform !== 'win32') {
+    throw new Error('screenshot not supported on this platform');
+  } else {
+    await execFileAsync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolveCaptureScriptPath(), '-OutPath', filepath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 });
+  }
   if (!fs.existsSync(filepath)) throw new Error('screenshot file was not created');
   try { fs.copyFileSync(filepath, latest); } catch (_) {}
   // 兼容旧路径（部分 UI 仍指向 state 根目录）
@@ -1050,9 +1197,23 @@ function register(api) {
         console.log(`[${PLUGIN_ID}] cancelled duplicate reply payload: ${preview}`);
         return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-run-outbound' };
       }
+      const silentRewrite = rewriteSilentFailureOutbound(rawText);
+      if (silentRewrite) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote silent-failure reply payload`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] rewrote silent-failure reply payload`);
+        rememberRunOutbound(event, silentRewrite);
+        return { content: silentRewrite };
+      }
       if (rawText && !shouldBlockOutbound(rawText)) {
         rememberRunOutbound(event, rawText);
       } else if (shouldBlockOutbound(rawText)) {
+        // 与 message_sending 分支保持一致：取消溢出/奇偶横幅的同时排队续聊，
+        // 否则若本 hook 先短路取消，session-overflow-rollover 收不到信号 →
+        // 之后每条消息都再次溢出被取消 → 用户「发很多不回复」直到手动 /new。
+        const preview = String(rawText || '').replace(/\s+/g, ' ').slice(0, 100);
+        if (needsSessionRollover(rawText)) {
+          queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+        }
         return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
       }
     } catch (e) {
@@ -1062,8 +1223,11 @@ function register(api) {
 
   api.on('message_sending', async (event) => {
     try {
+      // ── 微信投递二道门 ──
+      // reply_payload_sending 已去重/占坑；此处再 cancel 会掐死渠道唯一发送 → 模型 200 但用户静默。
+      // 本钩子只做：伪媒体修复、失败横幅改写/拦截；禁止 text/media 去重 cancel。
+
       if (event?.metadata?.nexoraPseudoMediaFixed) {
-        // reply_payload 已修好：若本通道仍带 MEDIA，只占坑不改写
         const fixedText = extractText(event);
         const paths = collectOutboundMediaPaths(event, fixedText);
         if (paths.length > 0 || outboundHasMedia(event) || looksLikeMediaStatusOnly(fixedText)) {
@@ -1075,12 +1239,47 @@ function register(api) {
       const text = extractText(event);
       const promptHint = extractDrawPicturePrompt(text);
       const existingPaths = collectOutboundMediaPaths(event, text);
+      const alreadyText = isChannelDeliveryAlreadyApproved(event, text);
+      const alreadyMedia = runAlreadyClaimedMediaOutbound(event);
 
-      // 伪生图 / 已有媒体：若已占坑则整段取消（禁止再跑 runDrawPicture）
+      // reply 层已占媒体坑：本通道是投递本身，放行（勿 cancel）
+      if (
+        alreadyMedia
+        && (existingPaths.length > 0 || outboundHasMedia(event) || looksLikeMediaStatusOnly(text) || promptHint)
+      ) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] channel-layer pass claimed media (delivery gate)`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] channel-layer pass claimed media (delivery gate)`);
+        return;
+      }
+
+      // reply 层已放行纯文本（含无 runId 指纹盖章）：仅处理失败横幅，不做去重 cancel
+      if (alreadyText && !promptHint && existingPaths.length === 0 && !outboundHasMedia(event)) {
+        const silentRewrite = rewriteSilentFailureOutbound(text);
+        if (silentRewrite) {
+          console.log(`[${PLUGIN_ID}] channel-layer rewrote silent-failure (post-approve)`);
+          return { content: silentRewrite };
+        }
+        if (shouldBlockOutbound(text)) {
+          const preview = text.replace(/\s+/g, ' ').slice(0, 100);
+          console.log(`[${PLUGIN_ID}] channel-layer cancelled banner (post-approve): ${preview}`);
+          if (needsSessionRollover(text)) {
+            queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+          }
+          return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
+        }
+        return;
+      }
+
+      // 以下：仅走 message_sending、未经 reply_payload 的路径（或伪媒体命令）
       if (
         (promptHint || existingPaths.length > 0 || outboundHasMedia(event) || looksLikeMediaStatusOnly(text))
         && isMediaDeliveryClaimed(event, text, existingPaths, promptHint)
       ) {
+        // 已有实体媒体路径 → 渠道投递，放行；纯伪命令重复才 cancel
+        if (existingPaths.length > 0 || outboundHasMedia(event)) {
+          console.log(`[${PLUGIN_ID}] channel-layer pass media paths (claimed elsewhere)`);
+          return;
+        }
         const preview = String(text || '').replace(/\s+/g, ' ').slice(0, 100);
         try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media outbound: ${preview}`); } catch (_) {}
         console.log(`[${PLUGIN_ID}] cancelled duplicate media outbound: ${preview}`);
@@ -1089,6 +1288,10 @@ function register(api) {
 
       const reserve = reserveSessionDrawSlot(event, text, promptHint);
       if (!reserve.ok) {
+        if (alreadyMedia || existingPaths.length > 0 || outboundHasMedia(event)) {
+          console.log(`[${PLUGIN_ID}] channel-layer pass after reserve deny (delivery gate)`);
+          return;
+        }
         try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate media reserve`); } catch (_) {}
         console.log(`[${PLUGIN_ID}] cancelled duplicate media reserve`);
         return { cancel: true, cancelReason: reserve.reason };
@@ -1107,6 +1310,11 @@ function register(api) {
         const claim = claimMediaDelivery(event, mediaRewrite, paths, promptHint);
         if (!claim.ok) {
           if (reserve.reserved) releaseSessionDrawReservation(event);
+          // 已有媒体坑：放行渠道发送，勿 cancel
+          if (paths.length > 0 || alreadyMedia) {
+            console.log(`[${PLUGIN_ID}] channel-layer pass MEDIA rewrite claim deny`);
+            return { content: mediaRewrite, metadata: { nexoraPseudoMediaFixed: true } };
+          }
           try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate MEDIA rewrite`); } catch (_) {}
           console.log(`[${PLUGIN_ID}] cancelled duplicate MEDIA rewrite`);
           return { cancel: true, cancelReason: claim.reason };
@@ -1120,11 +1328,20 @@ function register(api) {
       if (existingPaths.length > 0 || outboundHasMedia(event)) {
         const claim = claimMediaDelivery(event, text, existingPaths, promptHint);
         if (!claim.ok) {
-          return { cancel: true, cancelReason: claim.reason };
+          // 渠道投递已有媒体：放行
+          console.log(`[${PLUGIN_ID}] channel-layer pass native media claim deny`);
+          return;
         }
       }
 
-      // 先拦系统横幅，避免把 LLM request failed 记成「已投递」导致真回复被误杀
+      const silentRewrite = rewriteSilentFailureOutbound(text);
+      if (silentRewrite) {
+        try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote silent-failure outbound`); } catch (_) {}
+        console.log(`[${PLUGIN_ID}] rewrote silent-failure outbound`);
+        rememberRunOutbound(event, silentRewrite);
+        return { content: silentRewrite };
+      }
+
       if (shouldBlockOutbound(text)) {
         const preview = text.replace(/\s+/g, ' ').slice(0, 100);
         try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled outbound: ${preview}`); } catch (_) {}
@@ -1135,11 +1352,11 @@ function register(api) {
         return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
       }
 
+      // 渠道层：禁止 shouldCancelDuplicateRunOutbound cancel（防微信哑火）
       if (shouldCancelDuplicateRunOutbound(event, text)) {
         const preview = String(text || '').replace(/\s+/g, ' ').slice(0, 100);
-        try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled duplicate run outbound: ${preview}`); } catch (_) {}
-        console.log(`[${PLUGIN_ID}] cancelled duplicate run outbound: ${preview}`);
-        return { cancel: true, cancelReason: 'error-filter:suppress-duplicate-run-outbound' };
+        console.log(`[${PLUGIN_ID}] channel-layer skip duplicate cancel (delivery gate): ${preview}`);
+        return;
       }
 
       rememberRunOutbound(event, text);
@@ -1171,8 +1388,19 @@ export const __testables = {
   releaseSessionDrawReservation,
   extractDrawPicturePrompt,
   shouldBlockOutbound,
+  isNetworkFailureBanner,
+  rewriteNetworkFailureOutbound,
+  rewriteSilentFailureOutbound,
+  NETWORK_FAILURE_USER_NOTICE,
+  RATE_LIMIT_USER_NOTICE,
   looksLikeConversationalReply,
+  isDiagnosticBannerShaped,
   isSystemDiagnosticBannerOnly,
+  needsSessionRollover,
+  shouldCancelDuplicateRunOutbound,
+  rememberRunOutbound,
+  runAlreadyRecordedTextOutbound,
+  runAlreadyClaimedMediaOutbound,
   resetMediaDedupeState() {
     recentMediaOutboundByRun.clear();
     recentPromptMediaDelivery.clear();
@@ -1183,5 +1411,9 @@ export const __testables = {
     _pseudoMediaInflight.clear();
     recentTextOutboundByRun.clear();
     recentTextOutboundBySession.clear();
+    recentApprovedChannelDeliveryByFp.clear();
   },
+  isChannelDeliveryAlreadyApproved,
+  markApprovedForChannelDelivery,
+  isApprovedForChannelDelivery,
 };

@@ -1032,7 +1032,7 @@ function lockGatewayAuthBeforeStart() {
                 norm.changed = true;
             }
             if (norm.changed) {
-                fs.writeFileSync(CONFIG_PATH, JSON.stringify(norm.config, null, 2) + '\n', 'utf8');
+                writeConfigFileAtomic(JSON.stringify(norm.config, null, 2) + '\n');
                 console.log('[TokenGuard] Normalized gateway.auth before start');
             }
         }
@@ -1046,7 +1046,7 @@ function lockGatewayAuthBeforeStart() {
                 port = portHint;
             }
             fs.mkdirSync(CONFIG_DIR, { recursive: true });
-            fs.writeFileSync(CONFIG_PATH, JSON.stringify(minimal, null, 2) + '\n', 'utf8');
+            writeConfigFileAtomic(JSON.stringify(minimal, null, 2) + '\n');
             token = NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN;
         } catch (e2) {
             console.error('[TokenGuard] Failed to write emergency auth config:', e2.message);
@@ -1093,6 +1093,34 @@ function rememberDashboardUrl(url) {
 
 let CONFIG_DIR = path.join(process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\Public', '.openclaw');
 let CONFIG_PATH = path.join(CONFIG_DIR, 'openclaw.json');
+
+/**
+ * 原子写 openclaw.json：写临时文件 → fsync → renameSync 覆盖。
+ * 消除「非原子整文件覆盖」被网关并发读到半截 JSON 的问题（这是 .rejected /
+ * unreadable-config-before-write / .bak-jsonfix 等损坏文件的根因）。
+ * 同卷 rename 在 Windows/NTFS 上是原子替换，读者永远看到完整旧文件或完整新文件。
+ * 注：这只根治「torn read 损坏」；app 与网关双写导致的 clobber+restore ping-pong
+ * 需「单一写者」架构改造，后续处理。
+ */
+function writeConfigFileAtomic(contents) {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.dirname(CONFIG_PATH);
+    const tmp = path.join(dir, `.openclaw.json.tmp-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+    try {
+        const fd = fs.openSync(tmp, 'w');
+        try {
+            fs.writeSync(fd, contents);
+            try { fs.fsyncSync(fd); } catch (_) {}
+        } finally {
+            fs.closeSync(fd);
+        }
+        fs.renameSync(tmp, CONFIG_PATH);
+    } catch (e) {
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+        throw e;
+    }
+}
 
 function resolveStableOpenClawHome(preferredHome) {
     const installDir = (() => {
@@ -1368,6 +1396,7 @@ const BUNDLED_EXTENSION_PLUGINS = [
 const MEDIA_TOOLS_MARKER = '<!-- nexora-media-tools-v3 -->';
 const MEDIA_MEMORY_MARKER = '<!-- nexora-media-memory-v1 -->';
 const MEDIA_AGENTS_MARKER = '<!-- nexora-media-agents-v2 -->';
+const SESSION_CONTINUITY_AGENTS_MARKER = '<!-- nexora-session-continuity-v1 -->';
 const MEDIA_TOOLS_MARKER_LEGACY = '<!-- nexora-media-tools-v1 -->';
 const MEDIA_AGENTS_MARKER_LEGACY = '<!-- nexora-media-agents-v1 -->';
 const REPLY_DEDUPE_AGENTS_MARKER = '<!-- nexora-reply-dedupe-v1 -->';
@@ -2409,6 +2438,13 @@ ${REPLY_DEDUPE_AGENTS_MARKER}
 - 普通对话只输出助手正文，**不要**用 \`message\` 工具再发一遍纯文本
 - 若本轮必须用 \`message\`/\`sendMedia\`，结尾只能是 \`NO_REPLY\`
 - 一轮只允许用户看到一条回复
+
+## 会话连续性
+${SESSION_CONTINUITY_AGENTS_MARKER}
+- 上下文长度与会话切换完全由系统自动处理（自动压缩、自动归档、自动续聊）
+- **禁止**要求或建议用户「开新会话 / 新窗口 / 重新开始对话 / 发 /new」
+- **禁止**向用户提及换会话、归档、压缩、上下文过长或「失忆」
+- 感觉历史太长也照常直接回答；缺历史细节可 read \`memory/last-session-archive.md\`
 `;
 
 function seedDefaultMemoryFile(memFile) {
@@ -2787,6 +2823,33 @@ function ensureMediaAgentsGuidance(wsDir) {
 }
 
 /**
+ * 会话连续性规则：禁止模型让用户「开新会话/新窗口」。
+ * 上下文吃紧时由 session-overflow-rollover 插件自动归档换新，用户全程无感。
+ */
+function ensureSessionContinuityGuidance(wsDir) {
+    try {
+        const agentsPath = path.join(wsDir, 'AGENTS.md');
+        if (!fs.existsSync(agentsPath)) return;
+        const cur = fs.readFileSync(agentsPath, 'utf8');
+        if (cur.includes(SESSION_CONTINUITY_AGENTS_MARKER)) return;
+        const section = [
+            '',
+            '## 会话连续性',
+            SESSION_CONTINUITY_AGENTS_MARKER,
+            '- 上下文长度与会话切换完全由系统自动处理（自动压缩、自动归档、自动续聊）',
+            '- **禁止**要求或建议用户「开新会话 / 新窗口 / 重新开始对话 / 发 /new」',
+            '- **禁止**向用户提及换会话、归档、压缩、上下文过长或「失忆」',
+            '- 感觉历史太长也照常直接回答；缺历史细节可 read `memory/last-session-archive.md`',
+            ''
+        ].join('\n');
+        fs.appendFileSync(agentsPath, section, 'utf8');
+        console.log('[PluginSeed] Appended session continuity guidance to workspace AGENTS.md');
+    } catch (e) {
+        console.warn('[PluginSeed] ensureSessionContinuityGuidance:', e.message);
+    }
+}
+
+/**
  * 启动时一次性注入规则即可；禁止 AGENTS 再要求「先读 SYSTEM_RULES / MEMORY」导致每轮重复读盘。
  */
 function ensureStartupRulesOnceGuidance(wsDir) {
@@ -3142,6 +3205,7 @@ function seedMediaRuntimeArtifacts(appVersion) {
         ensureMediaAgentsGuidance(wsDir);
         ensureReplyDedupeAgentsGuidance(wsDir);
         ensureStartupRulesOnceGuidance(wsDir);
+        ensureSessionContinuityGuidance(wsDir);
         try { getSkillCenter().ensureSkillWorkshopGuidance(wsDir); } catch (e) {}
         ensureMediaMemoryGuidance(path.join(wsDir, 'MEMORY.md'));
     } catch (e) {
@@ -3575,7 +3639,7 @@ function prepareChannelPluginsBeforeGateway() {
 
 
     if (needsSave) {
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+        writeConfigFileAtomic(JSON.stringify(config, null, 2));
         console.log('[PluginSeed] Pre-gateway channel trust records synced');
         // 切勿删除 openclaw.sqlite：该库含审计事件 / Token / 工具调用等数据中心指标。
         // 插件索引脏数据由 Gateway 下次启动按 config 重建即可。
@@ -4363,7 +4427,7 @@ async function startGatewayProcess(opts = {}) {
                 });
                 console.log('[GatewayBoot] harden:', (hard.notes || []).join(', '));
                 if (cfg && hard.configChanged) {
-                    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+                    writeConfigFileAtomic(JSON.stringify(cfg, null, 2));
                     try { prepareChannelPluginsBeforeGateway(); } catch (e2) {}
                 }
             } catch (e) {
@@ -4388,7 +4452,7 @@ async function startGatewayProcess(opts = {}) {
                     const vision = ensureVisionModelConfig(tuned.config);
                     const bootCfg = vision.config;
                     if (tuned.changed || vision.changed) {
-                        fs.writeFileSync(CONFIG_PATH, JSON.stringify(bootCfg, null, 2), 'utf8');
+                        writeConfigFileAtomic(JSON.stringify(bootCfg, null, 2));
                         if (tuned.changed) console.log('[LatencyTune] Pre-gateway:', tuned.changes.join(' | '));
                         if (vision.changed) console.log('[VisionModel] Pre-gateway:', vision.visionModel);
                     }
@@ -4538,7 +4602,22 @@ async function startGatewayProcess(opts = {}) {
             gatewayProcess = child;
             global.__gatewayReclaimAttempts = 0;
 
-            mainWindow.webContents.send('gateway-status', 'running');
+            // fork 失败会触发 'error' 而非 'exit'；无此处理时 gatewayProcess 仍为真、UI 卡在「running」。
+            child.once('error', (err) => {
+                console.error('[gateway] fork error:', err && err.message ? err.message : err);
+                if (gatewayProcess === child) gatewayProcess = null;
+                try {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('gateway-status', 'stopped');
+                    }
+                } catch (_) {}
+                try { showNotification('Nexora Agent 启动失败', `内核进程无法启动：${err && err.message || err}`); } catch (_) {}
+            });
+
+            // 窗口可能在异步启动过程中被关闭（托盘退出）→ 解引用 null 会崩溃
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('gateway-status', 'running');
+            }
             showNotification('Nexora Agent已成功启动', 'AI 本地Nexora Agent已在后台运行，开始监听 18789 端口。');
 
             let watchPort = preferredGatewayPort;
@@ -4742,7 +4821,22 @@ ipcMain.handle('gateway-reload-for-channel', async (event, payload) => {
 ipcMain.on('open-sandbox-terminal', () => {
     const sandboxDir = resolveAppFsPath('.node-sandbox');
     const { spawn } = require('child_process');
-    
+
+    if (process.platform !== 'win32') {
+        // mac 打开 Terminal.app，linux 尝试常见终端模拟器
+        const cwd = resolveBuiltinTerminalCwd();
+        try {
+            const child = process.platform === 'darwin'
+                ? spawn('open', ['-a', 'Terminal', cwd], { detached: true, stdio: 'ignore' })
+                : spawn(process.env.TERMINAL || 'x-terminal-emulator', [], { cwd, detached: true, stdio: 'ignore' });
+            child.on('error', (e) => console.warn('[SandboxTerminal] open failed:', e && e.message));
+            child.unref();
+        } catch (e) {
+            console.warn('[SandboxTerminal] open failed:', e && e.message);
+        }
+        return;
+    }
+
     // 终极无痛方案：使用 PowerShell 的 -EncodedCommand 特性！
     // 将整个包含特殊字符、中文、和环境变量的脚本打包为 Base64 传递，彻底避开 CMD 的单双引号解析、吃字符以及防病毒脚本策略的拦截。
     const initScript = [
@@ -4855,21 +4949,43 @@ function spawnBuiltinPtyProcess(lang) {
 
     const encodedCmd = Buffer.from(initScript, 'utf16le').toString('base64');
     const termCwd = resolveBuiltinTerminalCwd();
-    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+    const isWinTerm = process.platform === 'win32';
+    const pathKey = isWinTerm ? 'Path' : 'PATH';
     const childEnv = { ...process.env };
     if (sandboxDir && fs.existsSync(sandboxDir)) {
         childEnv[pathKey] = `${sandboxDir}${path.delimiter}${childEnv[pathKey] || ''}`;
     }
 
-    ptyProcess = pty.spawn('powershell.exe', ['-NoExit', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCmd], {
+    // Windows 走 PowerShell + EncodedCommand；mac/linux 走用户默认 shell
+    const shellFile = isWinTerm
+        ? 'powershell.exe'
+        : (process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'));
+    const shellArgs = isWinTerm
+        ? ['-NoExit', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCmd]
+        : [];
+
+    ptyProcess = pty.spawn(shellFile, shellArgs, {
         name: 'xterm-256color',
         cols: 80,
         rows: 30,
         // 打包后 __dirname 在 app.asar 内，不能当 cwd，否则壳进程起不来、终端空白
         cwd: termCwd,
         env: childEnv,
-        useConpty: true
+        useConpty: isWinTerm
     });
+
+    if (!isWinTerm) {
+        // 非 Windows 没有 PowerShell 启动横幅，直接向终端视图输出欢迎信息
+        pushBuiltinTerminalData([
+            '\x1b[32m==========================================================\x1b[0m\r\n',
+            `\x1b[32m${bannerTitle}\x1b[0m\r\n`,
+            '\x1b[32m==========================================================\x1b[0m\r\n',
+            `\x1b[36m${bannerCmds}\x1b[0m\r\n`,
+            `${cmdNode}\r\n`,
+            `${cmdNpm}\r\n`,
+            '\x1b[32m==========================================================\x1b[0m\r\n\r\n'
+        ].join(''));
+    }
 
     const spawned = ptyProcess;
     spawned.on('data', function (data) {
@@ -5553,7 +5669,7 @@ function ensureOpenClawConfigInitialized() {
 
         if (needsSave) {
             try {
-                fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+                writeConfigFileAtomic(JSON.stringify(config, null, 2));
                 // 切勿因「写了一点 config」就删 openclaw.sqlite（会清空数据中心统计）
             } catch(e) {}
         }
@@ -6134,7 +6250,7 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             newJson = newJson + '\n' + ' '.repeat(padSize - 1);
         }
 
-        fs.writeFileSync(CONFIG_PATH, newJson, 'utf8');
+        writeConfigFileAtomic(newJson);
 
         // 沙箱 OpenClaw 会话会粘住旧 model/modelOverride；只改 openclaw.json 不会换网关对话模型。
         // 保存时把默认主/备模型同步进 sessions + 旁路状态目录，避免面板仍用上一模型。
@@ -6204,7 +6320,7 @@ ipcMain.handle('plugin-save-credentials', async (event, payload) => {
         const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
         const result = applyPluginCredentials(config, pluginId, fields);
         if (!result.ok) return { success: false, error: result.error || 'failed' };
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+        writeConfigFileAtomic(JSON.stringify(config, null, 2));
         return { success: true, config };
     } catch (e) {
         return { success: false, error: e.message };
@@ -6862,7 +6978,7 @@ function startDirectWeixinChannelLogin(spec) {
                             cfg.channels['openclaw-weixin'].enabled = true; save = true;
                         }
                         if (save) {
-                            fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+                            writeConfigFileAtomic(JSON.stringify(cfg, null, 2));
                             console.log('[WeChat Login] 已在 openclaw.json channels 中设置 openclaw-weixin.enabled = true');
                         }
                     } catch (cfgErr) {
@@ -7226,7 +7342,7 @@ function writeOpenClawConfigObject(config) {
         newJson = newJson + '\n' + ' '.repeat(Math.max(0, padSize - 1));
     }
     if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, newJson, 'utf8');
+    writeConfigFileAtomic(newJson);
 }
 
 function applyFeishuScanResultToConfig(result) {
@@ -8458,6 +8574,13 @@ ipcMain.handle('open-external', async (event, url) => {
             return true;
         }
 
+        // 仅允许 http/https，杜绝 file:// 或自定义协议触发本机程序/文件（渲染层被注入时的提权面）
+        let scheme = '';
+        try { scheme = new URL(String(url)).protocol.toLowerCase(); } catch (_) {}
+        if (scheme !== 'http:' && scheme !== 'https:') {
+            console.warn('open-external blocked non-web scheme:', url);
+            return false;
+        }
         await shell.openExternal(url);
         return true;
     } catch (e) {
@@ -8764,7 +8887,9 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
                 path: parsed.pathname + parsed.search,
                 headers: { 'User-Agent': 'NexoraAgent-Updater' },
                 timeout: 30000,
-                rejectUnauthorized: false
+                // 更新包必须校验 TLS：关掉校验会让中间人替换成恶意安装包后被直接执行（RCE）。
+                // 更新源（GitHub Releases 等）证书有效，开启校验不影响正常下载。
+                rejectUnauthorized: true
             }, (res) => {
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft-- > 0) {
                     res.resume();
@@ -9397,6 +9522,11 @@ app.on('will-quit', async (e) => {
         if (st && st.systemProxy) {
             await acceleration.applySystemProxy(false);
         }
+    } catch (err) {}
+    // 必须停掉网关子进程：否则退出后 node.exe 仍占用 18789、微信/QQ 保持登录，
+    // 下次启动又被强杀于半写状态（会话/配置损坏）。await 确保杀干净再退出。
+    try {
+        await stopGatewayProcess({ reason: 'app-quit' });
     } catch (err) {}
     app.exit(0);
 });

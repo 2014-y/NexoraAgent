@@ -5,6 +5,12 @@
  * 1) 拦截「请 /new」类恢复文案
  * 2) 归档旧会话（sessions.reset reason=new → *.reset.<ts>）
  * 3) 在新会话里重提上一问，让模型继续回答
+ *
+ * 另有两道前置防线（让用户永远看不到「开新会话」）：
+ * a) 预防式换会话：回合结束后检查会话预算（remainingPromptBudgetTokens 等），
+ *    吃紧就在空闲窗口静默归档换新，不等真正溢出
+ * b) 模型话术拦截：模型在预算吃紧时自己劝用户「开新会话/新窗口」——按溢出横幅
+ *    处理：拦下不发，自动归档换新并续答上一问
  */
 
 import fs from 'node:fs';
@@ -14,10 +20,18 @@ import crypto from 'node:crypto';
 
 const PLUGIN_ID = 'session-overflow-rollover';
 const COOLDOWN_MS = 60_000;
-/** 本会话近期已有用户可见回复时，禁止 silent-retry / rollover 再跑一整轮（防双倍烧 token） */
+/** 本会话近期已有用户可见回复时，禁止 silent-retry / rollover 再跑一整轮（防双倍烧 token）。
+ *  窗口仅需覆盖「同一轮回复完成后尾随的溢出横幅」（几秒内）；过宽（原 120s）会把
+ *  「刚回一条、随后新提问真正溢出」也误判为已投递而跳过恢复 → 对新问题静默。 */
 const recentUserFacingDeliveryAt = new Map();
-const DELIVERY_BLOCK_RESUME_MS = 120_000;
+const DELIVERY_BLOCK_RESUME_MS = 10_000;
 const TRIGGER_FILE = 'overflow-rollover.trigger.json';
+/** 预防式换会话阈值：剩余提示预算低于 min(该值, 窗口的 20%) 即视为吃紧。
+ *  取窗口 20% 是为了兼容本地小模型（8k 窗口不能套 24k 阈值，否则每轮都换）。 */
+const PROACTIVE_REMAINING_TOKENS = Number(process.env.NEXORA_PROACTIVE_ROLLOVER_REMAINING || 24_000);
+const PROACTIVE_MIN_COMPACTIONS = Number(process.env.NEXORA_PROACTIVE_ROLLOVER_COMPACTIONS || 2);
+/** 回合结束后延迟触发，避开尾随的媒体投递；期间用户又发新消息则放弃等下个空闲窗口 */
+const PROACTIVE_DELAY_MS = 8_000;
 const ARCHIVE_NOTE_DIR_REL = path.join('workspace', 'compact-history');
 const ACTIVE_CONTEXT_HEADING = '## Active session context';
 const CONTINUITY_SUMMARY_MAX = 900;
@@ -29,6 +43,9 @@ const LAST_ARCHIVE_REL = path.join('workspace', 'memory', 'last-session-archive.
 
 /** @type {Map<string, { text: string, at: number }>} */
 const lastUserBySession = new Map();
+/** 入站时缓存投递路由，补 sessions.json 缺 lastChannel/lastTo 的情况（dmScope=main） */
+/** @type {Map<string, { channel: string, to: string, accountId: string, threadId: string, at: number }>} */
+const lastDeliveryRouteBySession = new Map();
 /** @type {Map<string, number>} */
 const lastRolloverAt = new Map();
 /** @type {Set<string>} */
@@ -145,45 +162,145 @@ function resolveSessionFileByKey(sessionKey) {
   }
 }
 
+function normalizeDeliveryRoute(channel, to, accountId, threadId) {
+  const ch = String(channel || '').trim();
+  const dest = String(to || '').trim();
+  if (!ch || !dest) return null;
+  if (/^webchat$/i.test(ch)) return null;
+  return {
+    channel: ch,
+    to: dest,
+    accountId: accountId ? String(accountId).trim() : '',
+    threadId: threadId != null && String(threadId).trim() ? String(threadId).trim() : '',
+  };
+}
+
+function rememberDeliveryRoute(sessionKey, event, ctx) {
+  try {
+    if (!sessionKey) return;
+    const channel =
+      (ctx && (ctx.channelId || ctx.channel || ctx.provider)) ||
+      (event && (event.channelId || event.channel || event.provider)) ||
+      (event && event.metadata && (event.metadata.channel || event.metadata.provider)) ||
+      '';
+    const to =
+      (ctx && (ctx.to || ctx.peerId || ctx.from)) ||
+      (event && (event.to || event.peerId || event.from)) ||
+      (event && event.metadata && event.metadata.to) ||
+      '';
+    const accountId =
+      (ctx && ctx.accountId) ||
+      (event && event.accountId) ||
+      (event && event.metadata && event.metadata.accountId) ||
+      '';
+    const threadId =
+      (ctx && (ctx.threadId || ctx.thread_id)) ||
+      (event && (event.threadId || event.thread_id)) ||
+      '';
+    const route = normalizeDeliveryRoute(channel, to, accountId, threadId);
+    if (!route) return;
+    lastDeliveryRouteBySession.set(sessionKey, { ...route, at: Date.now() });
+  } catch (_) {}
+}
+
 /** 读取会话投递路由（微信默认落到 agent:main:main，仅 deliver:true 不够） */
 function readSessionDeliveryRoute(sessionKey) {
   try {
     if (!sessionKey) return null;
     const storePath = path.join(stateDir(), 'agents', 'main', 'sessions', 'sessions.json');
+    if (fs.existsSync(storePath)) {
+      const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
+      const entry = store && store[sessionKey];
+      if (entry && typeof entry === 'object') {
+        const channel =
+          (entry.deliveryContext && entry.deliveryContext.channel) ||
+          entry.lastChannel ||
+          (entry.origin && (entry.origin.provider || entry.origin.channel)) ||
+          '';
+        const to =
+          (entry.deliveryContext && entry.deliveryContext.to) ||
+          entry.lastTo ||
+          (entry.origin && entry.origin.to) ||
+          '';
+        const accountId =
+          (entry.deliveryContext && entry.deliveryContext.accountId) ||
+          entry.lastAccountId ||
+          (entry.origin && entry.origin.accountId) ||
+          '';
+        const threadId =
+          (entry.deliveryContext && entry.deliveryContext.threadId) ||
+          entry.lastThreadId ||
+          '';
+        const fromStore = normalizeDeliveryRoute(channel, to, accountId, threadId);
+        if (fromStore) return fromStore;
+      }
+    }
+    // sessions.json 缺路由时，用入站缓存（否则 chat.send 只进内部 webchat，微信静默）
+    const cached = lastDeliveryRouteBySession.get(sessionKey);
+    if (cached && Date.now() - (cached.at || 0) < 30 * 60_000) {
+      return normalizeDeliveryRoute(cached.channel, cached.to, cached.accountId, cached.threadId);
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** 从 sessions.json 读会话预算/状态，供预防式换会话与话术拦截判断 */
+function readSessionContextPressure(sessionKey) {
+  try {
+    if (!sessionKey) return null;
+    const storePath = path.join(stateDir(), 'agents', 'main', 'sessions', 'sessions.json');
     if (!fs.existsSync(storePath)) return null;
-    const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^﻿/, ''));
     const entry = store && store[sessionKey];
     if (!entry || typeof entry !== 'object') return null;
-    const channel =
-      (entry.deliveryContext && entry.deliveryContext.channel) ||
-      entry.lastChannel ||
-      (entry.origin && (entry.origin.provider || entry.origin.channel)) ||
-      '';
-    const to =
-      (entry.deliveryContext && entry.deliveryContext.to) ||
-      entry.lastTo ||
-      (entry.origin && entry.origin.to) ||
-      '';
-    const accountId =
-      (entry.deliveryContext && entry.deliveryContext.accountId) ||
-      entry.lastAccountId ||
-      (entry.origin && entry.origin.accountId) ||
-      '';
-    const threadId =
-      (entry.deliveryContext && entry.deliveryContext.threadId) ||
-      entry.lastThreadId ||
-      '';
-    if (!channel || !to) return null;
-    if (/^webchat$/i.test(String(channel))) return null;
+    const contextTokens = Number(entry.contextTokens) || 0;
+    const totalTokens = Number(entry.totalTokens) || 0;
+    let remaining = Number(entry.remainingPromptBudgetTokens);
+    if (!Number.isFinite(remaining)) {
+      remaining = contextTokens > 0 && totalTokens > 0 ? contextTokens - totalTokens : NaN;
+    }
     return {
-      channel: String(channel).trim(),
-      to: String(to).trim(),
-      accountId: accountId ? String(accountId).trim() : '',
-      threadId: threadId != null && String(threadId).trim() ? String(threadId).trim() : '',
+      status: String(entry.status || ''),
+      updatedAt: Number(entry.updatedAt) || 0,
+      contextTokens,
+      totalTokens,
+      remaining: Number.isFinite(remaining) ? remaining : null,
+      overflowTokens: Number(entry.overflowTokens) || 0,
+      compactionCount: Number(entry.compactionCount) || 0,
     };
   } catch (_) {
     return null;
   }
+}
+
+/** 返回吃紧原因字符串；不吃紧返回 '' */
+function sessionUnderContextPressure(sessionKey) {
+  const p = readSessionContextPressure(sessionKey);
+  if (!p) return '';
+  if (p.overflowTokens > 0) return `overflowTokens=${p.overflowTokens}`;
+  if (p.compactionCount >= PROACTIVE_MIN_COMPACTIONS) return `compactionCount=${p.compactionCount}`;
+  if (p.remaining != null && p.contextTokens > 0) {
+    const floor = Math.min(PROACTIVE_REMAINING_TOKENS, Math.floor(p.contextTokens * 0.2));
+    if (p.remaining <= floor) return `remaining=${p.remaining}/${p.contextTokens}`;
+  }
+  return '';
+}
+
+/** 模型自己劝用户换会话的话术。仅配合 sessionUnderContextPressure 使用，
+ *  避免误伤正常功能问答（如用户问「怎么新建会话」时的解释）。 */
+function asksUserToStartNewSession(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length > 600) return false;
+  return (
+    /(请|麻烦|建议|需要|可以|得|要不?)[^\n。！？!?]{0,12}(重新|另|新)开[^\n。！？!?]{0,6}(会话|对话|聊天|窗口)/.test(t) ||
+    /(新建|新开|另开|换个?|重开)[^\n。！？!?]{0,4}(会话|对话|聊天窗口|窗口)/.test(t) ||
+    /开(一个|个)?新的?(会话|对话|聊天)(窗口)?/.test(t) ||
+    /start (a )?new (chat|session|conversation)/i.test(t) ||
+    /open (a )?new (chat|session|window)/i.test(t) ||
+    /(发送|输入|使用)\s*\/new/i.test(t)
+  );
 }
 
 function buildChatSendParams(sessionKey, message, deliveryRoute) {
@@ -543,56 +660,87 @@ function buildContinuePrompt(lastUserText, continuitySummary, archivePath) {
   ].join('\n');
 }
 
+/** 角色口吻（讲 overflow 机制等）——禁止当系统恢复横幅 */
+function looksLikeConversationalOutbound(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/(启禀|主子|小的|奴才|臣妾|回主|建议|推荐|方案|双剑)/.test(t)) return true;
+  const cn = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  return cn >= 48 && t.length >= 160;
+}
+
 /**
  * OpenClaw 在溢出 / 压缩失败 / 角色奇偶冲突时都会吐出「use /new」类恢复文案。
  * 这些文案若只被 error-filter 静默拦截、却不归档换新，通讯渠道就会哑火。
+ * 注意：助手长文解释「上下文溢出机制」不得匹配。
  */
 function isOverflowRecoveryText(text) {
   const t = String(text || '');
   if (!t) return false;
-  return (
+
+  const hardMachine =
+    /compaction[-_ ]?diag/i.test(t) ||
+    /diagId\s*=\s*ovf-/i.test(t) ||
+    /trigger\s*=\s*overflow/i.test(t) ||
+    /\[agent\/embedded\].*(overflow|compaction)/i.test(t) ||
+    /reserveTokensFloor/i.test(t) ||
     /Auto-compaction could not recover/i.test(t) ||
     /auto-compaction could not recover/i.test(t) ||
     /auto-compaction failed/i.test(t) ||
-    /Context overflow/i.test(t) ||
-    /context[_\s-]?overflow/i.test(t) ||
     /Context is too large and auto-compaction/i.test(t) ||
     /Context limit exceeded/i.test(t) ||
     /prompt too large for the model/i.test(t) ||
     /Compaction timed out/i.test(t) ||
     /compaction timeout/i.test(t) ||
-    /compaction[-_ ]?diag/i.test(t) ||
-    /trigger\s*=\s*overflow/i.test(t) ||
-    /diagId\s*=\s*ovf-/i.test(t) ||
-    /\[agent\/embedded\].*(overflow|compaction)/i.test(t) ||
-    /use \/compact/i.test(t) ||
-    // 禁止裸匹配 "use /new"：助手闲聊提到 /new 会误触发 rollover
-    /(?:⚠️|⚠|Context overflow|compaction|overflow|请(?:先)?使用)\s*[^\n]{0,80}\/new\b/i.test(t) ||
-    /\/new to start/i.test(t) ||
     /Message ordering conflict/i.test(t) ||
     /roles must alternate/i.test(t) ||
     /incorrect role information/i.test(t) ||
     /Session history looks corrupted/i.test(t) ||
     /rejected the conversation state/i.test(t) ||
     /provider rejected the conversation state/i.test(t) ||
-    /increase your compaction buffer/i.test(t) ||
-    /reserveTokensFloor/i.test(t) ||
-    /上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new|角色(顺序|奇偶)|消息顺序冲突/i.test(t)
-  );
+    /increase your compaction buffer/i.test(t);
+
+  if (hardMachine) return true;
+
+  const softBanner =
+    /Context overflow/i.test(t) ||
+    /context[_\s-]?overflow/i.test(t) ||
+    /use \/compact/i.test(t) ||
+    // 禁止裸匹配 "use /new"：助手闲聊提到 /new 会误触发 rollover
+    /(?:⚠️|⚠|Context overflow|compaction|overflow|请(?:先)?使用)\s*[^\n]{0,80}\/new\b/i.test(t) ||
+    /\/new to start/i.test(t) ||
+    /上下文过长|上下文溢出|自动压缩失败|请使用\s*\/new|角色(顺序|奇偶)|消息顺序冲突/i.test(t);
+
+  if (!softBanner) return false;
+  // 长角色解释里夹带「上下文溢出」——不是恢复横幅
+  if (looksLikeConversationalOutbound(t)) return false;
+  return t.length <= 400 || /^\s*⚠️/.test(t);
+}
+
+const RATE_LIMIT_USER_NOTICE = '模型暂时繁忙或限流，请稍后再发一条。';
+const NETWORK_FAILURE_USER_NOTICE =
+  '模型服务暂时不可用（中转连接失败）。请稍后重试，或在设置里确认备用模型为公网通道。';
+
+function isSubstituteUserNotice(text) {
+  const raw = String(text || '').trim();
+  return raw === RATE_LIMIT_USER_NOTICE || raw === NETWORK_FAILURE_USER_NOTICE;
 }
 
 function isRateLimitBannerText(text) {
   const t = String(text || '');
   if (!t) return false;
+  if (t.trim() === RATE_LIMIT_USER_NOTICE) return false;
   if (isOverflowRecoveryText(t)) return false;
-  return (
+  const hit =
     /All models are temporarily rate-limited/i.test(t) ||
     /temporarily rate-limited/i.test(t) ||
     /API rate limit reached/i.test(t) ||
     /Rate-limited\s*[—\-]/i.test(t) ||
     /temporarily overloaded/i.test(t) ||
-    /Please try again in a few minutes/i.test(t)
-  );
+    (/Please try again in a few minutes/i.test(t) && t.length <= 280);
+  if (!hit) return false;
+  if (looksLikeConversationalOutbound(t)) return false;
+  return true;
 }
 
 function isUserFacingSystemErrorText(text) {
@@ -643,6 +791,8 @@ function markUserFacingDelivery(sessionKey, text) {
   const raw = String(text || '').trim();
   if (!key || !raw) return;
   if (isUserFacingSystemErrorText(raw)) return;
+  // 限流/断连短提示不算「实质回复」，勿挡住后续 overflow rollover
+  if (isSubstituteUserNotice(raw)) return;
   if (/^NO_REPLY$/i.test(raw)) return;
   if (raw.length < 8 && !/MEDIA\s*:/i.test(raw)) return;
   recentUserFacingDeliveryAt.set(key, Date.now());
@@ -693,7 +843,7 @@ async function gatewayRequest(api, method, params) {
   return gw.request(method, params);
 }
 
-async function performRollover(api, sessionKey, lastUserText, via) {
+async function performRollover(api, sessionKey, lastUserText, via, opts = {}) {
   if (!sessionKey) return false;
   if (inFlight.has(sessionKey)) return false;
   const now = Date.now();
@@ -704,7 +854,8 @@ async function performRollover(api, sessionKey, lastUserText, via) {
   }
 
   // 已对用户发过实质内容：禁止 reset+resume（否则先清空会话再重跑 = 双倍 token）
-  if (sessionRecentlyDelivered(sessionKey)) {
+  // 预防式换会话（opts.ignoreDelivered）例外：它本来就挑在回复完成后的空闲窗口跑，且不重跑
+  if (!opts.ignoreDelivered && sessionRecentlyDelivered(sessionKey)) {
     lastRolloverAt.set(sessionKey, Date.now());
     console.log(
       `[${PLUGIN_ID}] skip rollover entirely (already delivered, no reset) key=${sessionKey} via=${via}`
@@ -738,15 +889,20 @@ async function performRollover(api, sessionKey, lastUserText, via) {
       reason: 'new',
     });
 
-    const continueText = buildContinuePrompt(
-      lastUserText,
-      continuity.summary,
-      continuity.archivePath
-    );
+    const continueText = opts.noResume
+      ? ''
+      : buildContinuePrompt(lastUserText, continuity.summary, continuity.archivePath);
     if (!continueText) {
       lastRolloverAt.set(sessionKey, Date.now());
       console.log(`[${PLUGIN_ID}] rollover archived without resume (empty last user) key=${sessionKey}`);
       return true;
+    }
+
+    if (!deliveryRoute) {
+      console.error(
+        `[${PLUGIN_ID}] rollover WARNING: no originating route for key=${sessionKey} — ` +
+          'chat.send may land on internal webchat (WeChat silent). Capture route on next inbound.'
+      );
     }
 
     // deliver:true + 显式 originating*：覆盖微信 dmScope=main（仅 deliver 会掉进内部通道）
@@ -828,6 +984,39 @@ function scheduleRollover(api, sessionKey, lastUserText, via) {
     performRollover(api, sessionKey, lastUserText, via).catch(() => {});
   }, 80);
   pendingScheduleTimers.set(timerKey, timer);
+}
+
+/**
+ * 预防式换会话：成功回合结束后检查会话预算，吃紧则在空闲窗口静默归档换新。
+ * 不重跑、不补发——用户完全无感，下一条消息自然落进带延续记忆的新会话。
+ */
+function maybeScheduleProactiveRollover(api, event, ctx) {
+  try {
+    const key = resolveSessionKeyWithFallback(event, ctx);
+    if (!key || /:cron:|:heartbeat:/i.test(key)) return;
+    const reason = sessionUnderContextPressure(key);
+    if (!reason) return;
+    const now = Date.now();
+    if (now - (lastRolloverAt.get(key) || 0) < COOLDOWN_MS) return;
+    const timerKey = `proactive:${key}`;
+    if (pendingScheduleTimers.has(timerKey) || inFlight.has(key)) return;
+    const scheduledAt = now;
+    console.log(`[${PLUGIN_ID}] proactive rollover scheduled key=${key} (${reason})`);
+    const timer = setTimeout(() => {
+      pendingScheduleTimers.delete(timerKey);
+      try {
+        // 延迟窗口内又开始了新回合：放弃本次，等下一个空闲窗口再触发
+        const p = readSessionContextPressure(key);
+        if (p && p.status && p.status !== 'done') return;
+        if (p && p.updatedAt && p.updatedAt > scheduledAt + 1500) return;
+      } catch (_) {}
+      performRollover(api, key, '', 'proactive-pressure', {
+        ignoreDelivered: true,
+        noResume: true,
+      }).catch(() => {});
+    }, PROACTIVE_DELAY_MS);
+    pendingScheduleTimers.set(timerKey, timer);
+  } catch (_) {}
 }
 
 async function performSilentRetry(api, sessionKey, lastUserText, via) {
@@ -924,7 +1113,7 @@ function register(api) {
   try {
     api.logger?.info?.(`[${PLUGIN_ID}] loaded`);
   } catch (_) {}
-  console.log(`[${PLUGIN_ID}] loaded (overflow/ordering → archive+resume deliver; rate-limit → silent retry; log-bridge)`);
+  console.log(`[${PLUGIN_ID}] loaded (overflow/ordering → archive+resume deliver; rate-limit → user notice; log-bridge)`);
 
   // 主进程日志桥：compaction-diag 只出现在 stdout 时也能静默续聊
   try {
@@ -937,6 +1126,7 @@ function register(api) {
         const key = resolveSessionKey(event, ctx);
         const text = extractText(event);
         if (key && text) rememberUserText(key, text);
+        if (key) rememberDeliveryRoute(key, event, ctx);
       } catch (_) {}
     });
   } catch (_) {}
@@ -947,6 +1137,7 @@ function register(api) {
         const key = resolveSessionKey(event, ctx);
         const text = extractText(event);
         if (key && text) rememberUserText(key, text);
+        if (key) rememberDeliveryRoute(key, event, ctx);
       } catch (_) {}
     });
   } catch (_) {}
@@ -954,7 +1145,11 @@ function register(api) {
   api.on('agent_end', async (event, ctx) => {
     try {
       // 成功回合绝不因历史残留文案触发换新；失败且像溢出/角色冲突才 rollover
-      if (event && event.success !== false) return;
+      if (event && event.success !== false) {
+        // 成功回合只做预算体检：吃紧就预防式换会话，绝不让用户撞上真溢出
+        maybeScheduleProactiveRollover(api, event, ctx);
+        return;
+      }
       if (!looksLikeOverflowFailure(event, ctx)) return;
       const key = resolveSessionKeyWithFallback(event, ctx);
       if (!key) return;
@@ -992,9 +1187,23 @@ function register(api) {
       const text = extractText(event);
       let key = resolveSessionKeyWithFallback(event, ctx);
       if (!key) key = resolveFreshestInteractiveSessionKey();
-      if (key && text) markUserFacingDelivery(key, text);
-      if (!isUserFacingSystemErrorText(text)) return;
+      // 模型在预算吃紧时自己劝用户「开新会话」——按溢出横幅处理，不算实质回复
+      const newSessionAsk =
+        !isUserFacingSystemErrorText(text) &&
+        asksUserToStartNewSession(text) &&
+        Boolean(key) &&
+        Boolean(sessionUnderContextPressure(key));
+      if (key && text && !newSessionAsk) markUserFacingDelivery(key, text);
+      if (!isUserFacingSystemErrorText(text) && !newSessionAsk) return;
       const lastUser = key ? pickLastUserText(key, event, ctx) : '';
+      if (newSessionAsk) {
+        console.log(`[${PLUGIN_ID}] cancel model new-session ask (context pressure) key=${key}`);
+        scheduleRollover(api, key, lastUser, 'message_sending:new-session-ask');
+        return {
+          cancel: true,
+          cancelReason: 'session-overflow-rollover:suppress-new-session-ask',
+        };
+      }
       if (isOverflowRecoveryText(text)) {
         // 已有实质回复：只拦横幅，绝不 reset/重跑
         if (key && sessionRecentlyDelivered(key)) {
@@ -1015,13 +1224,10 @@ function register(api) {
         console.warn(`[${PLUGIN_ID}] overflow banner without sessionKey — not cancelling`);
         return;
       }
-      // 限流/过载横幅：只对用户静默，不再后台重提原问题（防双回复烧 token）
-      if (key) {
-        console.log(`[${PLUGIN_ID}] cancel rate-limit banner key=${key} (no silent-retry)`);
-        return {
-          cancel: true,
-          cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
-        };
+      // 限流/过载横幅：改写短中文提示（禁止纯静默；也不再 silent-retry 烧 token）
+      if (isRateLimitBannerText(text)) {
+        console.log(`[${PLUGIN_ID}] rewrite rate-limit banner key=${key || '(none)'}`);
+        return { content: RATE_LIMIT_USER_NOTICE };
       }
     } catch (e) {
       console.warn(`[${PLUGIN_ID}] message_sending error:`, e && e.message);
@@ -1034,9 +1240,22 @@ function register(api) {
         const text = extractText(event?.payload) || extractText(event);
         let key = resolveSessionKeyWithFallback(event, ctx);
         if (!key) key = resolveFreshestInteractiveSessionKey();
-        if (key && text) markUserFacingDelivery(key, text);
-        if (!isUserFacingSystemErrorText(text)) return;
+        const newSessionAsk =
+          !isUserFacingSystemErrorText(text) &&
+          asksUserToStartNewSession(text) &&
+          Boolean(key) &&
+          Boolean(sessionUnderContextPressure(key));
+        if (key && text && !newSessionAsk) markUserFacingDelivery(key, text);
+        if (!isUserFacingSystemErrorText(text) && !newSessionAsk) return;
         const lastUser = key ? pickLastUserText(key, event, ctx) : '';
+        if (newSessionAsk) {
+          console.log(`[${PLUGIN_ID}] cancel model new-session ask (context pressure) key=${key}`);
+          scheduleRollover(api, key, lastUser, 'reply_payload_sending:new-session-ask');
+          return {
+            cancel: true,
+            cancelReason: 'session-overflow-rollover:suppress-new-session-ask',
+          };
+        }
         if (isOverflowRecoveryText(text)) {
           if (key && sessionRecentlyDelivered(key)) {
             return {
@@ -1053,11 +1272,8 @@ function register(api) {
           }
           return;
         }
-        if (key) {
-          return {
-            cancel: true,
-            cancelReason: 'session-overflow-rollover:suppress-rate-limit-banner',
-          };
+        if (isRateLimitBannerText(text)) {
+          return { content: RATE_LIMIT_USER_NOTICE };
         }
       } catch (_) {}
     });
@@ -1076,12 +1292,17 @@ export default pluginEntry;
 export {
   isOverflowRecoveryText,
   looksLikeOverflowFailure,
+  asksUserToStartNewSession,
+  sessionUnderContextPressure,
+  readSessionContextPressure,
   buildContinuitySummary,
   buildContinuePrompt,
   upsertActiveSessionContext,
   readSessionDeliveryRoute,
   buildChatSendParams,
   writeReadableSessionArchive,
+  rememberDeliveryRoute,
+  normalizeDeliveryRoute,
 };
 export function activate(api) {
   return register(api);

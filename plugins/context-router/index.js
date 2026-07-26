@@ -107,17 +107,19 @@ function getDefaultSkills() {
 
 /** 构建精简版系统提示 */
 function buildLeanSystemPrompt(basePrompt, intentCategories) {
-  // 移除冗余部分，只保留核心指令
   const sections = [];
 
-  // 身份
-  sections.push('# Identity');
-  sections.push('AI Assistant for desktop control and automation.');
+  // 【关键】保留原始人格/身份：系统提示开头通常是 IDENTITY / SOUL / 角色设定，
+  // 绝不能用一句通用英文 identity 替换掉（否则「机器人突然性格变了/不认得自己」）。
+  // 保留足够大的开头预算以覆盖人格设定，再对其后的冗余内容做精简。
+  const PERSONA_BUDGET = 14000;
+  const persona = String(basePrompt || '').slice(0, PERSONA_BUDGET).trim();
+  if (persona) sections.push(persona);
 
-  // 核心规则（从 basePrompt 中提取）
-  if (basePrompt) {
+  // 若人格块之后仍有内容，补充抽取到的核心规则（可能位于后半段）
+  if (basePrompt && basePrompt.length > PERSONA_BUDGET) {
     const coreRules = extractCoreRules(basePrompt);
-    if (coreRules) {
+    if (coreRules && !persona.includes(coreRules.slice(0, 80))) {
       sections.push(coreRules);
     }
   }

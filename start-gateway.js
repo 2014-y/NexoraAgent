@@ -56,7 +56,8 @@ function checkPrerequisites() {
     console.log(`✓ OpenClaw: ${localOpenClawPath} (本地安装)`);
   } else {
     try {
-      const cliPath = execSync('where openclaw', { encoding: 'utf8' }).trim();
+      const whichCmd = process.platform === 'win32' ? 'where openclaw' : 'command -v openclaw';
+      const cliPath = execSync(whichCmd, { encoding: 'utf8' }).trim();
       console.log(`✓ OpenClaw: ${cliPath} (全局安装)`);
     } catch (e) {
       console.error('✗ OpenClaw 未安装。请运行 npm install 安装依赖。');

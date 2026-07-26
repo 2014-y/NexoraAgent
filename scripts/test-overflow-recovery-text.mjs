@@ -17,6 +17,7 @@ const negatives = [
   '好的，我来帮你写一段代码',
   'use /help for more commands',
   'normal assistant reply without recovery banners',
+  '启禀主子！既然主子想了解技术细节，小的这就将后台运转的底层原委向主子详细呈报：造成这次短暂停顿的真正原因，是 OpenClaw 运行时的上下文溢出重载机制（Session Overflow Rollover）。它在检测到上下文过长时会归档并续聊，但并不是这次网络断连的主因。',
 ];
 
 for (const t of positives) {

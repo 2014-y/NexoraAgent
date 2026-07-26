@@ -27,6 +27,12 @@ const NO_PROXY_LIST = [
     '127.0.0.1',
     '::1',
     '0.0.0.0',
+    // 内网 LLM 中转：避免 mihomo 劫持导致 UND_ERR_SOCKET
+    '10.0.0.0/8',
+    '172.16.0.0/12',
+    '192.168.0.0/16',
+    '192.168.1.6',
+    '.local',
     '.weixin.qq.com',
     '.qq.com',
     'bots.qq.com',
@@ -2115,8 +2121,8 @@ function applyFakeIpSystemProxyFallback(envObj) {
             http_proxy: proxyUrl,
             https_proxy: proxyUrl,
             all_proxy: proxyUrl,
-            NO_PROXY: 'localhost,127.0.0.1,::1',
-            no_proxy: 'localhost,127.0.0.1,::1',
+            NO_PROXY: NO_PROXY_LIST,
+            no_proxy: NO_PROXY_LIST,
             NEXORA_FAKEIP_PROXY_FALLBACK: String(port),
             NEXORA_FAKEIP_SAMPLE: fakeIp
         });

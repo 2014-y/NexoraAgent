@@ -218,29 +218,16 @@ export default function createPlugin(runtime) {
             lastCompactAt: new Date().toISOString()
           });
 
-          // 2. 写入磁盘摘要
+          // 2. 写入磁盘摘要（独立文件，安全）
           const sessionKey = context?.sessionId || 'unknown';
-          const summaryFile = writeCompactSummary(lines, sessionKey);
+          writeCompactSummary(lines, sessionKey);
 
-          // 3. 保留最近对话，且不切断 tool_call / tool_result 配对（否则 Gemini 整会话 400）
-          // 若修复模块不可用：宁可跳过压缩，也不要 raw slice(-30) 切断配对
-          let recentLines = null;
-          try {
-            const repairMod = loadToolRepair();
-            if (repairMod && typeof repairMod.sliceSessionLinesKeepingToolPairs === 'function') {
-              recentLines = repairMod.sliceSessionLinesKeepingToolPairs(lines, 30).lines;
-            }
-          } catch (e) {}
-          if (!recentLines) {
-            console.warn(`[${PLUGIN_NAME}] tool-turn-repair unavailable — skip compact to avoid breaking tool pairs`);
-            return;
-          }
-
-          // 4. 写回会话文件
-          fs.writeFileSync(sessionFile, recentLines.map(l => JSON.stringify(l)).join('\n') + '\n', 'utf-8');
-          
+          // 3. 【已禁用】原先在此直接改写网关正在写入的 *.jsonl（fs.writeFileSync(sessionFile,...)），
+          //    与 gateway 内置 compaction / session-overflow-rollover / session-tool-heal 三方争抢同一文件，
+          //    交错写入会截断消息 → Gemini 整会话 400「不回话」且历史永久丢失。
+          //    实际的上下文缩减交给网关自身的 compaction 与 rollover 处理；本插件只负责把摘要落盘留档。
           compactCounter++;
-          console.log(`[${PLUGIN_NAME}] ✅ 压缩完成 (第 ${compactCounter} 次)，剩余 ${recentLines.length} 条记录`);
+          console.log(`[${PLUGIN_NAME}] 📄 已归档摘要（第 ${compactCounter} 次），会话文件交由网关安全压缩，本插件不改写`);
         }
       } catch (e) {
         // 静默失败，不影响正常对话

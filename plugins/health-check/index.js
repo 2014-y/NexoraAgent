@@ -36,27 +36,27 @@ const CAPABILITY_TESTS = [
 
   // --- 应用管理 ---
   { id: 'app-list', desc: '列出窗口', cmd: ['app-list'], pass: (o) => o.includes('PID=') || o.includes('Monitor=') },
-  { id: 'app-start', desc: '启动应用', cmd: ['app-start', 'notepad'], pass: (o) => o.toLowerCase().includes('started') },
-  { id: 'app-focus', desc: '聚焦窗口', cmd: ['app-focus', 'cmd'], pass: (o) => o.includes('Focused:') || o.includes('PID=') },
-  { id: 'app-close', desc: '关闭应用', cmd: ['app-close', 'notepad'], pass: (o) => o.includes('Closed:') || o.includes('Killed:') || o.includes('NOT_FOUND') },
-  { id: 'app-close-notepad', desc: '关闭记事本', cmd: ['app-close', 'notepad'], pass: (o) => o.includes('Closed:') || o.includes('Killed:') || o.includes('NOT_FOUND') },
+  { id: 'app-start', desc: '启动应用', cmd: ['app-start', 'notepad'], pass: (o) => o.toLowerCase().includes('started'), destructive: true },
+  { id: 'app-focus', desc: '聚焦窗口', cmd: ['app-focus', 'cmd'], pass: (o) => o.includes('Focused:') || o.includes('PID='), destructive: true },
+  { id: 'app-close', desc: '关闭应用', cmd: ['app-close', 'notepad'], pass: (o) => o.includes('Closed:') || o.includes('Killed:') || o.includes('NOT_FOUND'), destructive: true },
+  { id: 'app-close-notepad', desc: '关闭记事本', cmd: ['app-close', 'notepad'], pass: (o) => o.includes('Closed:') || o.includes('Killed:') || o.includes('NOT_FOUND'), destructive: true },
 
   // --- 窗口操作 ---
-  { id: 'win-fullscreen', desc: '最大化窗口', cmd: ['win-fullscreen', 'cmd'], pass: (o) => o.includes('Maximized:') || o.includes('NOT_FOUND') },
-  { id: 'win-minimize', desc: '最小化窗口', cmd: ['win-minimize', 'cmd'], pass: (o) => o.includes('Minimized:') || o.includes('NOT_FOUND') },
+  { id: 'win-fullscreen', desc: '最大化窗口', cmd: ['win-fullscreen', 'cmd'], pass: (o) => o.includes('Maximized:') || o.includes('NOT_FOUND'), destructive: true },
+  { id: 'win-minimize', desc: '最小化窗口', cmd: ['win-minimize', 'cmd'], pass: (o) => o.includes('Minimized:') || o.includes('NOT_FOUND'), destructive: true },
 
   // --- 鼠标控制 ---
-  { id: 'mouse-click', desc: '鼠标点击', cmd: ['mouse-click', 'cmd', '--pct', '0.5', '0.5'], pass: (o) => o.includes('Clicking at') || o.includes('NOT_FOUND') },
-  { id: 'mouse-scroll', desc: '鼠标滚动', cmd: ['mouse-scroll', 'cmd', '--pct', '0.5', '0.5', '--delta', '120'], pass: (o) => o.includes('Scrolled at') || o.includes('NOT_FOUND') },
+  { id: 'mouse-click', desc: '鼠标点击', cmd: ['mouse-click', 'cmd', '--pct', '0.5', '0.5'], pass: (o) => o.includes('Clicking at') || o.includes('NOT_FOUND'), destructive: true },
+  { id: 'mouse-scroll', desc: '鼠标滚动', cmd: ['mouse-scroll', 'cmd', '--pct', '0.5', '0.5', '--delta', '120'], pass: (o) => o.includes('Scrolled at') || o.includes('NOT_FOUND'), destructive: true },
 
   // --- 键盘控制 ---
-  { id: 'keyboard-send', desc: '键盘输入', cmd: ['keyboard-send', 'cmd', 'echo test'], pass: (o) => o.includes('Sent keys') || o.includes('NOT_FOUND') },
-  { id: 'keyboard-shortcut', desc: '快捷键', cmd: ['keyboard-shortcut', 'cmd', 'Ctrl+A'], pass: (o) => o.includes('Shortcut') || o.includes('NOT_FOUND') },
+  { id: 'keyboard-send', desc: '键盘输入', cmd: ['keyboard-send', 'cmd', 'echo test'], pass: (o) => o.includes('Sent keys') || o.includes('NOT_FOUND'), destructive: true },
+  { id: 'keyboard-shortcut', desc: '快捷键', cmd: ['keyboard-shortcut', 'cmd', 'Ctrl+A'], pass: (o) => o.includes('Shortcut') || o.includes('NOT_FOUND'), destructive: true },
 
   // --- 音量控制 ---
-  { id: 'volume-set', desc: '设置音量', cmd: ['volume-set', '50'], pass: (o) => o.includes('Volume') && !o.toLowerCase().includes('error') },
+  { id: 'volume-set', desc: '设置音量', cmd: ['volume-set', '50'], pass: (o) => o.includes('Volume') && !o.toLowerCase().includes('error'), destructive: true },
   { id: 'volume-get', desc: '查询音量', cmd: ['volume-get'], pass: (o) => o.includes('Volume:') && !o.toLowerCase().includes('error') },
-  { id: 'volume-toggle', desc: '静音切换', cmd: ['volume-toggle'], pass: (o) => o.includes('Toggled') && !o.toLowerCase().includes('error') },
+  { id: 'volume-toggle', desc: '静音切换', cmd: ['volume-toggle'], pass: (o) => o.includes('Toggled') && !o.toLowerCase().includes('error'), destructive: true },
 
   // --- 控件缓存 ---
   { id: 'cache-list', desc: '列出缓存', cmd: ['cache-list'], pass: () => true },
@@ -154,7 +154,7 @@ function checkSystemInfo() {
     cpus: os.cpus().length,
     uptime: Math.round(os.uptime()),
     user: process.env.USERNAME || 'unknown',
-    userProfile: PROFILE,
+    userProfile: process.env.USERPROFILE || os.homedir(),
   };
 }
 
@@ -184,8 +184,16 @@ async function runHealthCheck() {
     summary: { total: 0, passed: 0, failed: 0 },
   };
 
+  // 破坏性探测（弹记事本 / 往 cmd 打字 / 改音量 / 动鼠标）默认关闭；
+  // 需要时设 HEALTH_CHECK_DESKTOP_PROBES=1 显式开启，避免每次网关启动就骚扰桌面。
+  const allowDestructive = /^(1|true|yes)$/i.test(String(process.env.HEALTH_CHECK_DESKTOP_PROBES || ''));
+
   // 跑完所有 desktop-control.ps1 命令
   for (const test of CAPABILITY_TESTS) {
+    if (test.destructive && !allowDestructive) {
+      results.tests[test.id] = { available: null, skipped: true, reason: 'destructive-probe-disabled' };
+      continue;
+    }
     results.summary.total++;
     console.log(`[health-check]   测试: ${test.desc}...`);
 

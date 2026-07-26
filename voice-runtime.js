@@ -1029,6 +1029,27 @@ class VoiceRuntime extends EventEmitter {
         const speakEpoch = typeof epoch === 'number' ? epoch : this._speakEpoch;
         return new Promise((resolve, reject) => {
             if (speakEpoch !== this._speakEpoch) return resolve();
+            const attach = (proc, onError) => {
+                this._currentProc = proc;
+                proc.on('error', (err) => {
+                    if (speakEpoch !== this._speakEpoch) return resolve();
+                    if (onError) return onError(err);
+                    reject(err);
+                });
+                proc.on('close', () => resolve());
+            };
+            if (process.platform === 'darwin') {
+                attach(spawn('afplay', ['-v', String(Math.max(0, Math.min(1, volume / 100))), wavPath], { stdio: 'ignore' }));
+                return;
+            }
+            if (process.platform !== 'win32') {
+                // linux：优先 PulseAudio 的 paplay，缺失时回退 ALSA aplay
+                const vol = Math.round(Math.max(0, Math.min(1, volume / 100)) * 65536);
+                attach(spawn('paplay', [`--volume=${vol}`, wavPath], { stdio: 'ignore' }), () => {
+                    attach(spawn('aplay', ['-q', wavPath], { stdio: 'ignore' }));
+                });
+                return;
+            }
             const ps = `
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName PresentationCore
@@ -1043,16 +1064,10 @@ if ($ms -lt 100) { $ms = 100 }
 Start-Sleep -Milliseconds ($ms + 40)
 $p.Close()
 `;
-            const proc = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', ps], {
+            attach(spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', ps], {
                 windowsHide: true,
                 stdio: 'ignore'
-            });
-            this._currentProc = proc;
-            proc.on('error', (err) => {
-                if (speakEpoch !== this._speakEpoch) return resolve();
-                reject(err);
-            });
-            proc.on('close', () => resolve());
+            }));
         });
     }
 

@@ -1,0 +1,61 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: app:dist
+            artifact: windows-x64
+          - os: macos-latest
+            script: app:dist:mac
+            artifact: mac-arm64
+          - os: macos-15-intel
+            script: app:dist:mac
+            artifact: mac-x64
+          - os: ubuntu-latest
+            script: app:dist:linux
+            artifact: linux-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      # No Apple Developer certificate yet — produce unsigned mac builds.
+      # Remove this (and add CSC_LINK/CSC_KEY_PASSWORD secrets) once you have one.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # npmRebuild is disabled in electron-builder config, so node-pty must be
+      # compiled against Electron's ABI explicitly (npm install builds it for Node).
+      - name: Rebuild node-pty for Electron
+        run: npx @electron/rebuild -f -w node-pty
+
+      - name: Build installers
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-agent-${{ matrix.artifact }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
+          if-no-files-found: error

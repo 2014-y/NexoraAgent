@@ -18,7 +18,8 @@ const checks = [
   ['prompt fingerprint cache', /draw:\$\{normalizePromptFingerprint/],
   ['session draw cooldown', /SESSION_DRAW_COOLDOWN_MS/],
   ['remember after allow', /rememberRunOutbound/],
-  ['block before remember', /先拦系统横幅/],
+  ['channel delivery gate', /channel-layer skip duplicate cancel \(delivery gate\)/],
+  ['channel pass claimed media', /channel-layer pass claimed media \(delivery gate\)/],
 ];
 
 let failed = 0;
@@ -36,11 +37,25 @@ const overflowChecks = [
   ['skip resume if delivered', /already delivered/.test(overflow)],
   ['no reset after delivery', /skip rollover entirely \(already delivered, no reset\)/.test(overflow)],
   ['unwrap continuity', /function unwrapUserQuestion/.test(overflow)],
+  ['remember delivery route', /function rememberDeliveryRoute/.test(overflow)],
+  ['route missing warning', /no originating route/.test(overflow)],
   ['no bare use \\/new', !/\/use \\\/new\/i\.test\(t\)/.test(overflow) && !/\/use \\\/new\/i/.test(overflow.split('isOverflowRecoveryText')[1]?.slice(0,1200) || '')],
 ];
 for (const [name, ok] of overflowChecks) {
   console.log(ok ? 'OK ' : 'FAIL', name);
   if (!ok) failed += 1;
+}
+
+// route cache lives in overflow plugin, not error-filter — fix mis-placed check
+const efHasGate = /channel-layer skip duplicate cancel \(delivery gate\)/.test(src);
+const ovHasRoute = /function rememberDeliveryRoute/.test(overflow);
+if (!efHasGate) {
+  console.log('FAIL', 'channel delivery gate in error-filter');
+  failed += 1;
+}
+if (!ovHasRoute) {
+  console.log('FAIL', 'rememberDeliveryRoute in overflow');
+  failed += 1;
 }
 
 const oc = path.join(__dirname, '..', 'node_modules', 'openclaw', 'dist', 'selection-JInn13lc.js');

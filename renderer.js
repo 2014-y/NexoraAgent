@@ -10918,9 +10918,15 @@ async function loadExternalSessionHistory(force = false) {
 function stripSessionHtml(value) {
     const text = String(value || '');
     if (!/[<>&]/.test(text)) return text;
-    const div = document.createElement('div');
-    div.innerHTML = text;
-    return div.textContent || div.innerText || text;
+    // 用 DOMParser 解析（惰性文档，不加载资源、不执行脚本），只取纯文本。
+    // 旧实现 div.innerHTML = text 会真的触发 <img onerror> 等副作用 →
+    // 外部聊天消息里的 payload 在打开「会话存档」时被执行（XSS）。
+    try {
+        return new DOMParser().parseFromString(text, 'text/html').body.textContent || '';
+    } catch (_) {
+        // 兜底：纯正则去标签，绝不写入 live DOM
+        return text.replace(/<[^>]*>/g, '');
+    }
 }
 
 function archiveMessageToText(message) {
@@ -11512,7 +11518,8 @@ async function handleSendMessage() {
             }
         } else {
             const errText = await response.text();
-            aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 接口响应错误 (HTTP ${response.status}): ${errText || '未知错误'}</span>`;
+            // errText 是模型厂家/中转返回的原始响应体，必须转义，否则恶意/被劫持的端点可注入可执行 HTML
+            aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 接口响应错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
         }
     } catch (e) {
         aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 联络模型接口失败，请确认该厂家的 Base URL 和您的网络连通状态。</span>`;

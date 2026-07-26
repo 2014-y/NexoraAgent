@@ -35,6 +35,47 @@ function isObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
 }
 
+const PRIVATE_PROVIDER_TIMEOUT_SEC = 60;
+
+function hostnameFromBaseUrl(baseUrl) {
+  try {
+    const u = new URL(String(baseUrl || ''));
+    return String(u.hostname || '').toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+function isPrivateOrLocalHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  if (!h) return false;
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') return true;
+  if (h.endsWith('.local')) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  return false;
+}
+
+/** 内网/本机 OpenAI 兼容口：短超时以便尽快切备用 */
+function ensurePrivateProviderTimeouts(cfg, changes) {
+  const providers = cfg && cfg.models && cfg.models.providers;
+  if (!isObject(providers)) return;
+  for (const [id, prov] of Object.entries(providers)) {
+    if (!isObject(prov)) continue;
+    const host = hostnameFromBaseUrl(prov.baseUrl);
+    if (!isPrivateOrLocalHost(host)) continue;
+    const pt = Number(prov.timeoutSeconds);
+    if (!Number.isFinite(pt) || pt > PRIVATE_PROVIDER_TIMEOUT_SEC) {
+      const prev = prov.timeoutSeconds;
+      prov.timeoutSeconds = PRIVATE_PROVIDER_TIMEOUT_SEC;
+      changes.push(
+        `models.providers.${id}.timeoutSeconds: ${prev ?? 'unset'} -> ${PRIVATE_PROVIDER_TIMEOUT_SEC} (private-host)`
+      );
+    }
+  }
+}
+
 /** 从配置推断有效上下文窗口（优先主模型，其次 ollama 最小值） */
 function resolveEffectiveContextWindow(cfg) {
   const providers = cfg && cfg.models && cfg.models.providers;
@@ -425,6 +466,9 @@ function ensureLatencySafeConfig(config, opts = {}) {
     diag.stuckSessionAbortMs = 900000;
     changes.push('diagnostics.stuckSessionAbortMs: -> 900000');
   }
+  // 内网中转：短超时，避免 socket 挂死拖很久才 failover
+  ensurePrivateProviderTimeouts(cfg, changes);
+
   // 同步抬高 agnes-ai 请求超时，避免工具跑着模型侧先 idle Abort
   if (isObject(cfg.models) && isObject(cfg.models.providers) && isObject(cfg.models.providers['agnes-ai'])) {
     const prov = cfg.models.providers['agnes-ai'];
@@ -483,5 +527,7 @@ module.exports = {
   DEFAULTS,
   ensureLatencySafeConfig,
   resolveEffectiveContextWindow,
-  computeSafeReserveTokensFloor
+  computeSafeReserveTokensFloor,
+  isPrivateOrLocalHost,
+  ensurePrivateProviderTimeouts
 };

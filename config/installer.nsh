@@ -24,10 +24,23 @@
 !macro NexoraAgent_ForceKill
   SetDetailsPrint both
   !insertmacro NexoraAgent_Log "[process] stopping existing Nexora Agent processes"
-  ; 同时匹配安装目录（Nexora Agent）与 runtime 缓存目录（NexoraAgent，无空格）
-  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; Stop-Process -Name \"Nexora Agent\" -Force -ErrorAction SilentlyContinue; Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { try { $$p = [string]$$.Path; $$p -like \"*Nexora Agent*\" -or $$p -like \"*NexoraAgent*\" } catch { $$false } } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0"'
+  ; 主进程直接 taskkill（/T 连带子进程），不依赖 PowerShell 解析
+  nsExec::Exec 'taskkill /F /T /IM "Nexora Agent.exe"'
   Pop $0
-  Sleep 800
+  ; runtime 里的 node.exe 按路径过滤后杀（同时匹配安装目录 Nexora Agent 与缓存目录 NexoraAgent）
+  ; 注意：NSIS 中 $$_ 才展开为 PowerShell 管道变量 $_，写成 $$. 会展开成 $. 造成整段解析失败
+  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { try { $$p = [string]$$_.Path; $$p -like \"*Nexora Agent*\" -or $$p -like \"*NexoraAgent*\" } catch { $$false } } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0"'
+  Pop $0
+  ; 轮询等进程真正退出（最多 5 秒），避免解压时文件仍被占用
+  StrCpy $1 0
+  ${Do}
+    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Nexora Agent.exe" | find /I "Nexora Agent.exe" >nul'
+    Pop $0
+    ${IfThen} $0 != 0 ${|} ${ExitDo} ${|}
+    Sleep 500
+    IntOp $1 $1 + 1
+  ${LoopUntil} $1 >= 10
+  !insertmacro NexoraAgent_Log "[process] force kill finished (waited $1 rounds)"
 !macroend
 
 !macro customInit
@@ -80,7 +93,7 @@
     ; 与 gateway-runtime.js writeRuntimeStamp 对齐，避免首次启动再整包重解压
 
     FileOpen $1 "$LOCALAPPDATA\NexoraAgent\gateway-runtime\.runtime-stamp" w
-    FileWrite $1 "${VERSION}:pack-75db1f87afc5"
+    FileWrite $1 "${VERSION}:pack-ffff4b6eab7e"
     FileClose $1
     !insertmacro NexoraAgent_Log "[runtime] fresh runtime install completed"
   ${Else}
@@ -98,9 +111,19 @@
 
   ; 卸载：必清 gateway-runtime 等应用缓存；若目录内有 .openclaw（云电脑回退 home）则保留。
   ; 不删除 %USERPROFILE%\.openclaw；Electron AppData 由 deleteAppDataOnUninstall 勾选框处理。
-  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; function Clear-NexoraCache([string]$$root) { if (-not (Test-Path -LiteralPath $$root)) { return 0 }; $$keep = @(\".openclaw\"); Get-ChildItem -LiteralPath $$root -Force | ForEach-Object { if ($$keep -contains $$.Name) { return }; if ($$.PSIsContainer) { cmd /c rmdir /s /q $$.FullName } else { Remove-Item -LiteralPath $$.FullName -Force } }; $$left = @(Get-ChildItem -LiteralPath $$root -Force -ErrorAction SilentlyContinue); if ($$left.Count -eq 0) { Remove-Item -LiteralPath $$root -Force -Recurse } }; Clear-NexoraCache \"$LOCALAPPDATA\NexoraAgent\"; Clear-NexoraCache \"$APPDATA\NexoraAgent\"; exit 0"'
+  ; 注意：NSIS 中 $$_ 才展开为 PowerShell 管道变量 $_，写成 $$. 会展开成 $. 造成整段解析失败、缓存全残留
+  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; function Clear-NexoraCache([string]$$root) { if (-not (Test-Path -LiteralPath $$root)) { return 0 }; $$keep = @(\".openclaw\"); Get-ChildItem -LiteralPath $$root -Force | ForEach-Object { if ($$keep -contains $$_.Name) { return }; if ($$_.PSIsContainer) { cmd /c rmdir /s /q $$_.FullName } else { Remove-Item -LiteralPath $$_.FullName -Force } }; $$left = @(Get-ChildItem -LiteralPath $$root -Force -ErrorAction SilentlyContinue); if ($$left.Count -eq 0) { Remove-Item -LiteralPath $$root -Force -Recurse } }; Clear-NexoraCache \"$LOCALAPPDATA\NexoraAgent\"; Clear-NexoraCache \"$APPDATA\NexoraAgent\"; exit 0"'
   Pop $0
   DetailPrint "[uninstall] clear NexoraAgent caches (preserve .openclaw) exitCode=$0"
+
+  ; 询问是否连用户数据一起删（微信登录、聊天记忆、openclaw.json）。静默卸载不弹窗、默认保留。
+  IfSilent nexora_skip_userdata_purge
+  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "是否同时删除用户数据？$\n$\n包括：$PROFILE\.openclaw（微信登录、聊天记录、模型配置）$\n$\n选择「否」将保留这些数据，重新安装后可继续使用。" IDNO nexora_skip_userdata_purge
+  RMDir /r "$PROFILE\.openclaw"
+  RMDir /r "$LOCALAPPDATA\NexoraAgent"
+  RMDir /r "$APPDATA\NexoraAgent"
+  DetailPrint "[uninstall] user data purged (.openclaw + NexoraAgent dirs)"
+nexora_skip_userdata_purge:
 
   ; 此后勿再用 NexoraAgent_Log：该宏会重新 CreateDirectory %LOCALAPPDATA%\NexoraAgent
 !macroend

@@ -434,8 +434,8 @@
       },
       "fetch": {
         "enabled": true,
-        "allowPrivateNetwork": true,
-        "ssrfPolicy": "lax"
+        "allowPrivateNetwork": false,
+        "ssrfPolicy": "strict"
       }
     }
   }
