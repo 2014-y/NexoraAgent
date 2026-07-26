@@ -175,6 +175,39 @@ function t(keyOrZh, en, zhTw) {
 window.t = t;
 
 
+/**
+ * 从模型 ID 自适应推断上下文窗口（面向未来模型：按厂商/系列 + 名称内的显式窗口标记）。
+ * 返回推断出的 token 数，未知返回 null（由调用方回退默认或走实测）。
+ * 注意：latency-tune.js 里有一份等价实现，改动需同步。
+ */
+function inferContextWindow(modelId) {
+    const id = String(modelId || '').toLowerCase();
+    if (!id) return null;
+    // 名称内显式窗口标记：如 -1m / -128k / :200k（避开 2.5 / 4o 这类版本号）
+    const m = id.match(/(?:^|[^a-z0-9.])(\d{1,4})(k|m)(?![a-z0-9])/);
+    if (m) {
+        const n = parseInt(m[1], 10) * (m[2] === 'm' ? 1000000 : 1000);
+        if (n >= 8000) return n;
+    }
+    if (/gemini/.test(id)) {
+        if (/1\.5.*pro/.test(id)) return 2000000;
+        return 1000000; // Gemini 1.5/2.0/2.5/3.x pro/flash 均为百万级
+    }
+    if (/claude|sonnet|opus|haiku/.test(id)) return 200000;
+    if (/gpt-4\.1/.test(id)) return 1000000;
+    if (/(^|[^a-z])o[134]([^a-z0-9]|$)|o1-|o3-|o4-/.test(id)) return 200000;
+    if (/gpt-4o|gpt-4-turbo/.test(id)) return 128000;
+    if (/gpt-3\.5/.test(id)) return 16384;
+    if (/qwen|qwq/.test(id)) return 131072;
+    if (/deepseek/.test(id)) return 131072;
+    if (/glm-4|chatglm/.test(id)) return 131072;
+    if (/llama-?3|llama3/.test(id)) return 131072;
+    if (/moonshot|kimi/.test(id)) return 131072;
+    if (/mistral|mixtral/.test(id)) return 32768;
+    if (/(^|[^a-z])yi-/.test(id)) return 200000;
+    return null;
+}
+
 // 人性化上下文窗口单位解析与格式化
 function parseContextWindow(val) {
     if (!val) return 128000;
@@ -4741,7 +4774,7 @@ function renderProvidersList() {
                     <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="${t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
                 <div style="display: flex; gap: 4px; align-items: center;">
-                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow)}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow || inferContextWindow(model.id))}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                     <button type="button" class="btn-probe-context" data-provider="${key}" data-index="${index}" title="${t('实测真实上下文窗口（发送探测请求）', 'Probe real context window (sends a test request)', '實測真實上下文視窗（發送探測請求）')}" style="background: none; border: 1px solid var(--border-color); border-radius: 6px; color: #aaa; cursor: pointer; font-size: 13px; height: 30px; width: 30px; flex: none; line-height: 1; padding: 0;">📏</button>
                 </div>
                 <div style="text-align: center;">
@@ -5396,10 +5429,20 @@ function bindProviderEvents() {
                             contextWindow: 16384
                         }));
                     } else if (data.data && Array.isArray(data.data)) {
-                        fetchedModels = data.data.map(m => ({
-                            id: m.id,
-                            contextWindow: 128000
-                        }));
+                        fetchedModels = data.data.map(m => {
+                            // 优先用上游返回的真实窗口（各家字段名不一），否则按模型名自适应推断，最后回退默认
+                            const upstream = Number(
+                                m.context_length || m.context_window || m.max_context_length ||
+                                (m.meta && m.meta.context_length) ||
+                                (m.limits && (m.limits.max_context_tokens || m.limits.context_length))
+                            );
+                            return {
+                                id: m.id,
+                                contextWindow: (Number.isFinite(upstream) && upstream > 0)
+                                    ? upstream
+                                    : (inferContextWindow(m.id) || 128000)
+                            };
+                        });
                     }
 
                     if (fetchedModels.length === 0) {

@@ -22,10 +22,10 @@ const DEFAULTS = {
   /** 本地模型：尽量少注入，但仍靠更大窗口兜底 */
   smallBootstrapMaxChars: 1200,
   smallBootstrapTotalMaxChars: 2800,
-  /** 云端模型窗口封顶（成本+压缩时长安全阀）。可用 NEXORA_CLOUD_CTX_CAP 放宽；
-   *  注意：历史已被封顶写回 openclaw.json 的模型需手动改回原声明值才能享受更大窗口 */
+  /** 云端模型窗口硬上限（成本+压缩时长的安全阀）。默认放到 2M，只挡异常大的值，不再一刀切压到 128k。
+   *  用 NEXORA_CLOUD_CTX_CAP 可自定义（比如想省成本就调小）。真实窗口由 inferCloudContextWindow 自适应推断。 */
   cloudContextWindowCap:
-    Number(process.env.NEXORA_CLOUD_CTX_CAP) > 0 ? Number(process.env.NEXORA_CLOUD_CTX_CAP) : 131072,
+    Number(process.env.NEXORA_CLOUD_CTX_CAP) > 0 ? Number(process.env.NEXORA_CLOUD_CTX_CAP) : 2097152,
   // 云端大窗：预留足够压缩缓冲，尽早触发压缩，避免撑到 overflow 后 120s 超时
   reserveTokensFloor: 8000,
   /** 大上下文云端模型的主动压缩地板（勿再压回 8000） */
@@ -36,6 +36,37 @@ const DEFAULTS = {
 
 function isObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * 从模型 ID 自适应推断上下文窗口（面向未来模型：按厂商/系列 + 名称内显式窗口标记）。
+ * 未知返回 null。注意：renderer.js 里有一份等价实现，改动需同步。
+ */
+function inferCloudContextWindow(modelId) {
+  const id = String(modelId || '').toLowerCase();
+  if (!id) return null;
+  const m = id.match(/(?:^|[^a-z0-9.])(\d{1,4})(k|m)(?![a-z0-9])/);
+  if (m) {
+    const n = parseInt(m[1], 10) * (m[2] === 'm' ? 1000000 : 1000);
+    if (n >= 8000) return n;
+  }
+  if (/gemini/.test(id)) {
+    if (/1\.5.*pro/.test(id)) return 2000000;
+    return 1000000;
+  }
+  if (/claude|sonnet|opus|haiku/.test(id)) return 200000;
+  if (/gpt-4\.1/.test(id)) return 1000000;
+  if (/(^|[^a-z])o[134]([^a-z0-9]|$)|o1-|o3-|o4-/.test(id)) return 200000;
+  if (/gpt-4o|gpt-4-turbo/.test(id)) return 128000;
+  if (/gpt-3\.5/.test(id)) return 16384;
+  if (/qwen|qwq/.test(id)) return 131072;
+  if (/deepseek/.test(id)) return 131072;
+  if (/glm-4|chatglm/.test(id)) return 131072;
+  if (/llama-?3|llama3/.test(id)) return 131072;
+  if (/moonshot|kimi/.test(id)) return 131072;
+  if (/mistral|mixtral/.test(id)) return 32768;
+  if (/(^|[^a-z])yi-/.test(id)) return 200000;
+  return null;
 }
 
 const PRIVATE_PROVIDER_TIMEOUT_SEC = 60;
@@ -224,10 +255,21 @@ function ensureLatencySafeConfig(config, opts = {}) {
     if (provId === 'ollama' || !isObject(prov) || !Array.isArray(prov.models)) continue;
     for (const model of prov.models) {
       if (!isObject(model)) continue;
+      const cw = Number(model.contextWindow);
+      const inferred = inferCloudContextWindow(model.id);
+      // 自适应升级：仅当窗口未设置、或还停留在历史一刀切默认值(128000/131072)时，用推断出的真实窗口顶上。
+      // 用户显式设过的其它值（如故意调小的 64k、或调大的 256k）一律尊重、不动。
+      const isDefaultish = !Number.isFinite(cw) || cw <= 0 || cw === 128000 || cw === 131072;
+      if (inferred && isDefaultish && inferred > (cw || 0)) {
+        const prev = Number.isFinite(cw) && cw > 0 ? cw : 'unset';
+        model.contextWindow = inferred;
+        changes.push(`${provId}/${model.id || '?'}.contextWindow: ${prev} -> ${inferred} (auto)`);
+      }
+      // 硬上限安全阀：只挡超过上限的异常值（默认 2M，可用 NEXORA_CLOUD_CTX_CAP 调整）
       if (Number(model.contextWindow) > DEFAULTS.cloudContextWindowCap) {
         const prev = model.contextWindow;
         model.contextWindow = DEFAULTS.cloudContextWindowCap;
-        changes.push(`${provId}/${model.id || '?'}.contextWindow: ${prev} -> ${DEFAULTS.cloudContextWindowCap}`);
+        changes.push(`${provId}/${model.id || '?'}.contextWindow: ${prev} -> ${DEFAULTS.cloudContextWindowCap} (cap)`);
       }
     }
   }
