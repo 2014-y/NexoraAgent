@@ -3535,13 +3535,16 @@ textarea.acc-input {
   gap: 6px;
   width: 100%;
   margin-top: 0;
-  flex: 0 0 auto; /* 按内容高度，不被拉伸 */
+  flex: 1 1 auto; /* 撑满右列可用高度，让末尾的引擎卡片能向下延伸 */
+  min-height: 0;
 }
 
-/* 引擎服务配置卡片：高度贴合内容，不再拉出大片空白 */
+/* 引擎服务配置卡片：自适应撑高，填满到底部「应用运行时间」上方 */
 #console-system-info-panel {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   align-self: stretch;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .stat-card-mini {
@@ -4100,6 +4103,11 @@ select option {
   border: 1px dashed rgba(255,255,255,0.1);
   border-radius: 14px;
   background: rgba(255,255,255,0.02);
+}
+
+/* 内置插件页：卡片网格撑满可用高度（行拉伸，卡片随之增高；内容 space-between 自然分布，开关沉到底部） */
+#plugins-view .plugins-masonry {
+  align-content: stretch;
 }
 
 .plugin-card-item {
