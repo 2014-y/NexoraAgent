@@ -127,6 +127,25 @@ function createApp(options = {}) {
     return { engine: 'sqljs', db: openSqlJsDb(file) };
   }
 
+  function isTransientDbError(error) {
+    const msg = String((error && (error.code || error.message)) || error || '').toLowerCase();
+    return (
+      msg.includes('disk i/o') ||
+      msg.includes('sqlite_ioerr') ||
+      msg.includes('unable to open database') ||
+      msg.includes('database is locked') ||
+      msg.includes('database is busy') ||
+      msg.includes('resource busy') ||
+      msg.includes('ebusy') ||
+      msg.includes('eio')
+    );
+  }
+
+  function retryDelayFor(attempt) {
+    const delays = [80, 180, 400, 800, 1400, 2400];
+    return delays[Math.min(attempt, delays.length - 1)];
+  }
+
   function closeHandle(handle) {
     try {
       if (handle && handle.db && typeof handle.db.close === 'function') handle.db.close();
@@ -171,7 +190,7 @@ function createApp(options = {}) {
   }
 
   /** @throws on open/query failure — callers must not treat failures as empty tables */
-  function query(dbKey, sql, params) {
+  function queryOnce(dbKey, sql, params) {
     const handle = openDb(dbKey);
     try {
       if (handle.engine === 'native') return queryNative(handle.db, sql, params);
@@ -179,6 +198,20 @@ function createApp(options = {}) {
     } finally {
       closeHandle(handle);
     }
+  }
+
+  function query(dbKey, sql, params) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 7; attempt++) {
+      try {
+        return queryOnce(dbKey, sql, params);
+      } catch (e) {
+        lastErr = e;
+        if (!isTransientDbError(e) || attempt >= 6) break;
+        sleepSync(retryDelayFor(attempt));
+      }
+    }
+    throw lastErr || new Error('database query failed');
   }
 
   function sendRows(res, run) {

@@ -1103,8 +1103,8 @@ function updateTopologyUI() {
                 topoNodeStates[nodeId] = 'pending';
             } else if (topoNodeStates['node-core'] === 'completed' && state !== 'completed') {
                 // 已绑定且网关就绪 → 直接就绪
-                state = 'completed';
-                topoNodeStates[nodeId] = 'completed';
+                state = 'active';
+                topoNodeStates[nodeId] = 'active';
             }
 
             setTopoState(nodeId, lineId, state);
@@ -1277,6 +1277,29 @@ let uptimeInterval = null;
 let totalRequestCount = 0;
 let gatewayReadyProbeTimer = null;
 let gatewayLogReadyTail = '';
+let gatewayReadyReconcileTimers = [];
+let gatewayProcessReportedRunning = false;
+
+function clearGatewayReadyReconcileTimers() {
+    gatewayReadyReconcileTimers.forEach((id) => clearTimeout(id));
+    gatewayReadyReconcileTimers = [];
+}
+
+function scheduleGatewayReadyReconcile(reason) {
+    clearGatewayReadyReconcileTimers();
+    [1200, 3500, 7000, 12000].forEach((delay) => {
+        const id = setTimeout(() => {
+            if (gatewayFullyReady || gatewayStatus === 'stopped' || gatewayStatus === 'upgrading') return;
+            if (!gatewayProcessReportedRunning) return;
+            probeControlUiReady(resolveGatewayProbePort()).then((ok) => {
+                if (ok && !gatewayFullyReady && gatewayStatus !== 'stopped' && gatewayStatus !== 'upgrading') {
+                    markGatewayReadyFromLog('核心服务已就绪（状态自动对齐）');
+                }
+            }).catch(() => {});
+        }, delay);
+        gatewayReadyReconcileTimers.push(id);
+    });
+}
 
 function stopGatewayReadyProbe() {
     if (gatewayReadyProbeTimer) {
@@ -1349,7 +1372,7 @@ function startGatewayReadyProbe(reason) {
             } catch (e) {}
         }
         probeControlUiReady(port).then((ok) => {
-            if (ok && !gatewayFullyReady) {
+            if (ok && !gatewayFullyReady && gatewayProcessReportedRunning) {
                 markGatewayReadyFromLog('核心服务已就绪，可打开 OpenClaw');
             }
         });
@@ -1372,6 +1395,7 @@ function setGatewayFullyReadyUI() {
     gatewayFullyReady = true;
     gatewayStatus = 'running';
     stopGatewayReadyProbe();
+    clearGatewayReadyReconcileTimers();
     updateGatewayStatusUI('running');
     try { updateProgressUI(100, '本地 AI Nexora Agent服务就绪！'); } catch (e) {}
     try { sendDesktopNotification('Nexora Agent状态变更', 'OpenClaw 本地智能Nexora Agent已成功启动运行！'); } catch (e) {}
@@ -2155,11 +2179,13 @@ async function init() {
         });
     }
 
-    // 网关重新拉起：保留活动流与通道状态，不清空本地持久化（Win+R / 重启不丢）
+    // New gateway run: clear previous activity/status snapshots so stale state cannot masquerade as this run.
     if (window.api && window.api.onGatewayClearLogs) {
         window.api.onGatewayClearLogs(() => {
-            resetConsoleRuntimeLogs({ clearPersisted: false, clearSystemLogsArea: false });
-            try { restorePersistedConsoleStatusUi(); } catch (_) {}
+            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: false });
+            try { localStorage.removeItem(CHANNEL_STATUS_STORAGE_KEY); } catch (_) {}
+            try { localStorage.removeItem(ACTIVE_MODEL_STORAGE_KEY); } catch (_) {}
+            try { setAllChannelStatusTilesOffline({ persist: false }); } catch (_) {}
         });
     }
     // 应用冷启动：回灌上一轮活动流 / 通道绿点 / 激活模型，避免 Win+R 后空白
@@ -2181,8 +2207,10 @@ async function init() {
             gatewayToggleBtn.style.opacity = '0.6';
             gatewayToggleBtn.style.cursor = 'not-allowed';
 
-            // 启动时保留历史活动流（Win+R / 重启不丢），新日志继续追加
-            resetConsoleRuntimeLogs({ clearPersisted: false, clearSystemLogsArea: false });
+            resetConsoleRuntimeLogs({ clearPersisted: true, clearSystemLogsArea: false });
+            try { localStorage.removeItem(CHANNEL_STATUS_STORAGE_KEY); } catch (_) {}
+            try { localStorage.removeItem(ACTIVE_MODEL_STORAGE_KEY); } catch (_) {}
+            try { setAllChannelStatusTilesOffline({ persist: false }); } catch (_) {}
             ensureStartingActivityTip();
 
             window.api.gatewayAction('start', { source: 'manual' });
@@ -3666,9 +3694,11 @@ function setupIpcListeners() {
         if (status === 'stopped') {
             gatewayStatus = 'stopped';
             gatewayFullyReady = false;
+            gatewayProcessReportedRunning = false;
             gatewayLogReadyTail = '';
             __gatewayLoadedPluginCount = null;
             stopGatewayReadyProbe();
+            clearGatewayReadyReconcileTimers();
             clearOpenclawControlUiRetry();
             try { setOpenclawPanelOverlay('hide'); } catch (e) {}
             updateGatewayStatusUI('stopped');
@@ -3689,6 +3719,7 @@ function setupIpcListeners() {
             if (typeof refreshAccelerationChannel === 'function') refreshAccelerationChannel().catch(() => {});
         } 
         else if (status === 'running') {
+            gatewayProcessReportedRunning = true;
             gatewayRunningTime = Date.now();
             // 冷启动/热恢复都不再回灌旧活动流；通道绿点等本轮连接日志刷新
             if (oldStatus !== 'stopped') {
@@ -3700,6 +3731,7 @@ function setupIpcListeners() {
                 gatewayStatus = 'starting';
                 updateGatewayStatusUI('starting');
                 startGatewayReadyProbe('status-running');
+                scheduleGatewayReadyReconcile('status-running');
                 setTimeout(() => {
                     if (gatewayFullyReady) return;
                     probeControlUiReady(resolveGatewayProbePort()).then((ok) => {
@@ -3712,6 +3744,8 @@ function setupIpcListeners() {
             if (typeof refreshAccelerationChannel === 'function') refreshAccelerationChannel().catch(() => {});
         }
         else {
+            if (status === 'starting' && gatewayFullyReady && oldStatus === 'running') return;
+            if (status === 'starting') gatewayProcessReportedRunning = false;
             gatewayStatus = status;
             updateGatewayStatusUI(status);
         }
@@ -7227,9 +7261,9 @@ function updateStepperUI(progressVal) {
             const hasFeishu = !!(configData.channels.feishu?.appId && configData.channels.feishu?.appSecret)
                 || !!(configData.channels.feishu?.accounts && Object.values(configData.channels.feishu.accounts).some((a) => a && a.appId && a.appSecret));
 
-            if (hasWechat) topoNodeStates['node-wechat'] = 'completed';
-            if (hasQq) topoNodeStates['node-qq'] = 'completed';
-            if (hasFeishu) topoNodeStates['node-feishu'] = 'completed';
+            if (hasWechat && topoNodeStates['node-wechat'] !== 'completed') topoNodeStates['node-wechat'] = 'active';
+            if (hasQq && topoNodeStates['node-qq'] !== 'completed') topoNodeStates['node-qq'] = 'active';
+            if (hasFeishu && topoNodeStates['node-feishu'] !== 'completed') topoNodeStates['node-feishu'] = 'active';
         }
     } else {
         // 100% Running
@@ -7246,9 +7280,9 @@ function updateStepperUI(progressVal) {
             const hasFeishu = !!(configData.channels.feishu?.appId && configData.channels.feishu?.appSecret)
                 || !!(configData.channels.feishu?.accounts && Object.values(configData.channels.feishu.accounts).some((a) => a && a.appId && a.appSecret));
 
-            topoNodeStates['node-wechat'] = hasWechat ? 'completed' : 'pending';
-            topoNodeStates['node-qq'] = hasQq ? 'completed' : 'pending';
-            topoNodeStates['node-feishu'] = hasFeishu ? 'completed' : 'pending';
+            topoNodeStates['node-wechat'] = hasWechat ? (topoNodeStates['node-wechat'] === 'completed' ? 'completed' : 'active') : 'pending';
+            topoNodeStates['node-qq'] = hasQq ? (topoNodeStates['node-qq'] === 'completed' ? 'completed' : 'active') : 'pending';
+            topoNodeStates['node-feishu'] = hasFeishu ? (topoNodeStates['node-feishu'] === 'completed' ? 'completed' : 'active') : 'pending';
         } else {
             topoNodeStates['node-wechat'] = 'pending';
             topoNodeStates['node-qq'] = 'pending';
@@ -7507,9 +7541,14 @@ function updateGatewayStatusUI(status) {
 
         // 假进度只爬到 80%，避免「97% 假死」观感；真正就绪靠端口探测 / listening 日志
         if (progressContainer) progressContainer.style.display = 'flex';
-        updateProgressUI(8, t('console.progress.starting_env') || '正在拉起子进程环境...');
+        if (gatewayFullyReady || currentProgress >= 100) {
+            updateProgressUI(100, t('console.progress.ready') || '本地 AI Nexora Agent服务就绪！');
+        } else {
+            updateProgressUI(8, t('console.progress.starting_env') || '正在拉起子进程环境...');
+        }
         gatewayLogReadyTail = '';
         startGatewayReadyProbe('user-start');
+        scheduleGatewayReadyReconcile('user-start');
 
         if (progressInterval) clearInterval(progressInterval);
         progressInterval = setInterval(() => {

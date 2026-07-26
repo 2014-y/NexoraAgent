@@ -185,6 +185,36 @@ function getAvailableNodePath() {
     return null;
 }
 
+function execSqliteStatementsWithSandbox(sqlitePath, statements) {
+    if (!sqlitePath || !fs.existsSync(sqlitePath)) return false;
+    const nodeExePath = getAvailableNodePath();
+    if (!nodeExePath) throw new Error('no Node runtime with node:sqlite available');
+    const list = Array.isArray(statements) ? statements.filter(Boolean) : [statements].filter(Boolean);
+    if (!list.length) return false;
+    const code = `
+        const { DatabaseSync } = require('node:sqlite');
+        const sqlitePath = process.argv[1];
+        const statements = JSON.parse(process.argv[2] || '[]');
+        const db = new DatabaseSync(sqlitePath);
+        try {
+            for (const sql of statements) {
+                if (typeof sql !== 'string' || !sql.trim()) continue;
+                try {
+                    db.exec(sql);
+                } catch (_) {}
+            }
+        } finally {
+            db.close();
+        }
+    `;
+    require('child_process').execFileSync(nodeExePath, ['-e', code, sqlitePath, JSON.stringify(list)], {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true
+    });
+    return true;
+}
+
 
 
 function resolveBundledNpmCliPath() {
@@ -4461,10 +4491,7 @@ async function startGatewayProcess(opts = {}) {
             try {
                 const sqlitePath = path.join(lockedAuth.stateDir, 'state', 'openclaw.sqlite');
                 if (fs.existsSync(sqlitePath)) {
-                    const { DatabaseSync } = require('node:sqlite');
-                    const db = new DatabaseSync(sqlitePath);
-                    db.exec("DELETE FROM state_leases WHERE scope = 'startup-migrations';");
-                    db.close();
+                    execSqliteStatementsWithSandbox(sqlitePath, "DELETE FROM state_leases WHERE scope = 'startup-migrations';");
                     console.log('[TokenGuard] Automatically cleared stale startup-migrations lease lock in SQLite state db.');
                 }
             } catch (e) {
@@ -4492,12 +4519,11 @@ async function startGatewayProcess(opts = {}) {
                 const sqlitePath = path.join(stateDir, 'state', 'openclaw.sqlite');
                 if (fs.existsSync(sqlitePath)) {
                     try {
-                        const { DatabaseSync } = require('node:sqlite');
-                        const db = new DatabaseSync(sqlitePath);
-                        try { db.exec("DELETE FROM gateway_boot_lifecycle"); } catch (e) {}
-                        try { db.exec("DELETE FROM state_leases WHERE scope LIKE '%breaker%' OR scope LIKE '%crash%'"); } catch (e) {}
-                        try { db.exec("DELETE FROM kv_store WHERE key LIKE '%restart_loop%' OR key LIKE '%crash_loop%' OR key LIKE '%breaker%'"); } catch (e) {}
-                        db.close();
+                        execSqliteStatementsWithSandbox(sqlitePath, [
+                            "DELETE FROM gateway_boot_lifecycle",
+                            "DELETE FROM state_leases WHERE scope LIKE '%breaker%' OR scope LIKE '%crash%'", 
+                            "DELETE FROM kv_store WHERE key LIKE '%restart_loop%' OR key LIKE '%crash_loop%' OR key LIKE '%breaker%'"
+                        ]);
                         console.log('[TokenGuard] Reset crash-loop breaker state (gateway_boot_lifecycle cleared).');
                     } catch (e) {}
                 }
