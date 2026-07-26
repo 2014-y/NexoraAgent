@@ -3137,6 +3137,12 @@ textarea.acc-input {
   flex-shrink: 0;
 }
 
+/* 当 .view-header 被包在 .view-header-row（标题+右侧工具栏）里时，去掉它自身的下边距，
+   否则会与外层 row 的 margin-bottom 叠成双倍空隙、把 header 撑高（roles/terminal/syslogs 之前 72px 的元凶）。 */
+.view-header-row .view-header {
+  margin-bottom: 0;
+}
+
 .view-header h2 {
   font-size: 22px;
   font-weight: 700;
@@ -3841,8 +3847,7 @@ select option {
 #voice-view > .view-header {
   position: relative;
   z-index: 2;
-  margin-bottom: 24px;
-  padding-bottom: 6px;
+  margin-bottom: 20px; /* 统一为控制面板一致的 20px header→内容间距 */
 }
 
 /* 技能中心：固定头栏，下方网格可滚动 */
@@ -7697,7 +7702,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 20px; /* 统一为控制面板一致的 20px */
   flex-shrink: 0;
   position: relative;
   z-index: 40;
