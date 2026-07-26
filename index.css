@@ -1319,7 +1319,7 @@ body.theme-custom.has-custom-bg .title-bar {
 #terminal-view {
   overflow: hidden;
   box-sizing: border-box;
-  padding: 20px;
+  /* 外边距统一走 .content-viewport 的 24px，不再叠加 */
   min-height: 0;
 }
 
@@ -1351,7 +1351,7 @@ body.theme-custom.has-custom-bg .title-bar {
 #syslogs-view {
   overflow: hidden;
   box-sizing: border-box;
-  padding: 20px;
+  /* 外边距统一走 .content-viewport 的 24px，不再叠加 */
   min-height: 0;
 }
 
@@ -7542,7 +7542,7 @@ input:focus, select:focus, textarea:focus {
 #roles-view {
   overflow: hidden;
   box-sizing: border-box;
-  padding: 20px;
+  /* 外边距统一交给 .content-viewport 的 24px，勿再叠加，否则本页比其它页更靠右 */
 }
 
 .roles-toolbar {
@@ -8189,7 +8189,7 @@ input:focus, select:focus, textarea:focus {
   overflow-y: auto;
   overflow-x: hidden;
   box-sizing: border-box;
-  padding: 20px;
+  /* 外边距统一走 .content-viewport 的 24px，不再叠加 */
 }
 
 .voice-control-panel {
@@ -8455,11 +8455,10 @@ input:focus, select:focus, textarea:focus {
   flex-direction: column;
   gap: 14px;
   height: 100%;
-  padding: 18px;
+  /* 外边距统一走 .content-viewport 的 24px，卡片左边与其它页对齐，不再额外 18px */
   box-sizing: border-box;
   overflow: hidden;
 }
-.session-archive-header,
 .session-archive-toolbar,
 .session-archive-detail,
 .session-archive-card {
@@ -8473,7 +8472,9 @@ input:focus, select:focus, textarea:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 20px;
+  /* 头部改为裸标题（不再是卡片），与其它页统一：标题左对齐 24px、顶部对齐 */
+  padding: 0;
+  margin-bottom: 6px;
 }
 .session-archive-header h2 { margin: 0 0 6px 0; color: var(--text-primary); font-size: 22px; }
 .session-archive-header p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
