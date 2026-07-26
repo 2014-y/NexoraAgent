@@ -6748,7 +6748,12 @@ function skillIconFor(item) {
     }
     const s = String((item && (item.slug || item.displayName || item.ref || item.name)) || '').toLowerCase();
     const map = [
-        [/github/, '🐙'], [/gitlab/, '🦊'],
+        [/github/, '🐙'], [/gitlab/, '🦊'], [/(^|[^a-z])git($|[^a-z])|chronicle/, '🐙'],
+        [/emotion|mood|feel|amygdala|情绪/, '😊'],
+        [/companion|girlfriend|boyfriend|friend|lady|dating|恋爱|陪伴|companion/, '💕'],
+        [/mental|health|therapy|心理|counsel/, '🩺'],
+        [/chat|character|conversation|companion|聊天|对话/, '💬'],
+        [/plan|planner|sop|task|todo|execution|流程/, '🗂️'],
         [/weather|forecast/, '🌦️'], [/obsidian/, '🟣'], [/notion/, '📝'],
         [/pdf/, '📄'], [/(^|[^a-z])(search|tavily|serp|brave)/, '🔍'],
         [/calendar|gcal/, '📅'], [/gog|workspace|gmail|gsuite/, '📇'],
@@ -6892,7 +6897,7 @@ async function renderSkillsInstalled() {
             : skillsT('skills.status.disabled', '已禁用');
         card.innerHTML = `
           <div class="skill-card-head">
-            <div class="skill-card-icon">⭐</div>
+            <div class="skill-card-icon">${skillIconFor(sk)}</div>
             <div class="skill-card-titles">
               <h4 class="skill-card-title">${escapeHtml(sk.name || '')}${badge}</h4>
               <div class="skill-card-sub">${escapeHtml(sk.relativePath || sk.name || '')}</div>
@@ -6950,7 +6955,7 @@ async function renderSkillsPending() {
         const desc = String(p.description || p.preview || '').trim();
         card.innerHTML = `
           <div class="skill-card-head">
-            <div class="skill-card-icon pending">📝</div>
+            <div class="skill-card-icon pending">${skillIconFor(p)}</div>
             <div class="skill-card-titles">
               <h4 class="skill-card-title">${escapeHtml(p.name || p.id || '')}</h4>
               <div class="skill-card-sub">${escapeHtml(p.id || '')}</div>
