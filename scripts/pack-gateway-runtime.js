@@ -246,6 +246,10 @@ function appendOpenClawTemplates() {
 
 /** 确保沙箱自带 npm（Doctor 插件修复 / openclaw plugins install 依赖） */
 function appendSandboxNpm() {
+  if (process.platform !== 'win32') {
+    console.log('  + skip sandbox npm (non-Windows pack, uses system/Electron node)');
+    return;
+  }
   const npmCli = path.join(ROOT, '.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-cli.js');
   const npmPrefix = path.join(ROOT, '.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-prefix.js');
   if (!fs.existsSync(npmCli) || !fs.existsSync(npmPrefix)) {

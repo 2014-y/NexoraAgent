@@ -6,7 +6,7 @@
 const RUNTIME_PACK_ID = 'pack-ffff4b6eab7e';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
-const REQUIRED_RUNTIME_MARKERS = [
+const ALL_RUNTIME_MARKERS = [
   ['node_modules', 'openclaw', 'dist', 'index.js'],
   ['node_modules', '@tencent-weixin', 'openclaw-weixin', 'package.json'],
   ['node_modules', '@openclaw', 'feishu', 'package.json'],
@@ -19,6 +19,11 @@ const REQUIRED_RUNTIME_MARKERS = [
   ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-prefix.js'],
   ['node_modules', 'openclaw', 'docs', 'reference', 'templates', 'AGENTS.md']
 ];
+
+// .node-sandbox（内置 Windows Node/npm）只随 Windows 包分发，mac/linux 用系统或 Electron 内置 Node
+const REQUIRED_RUNTIME_MARKERS = process.platform === 'win32'
+  ? ALL_RUNTIME_MARKERS
+  : ALL_RUNTIME_MARKERS.filter((segs) => segs[0] !== '.node-sandbox');
 
 /** zip 内路径（正斜杠），打包结束必须全部存在 */
 const REQUIRED_ZIP_ENTRIES = REQUIRED_RUNTIME_MARKERS.map((segs) => segs.join('/'));
