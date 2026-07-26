@@ -80,7 +80,7 @@
     ; 与 gateway-runtime.js writeRuntimeStamp 对齐，避免首次启动再整包重解压
 
     FileOpen $1 "$LOCALAPPDATA\NexoraAgent\gateway-runtime\.runtime-stamp" w
-    FileWrite $1 "${VERSION}:pack-e3e4b7011ee3"
+    FileWrite $1 "${VERSION}:pack-505b9d269369"
     FileClose $1
     !insertmacro NexoraAgent_Log "[runtime] fresh runtime install completed"
   ${Else}
