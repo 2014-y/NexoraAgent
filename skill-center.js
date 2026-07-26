@@ -647,6 +647,7 @@ function createSkillCenter(deps) {
             ownerHandle: owner,
             ref,
             displayName: r.displayName || slug,
+            icon: r.icon || r.emoji || r.logo || r.iconUrl || (r.meta && r.meta.icon) || '',
             summary: summary || description.slice(0, 180),
             description: description || summary,
             version: version ? String(version) : null,

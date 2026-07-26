@@ -1510,9 +1510,9 @@ function drawSidebarChart() {
     const dpr = window.devicePixelRatio || 1;
     const width = sidebarChartCanvas.width / dpr;
     const height = sidebarChartCanvas.height / dpr;
-    
+
     ctx.clearRect(0, 0, width, height);
-    
+
     // 绘制微弱背景水平网格线
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.lineWidth = 1;
@@ -1523,25 +1523,25 @@ function drawSidebarChart() {
         ctx.lineTo(width, y);
         ctx.stroke();
     }
-    
+
     const points = sidebarChartData;
     const maxVal = Math.max(...points, 200); // 确保刻度最大值至少为 200，折线波动更平缓精致
     const minVal = 0;
     const len = points.length;
-    
+
     const getX = (index) => (width / (len - 1)) * index;
     const getY = (val) => {
         const ratio = (val - minVal) / (maxVal - minVal);
         return height - ratio * (height - 8) - 4; // 留出上下间距 4px
     };
-    
+
     // 绘制折线
     ctx.beginPath();
     ctx.moveTo(getX(0), getY(points[0]));
     for (let i = 1; i < len; i++) {
         ctx.lineTo(getX(i), getY(points[i]));
     }
-    
+
     // 从 CSS 获取主题色
     const computedAccentColor = getComputedStyle(document.body).getPropertyValue('--accent-color').trim() || '#6366f1';
     ctx.strokeStyle = computedAccentColor;
@@ -1549,12 +1549,12 @@ function drawSidebarChart() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
-    
+
     // 绘制渐变填充区域
     ctx.lineTo(getX(len - 1), height);
     ctx.lineTo(getX(0), height);
     ctx.closePath();
-    
+
     const grad = ctx.createLinearGradient(0, 0, 0, height);
     const computedAccentRgb = getComputedStyle(document.body).getPropertyValue('--accent-rgb').trim() || '99, 102, 241';
     grad.addColorStop(0, `rgba(${computedAccentRgb}, 0.18)`);
@@ -6734,6 +6734,45 @@ async function refreshSkillsCenter() {
     else await renderSkillsInstalled();
 }
 
+/**
+ * 为技能卡片选一个图标：优先用上游/后端返回的 icon（emoji 或图片 URL），
+ * 否则按技能名称/slug 智能匹配一个有意义的 emoji（对以后的新技能也适用），最后按名字哈希取一个，保证各不相同、不再全是 🔥。
+ */
+function skillIconFor(item) {
+    const rawIcon = item && (item.icon || item.emoji || item.logo) ? String(item.icon || item.emoji || item.logo).trim() : '';
+    if (rawIcon) {
+        if (/^https?:\/\//i.test(rawIcon)) {
+            return `<img src="${escapeHtml(rawIcon)}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:6px;" onerror="this.outerHTML='🧩'">`;
+        }
+        return escapeHtml(rawIcon); // emoji 或短字符
+    }
+    const s = String((item && (item.slug || item.displayName || item.ref || item.name)) || '').toLowerCase();
+    const map = [
+        [/github/, '🐙'], [/gitlab/, '🦊'],
+        [/weather|forecast/, '🌦️'], [/obsidian/, '🟣'], [/notion/, '📝'],
+        [/pdf/, '📄'], [/(^|[^a-z])(search|tavily|serp|brave)/, '🔍'],
+        [/calendar|gcal/, '📅'], [/gog|workspace|gmail|gsuite/, '📇'],
+        [/browser|playwright|puppeteer|chromium/, '🌐'],
+        [/image|banana|admapix|photo|dalle|diffusion|midjourney/, '🖼️'],
+        [/human(ize)?/, '✍️'], [/phone|polly|call|dial|sms/, '📞'],
+        [/ontology|knowledge|graph|memory|rag|vector/, '🧠'],
+        [/vet|scan|security|guard|audit|safe/, '🛡️'],
+        [/update|upgrad/, '🔄'], [/proactive/, '⚡'],
+        [/self|improv|reflect|learn/, '🌱'], [/agent|bot/, '🤖'],
+        [/note|doc|markdown|wiki/, '🗒️'], [/map|geo|location/, '🗺️'],
+        [/music|audio|tts|voice|speech/, '🎵'], [/video|movie|film/, '🎬'],
+        [/code|dev|compile|lint/, '💻'], [/mail|email|smtp/, '📧'],
+        [/data|db|sql|sqlite|postgres|mysql/, '🗄️'], [/finance|stock|crypto|pay/, '💰'],
+        [/translate|i18n|lang/, '🌍'], [/task|todo|kanban|plan/, '🗂️'], [/scrape|crawl/, '🕸️'],
+    ];
+    for (const [re, em] of map) { if (re.test(s)) return em; }
+    // 未知技能：按名字哈希从调色板取一个，保证彼此不同
+    const palette = ['🧩', '📦', '🔧', '✨', '🚀', '🔩', '📊', '🧭', '🔮', '⚙️', '🧱', '🎛️'];
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return palette[h % palette.length];
+}
+
 async function renderSkillsClawhub(opts = {}) {
     const grid = document.getElementById('skills-clawhub-grid');
     if (!grid) return;
@@ -6781,7 +6820,7 @@ async function renderSkillsClawhub(opts = {}) {
         ].filter(Boolean).join(' · ');
         card.innerHTML = `
           <div class="skill-card-head">
-            <div class="skill-card-icon store">🔥</div>
+            <div class="skill-card-icon store">${skillIconFor(item)}</div>
             <div class="skill-card-titles">
               <h4 class="skill-card-title">${escapeHtml(item.displayName || item.slug || '')}</h4>
               <div class="skill-card-sub">${escapeHtml(item.ref || item.slug || '')}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
@@ -15030,8 +15069,16 @@ function filterAccelerationNodesByLatency(nodes, latencyFilters) {
         ? latencyFilters.filter((s) => s === 'available' || s === 'timeout')
         : [];
     if (!selected.length) return nodes || [];
+    const list = nodes || [];
+    // 还没测过速时（全部 untested），「可用通道/超时通道」筛选会把节点全部滤掉、进页面一片空白，体验很差。
+    // 此时视为未筛选、直接展示全部；等用户点了「延迟测试」有结果后，筛选再真正生效。
+    const anyTested = list.some((n) => {
+        const s = getAccelerationNodeLatencyStatus(n);
+        return s === 'available' || s === 'timeout';
+    });
+    if (!anyTested) return list;
     const want = new Set(selected);
-    return (nodes || []).filter((n) => want.has(getAccelerationNodeLatencyStatus(n)));
+    return list.filter((n) => want.has(getAccelerationNodeLatencyStatus(n)));
 }
 
 /** 在当前选中的地区分类标签范围内，挑选延迟最低的可用节点 */
@@ -17024,30 +17071,34 @@ function updateDashboardSpeedEmptyState(hasTraffic) {
     }
 }
 
+/** 网速格式化（短） */
+function formatDashSpeed(bps) {
+    const b = Math.max(0, Number(bps) || 0);
+    if (b < 1024) return { num: b.toFixed(0), unit: 'B/s' };
+    if (b < 1024 * 1024) return { num: (b / 1024).toFixed(b < 10 * 1024 ? 1 : 0), unit: 'KB/s' };
+    if (b < 1024 * 1024 * 1024) return { num: (b / 1048576).toFixed(b < 10 * 1048576 ? 1 : 0), unit: 'MB/s' };
+    return { num: (b / 1073741824).toFixed(1), unit: 'GB/s' };
+}
+
+/** 汽车表盘式速度表：270° 刻度盘 + 绿→黄→红分区 + 指针，体现实时网络速率 */
 function drawDashboardSpeedChart(upSpeed, downSpeed) {
     const canvas = document.getElementById('acc-dash-speed-canvas');
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     const container = canvas.parentElement;
-    
-    // 自适应 DPI
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    
     if (canvas.width !== Math.floor(rect.width * dpr) || canvas.height !== Math.floor(rect.height * dpr)) {
         canvas.width = Math.floor(rect.width * dpr);
         canvas.height = Math.floor(rect.height * dpr);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    
     const width = rect.width;
     const height = rect.height;
-    
-    // 清空 Canvas
     ctx.clearRect(0, 0, width, height);
 
-    // 将网速压入历史
+    // 历史（保留供空状态判定）
     if (!window._dashSpeedHistory) {
         window._dashSpeedHistory = { up: [], down: [], maxPoints: 60 };
     }
@@ -17057,138 +17108,128 @@ function drawDashboardSpeedChart(upSpeed, downSpeed) {
         window._dashSpeedHistory.up.shift();
         window._dashSpeedHistory.down.shift();
     }
-
-    const upPoints = window._dashSpeedHistory.up;
-    const downPoints = window._dashSpeedHistory.down;
-    const hasTraffic = upPoints.some((v) => v > 0) || downPoints.some((v) => v > 0);
+    const up = Number(upSpeed) || 0;
+    const down = Number(downSpeed) || 0;
+    const total = up + down;
+    const hasTraffic = window._dashSpeedHistory.up.some((v) => v > 0) || window._dashSpeedHistory.down.some((v) => v > 0);
     updateDashboardSpeedEmptyState(hasTraffic);
 
-    // 始终画网格，避免大块纯黑空白
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 4]);
-    for (let i = 1; i <= 3; i++) {
-        const y = (height * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-    }
-    for (let i = 1; i <= 4; i++) {
-        const x = (width * i) / 5;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-    }
-    ctx.setLineDash([]);
-
-    // 空闲时画一条贴近底部的微弱基线，不至于一片死黑
-    if (!hasTraffic || upPoints.length < 2) {
-        const baseY = height - 18;
-        ctx.beginPath();
-        ctx.moveTo(0, baseY);
-        ctx.lineTo(width, baseY);
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.18)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, baseY + 6);
-        ctx.lineTo(width, baseY + 6);
-        ctx.strokeStyle = 'rgba(244, 63, 94, 0.14)';
-        ctx.stroke();
-        return;
-    }
-
-    // 计算 Y 轴最大尺度 (至少 10 KB/s)
-    let maxSpeed = 10 * 1024;
-    for (let i = 0; i < upPoints.length; i++) {
-        if (upPoints[i] > maxSpeed) maxSpeed = upPoints[i];
-        if (downPoints[i] > maxSpeed) maxSpeed = downPoints[i];
-    }
-    // 上浮 20% 余量
-    maxSpeed *= 1.2;
-
-    // 贝塞尔平滑连线绘制工具
-    const drawCurve = (points, strokeColor, fillColor, shadowColor) => {
-        ctx.beginPath();
-        const stepX = width / (window._dashSpeedHistory.maxPoints - 1);
-        const startX = width - (points.length - 1) * stepX;
-        
-        ctx.moveTo(startX, height - (points[0] / maxSpeed) * height);
-        
-        for (let i = 0; i < points.length - 1; i++) {
-            const x0 = startX + i * stepX;
-            const y0 = height - (points[i] / maxSpeed) * (height - 10);
-            const x1 = startX + (i + 1) * stepX;
-            const y1 = height - (points[i + 1] / maxSpeed) * (height - 10);
-            
-            const cpX1 = x0 + stepX / 2;
-            const cpY1 = y0;
-            const cpX2 = x1 - stepX / 2;
-            const cpY2 = y1;
-            
-            ctx.bezierCurveTo(cpX1, cpY1, cpX2, cpY2, x1, y1);
-        }
-
-        // 绘制描边
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 1.5;
-        ctx.shadowColor = shadowColor;
-        ctx.shadowBlur = 6;
-        ctx.stroke();
-        
-        // 关闭阴影
-        ctx.shadowBlur = 0;
-
-        // 闭合路径填充渐变
-        ctx.lineTo(width, height);
-        ctx.lineTo(startX, height);
-        ctx.closePath();
-        
-        const gradient = ctx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, fillColor);
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        // 绘制最新点的呼吸发光脉冲点
-        const lastX = startX + (points.length - 1) * stepX;
-        const lastY = height - (points[points.length - 1] / maxSpeed) * (height - 10);
-        
-        ctx.shadowColor = shadowColor;
-        ctx.shadowBlur = 10;
-        
-        // 绘制外层半透明波纹晕圈
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = strokeColor.replace('0.75', '0.25');
-        ctx.fill();
-
-        // 绘制中心极亮发光实心点
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 2.0, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-
-        ctx.shadowBlur = 0;
+    // 量程：持久峰值上限，避免指针抖动；至少 1 MB/s
+    const MIN_SCALE = 1024 * 1024;
+    window._dashSpeedGaugeMax = Math.max(window._dashSpeedGaugeMax || MIN_SCALE, total);
+    const niceCeil = (v) => {
+        if (v <= 0) return MIN_SCALE;
+        const p = Math.pow(10, Math.floor(Math.log10(v)));
+        const n = v / p;
+        const m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+        return m * p;
     };
+    const scaleMax = niceCeil(window._dashSpeedGaugeMax * 1.1);
+    const ratio = Math.max(0, Math.min(1, total / scaleMax));
 
-    // 绘制上传曲线 (淡粉红色)
-    drawCurve(
-        upPoints, 
-        'rgba(244, 63, 94, 0.75)', 
-        'rgba(244, 63, 94, 0.08)', 
-        'rgba(244, 63, 94, 0.3)'
-    );
+    const accent = getComputedStyle(document.body).getPropertyValue('--accent-color').trim() || '#38bdf8';
+    const accentRgb = getComputedStyle(document.body).getPropertyValue('--accent-rgb').trim() || '56, 189, 248';
 
-    // 绘制下载曲线 (淡蓝色)
-    drawCurve(
-        downPoints, 
-        'rgba(14, 165, 233, 0.75)', 
-        'rgba(14, 165, 233, 0.08)', 
-        'rgba(14, 165, 233, 0.3)'
-    );
+    // 270° 表盘（尽量填满卡片）
+    const cx = width / 2;
+    const cy = height / 2 + Math.min(height * 0.08, 16);
+    const r = Math.max(40, Math.min(width / 2 - 22, height / 2 - 12, 210));
+    const arcW = Math.max(9, r * 0.085);
+    const START = 0.75 * Math.PI;   // 135°（左下）
+    const SWEEP = 1.5 * Math.PI;    // 270°
+    const ang = START + SWEEP * ratio;
+
+    // 背景轨道
+    ctx.beginPath();
+    ctx.lineWidth = arcW;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.arc(cx, cy, r, START, START + SWEEP);
+    ctx.stroke();
+
+    // 分区色带：绿→黄→红（用锥形渐变沿弧上色），仅画到当前值
+    if (ratio > 0.002) {
+        let stroke = accent;
+        try {
+            if (typeof ctx.createConicGradient === 'function') {
+                const cg = ctx.createConicGradient(START, cx, cy);
+                // 弧占整圆 0.75；在此范围内铺 绿→黄→红
+                cg.addColorStop(0.0, '#22c55e');
+                cg.addColorStop(0.45, '#22c55e');
+                cg.addColorStop(0.6, '#eab308');
+                cg.addColorStop(0.72, '#ef4444');
+                cg.addColorStop(0.75, '#ef4444');
+                cg.addColorStop(1.0, '#ef4444');
+                stroke = cg;
+            }
+        } catch (_) {}
+        ctx.beginPath();
+        ctx.lineWidth = arcW;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = stroke;
+        ctx.arc(cx, cy, r, START, ang);
+        ctx.stroke();
+    }
+
+    // 刻度点
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    for (let i = 0; i <= 10; i++) {
+        const a = START + SWEEP * (i / 10);
+        const tx = cx + Math.cos(a) * (r - arcW - 6);
+        const ty = cy + Math.sin(a) * (r - arcW - 6);
+        ctx.beginPath();
+        ctx.arc(tx, ty, i % 5 === 0 ? Math.max(1.6, r * 0.018) : Math.max(1.0, r * 0.011), 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 指针
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.16, 0);
+    ctx.lineTo(r - arcW - 2, 0);
+    ctx.lineWidth = Math.max(2.4, r * 0.022);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = accent;
+    ctx.shadowColor = `rgba(${accentRgb}, 0.7)`;
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.restore();
+
+    // 中心轴
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(4, r * 0.04), 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.shadowColor = `rgba(${accentRgb}, 0.7)`;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 中央读数：总速率
+    const numFont = Math.max(20, Math.round(r * 0.22));
+    const unitFont = Math.max(10, Math.round(r * 0.1));
+    const subFont = Math.max(10, Math.round(r * 0.085));
+    const f = formatDashSpeed(total);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 ${numFont}px var(--font-mono, monospace)`;
+    ctx.fillText(f.num, cx, cy - r * 0.40);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `600 ${unitFont}px system-ui, sans-serif`;
+    ctx.fillText(f.unit, cx, cy - r * 0.40 + unitFont + 3);
+
+    // 底部 ↑上行 / ↓下行 小读数
+    const fu = formatDashSpeed(up);
+    const fd = formatDashSpeed(down);
+    ctx.font = `600 ${subFont}px var(--font-mono, monospace)`;
+    ctx.fillStyle = 'rgba(14,165,233,0.9)';
+    ctx.textAlign = 'right';
+    ctx.fillText('↓ ' + fd.num + fd.unit, cx - 8, cy + r * 0.62);
+    ctx.fillStyle = 'rgba(244,63,94,0.9)';
+    ctx.textAlign = 'left';
+    ctx.fillText('↑ ' + fu.num + fu.unit, cx + 8, cy + r * 0.62);
 }
 
 // 绘制流量占比微型环形图
