@@ -11478,6 +11478,19 @@ async function handleSendMessage() {
     if (!text && !chatAttachmentBase64) return;
 
     inputArea.value = '';
+
+    // 上一次是生图/生视频临时切了图片/视频模型，这次发普通消息 → 自动切回原来的文字聊天模型
+    try {
+        if (window.__preGenChatModel && window.__preGenChatModel.value) {
+            const sel = ensureChatModelSelect();
+            const curVal = sel ? sel.value : '';
+            if (/image|video/i.test(curVal)) {
+                setChatModelSelection(window.__preGenChatModel.value, window.__preGenChatModel.provider);
+            }
+            window.__preGenChatModel = null;
+        }
+    } catch (_) {}
+
     const file = chatAttachmentBase64;
     const userArchiveMessage = { role: 'user', content: text || (file ? t('session_archive.image_attachment') : ''), attachment: file || '', createdAt: new Date().toISOString() };
     
@@ -11759,6 +11772,24 @@ async function handleActionGenerate(type) {
 
     inputArea.value = '';
     appendChatMessage('user', `[${type === 'image' ? '🎨 智能生图' : '🎥 创意生视频'}] 指令: ${prompt}`);
+
+    // 自动把顶部「当前模型」切成对应的图片/视频模型，所见即所用（发普通消息时自动切回文字模型）
+    try {
+        const prefKey = type === 'image' ? 'client_pref_image_model' : 'client_pref_video_model';
+        const fallback = type === 'image' ? 'agnes-ai/agnes-image-2.0-flash' : 'agnes-ai/agnes-video-v2.0';
+        const pref = localStorage.getItem(prefKey) || fallback;
+        const slash = pref.indexOf('/');
+        const gProvider = slash > 0 ? pref.slice(0, slash) : 'agnes-ai';
+        const gModel = slash > 0 ? pref.slice(slash + 1) : pref;
+        const sel = ensureChatModelSelect();
+        const curVal = sel ? sel.value : '';
+        const curProv = (sel && sel.options[sel.selectedIndex]) ? (sel.options[sel.selectedIndex].getAttribute('data-provider') || '') : '';
+        // 记住切换前的文字聊天模型（当前不是生成类模型时）
+        if (!/image|video/i.test(curVal) && curVal) {
+            window.__preGenChatModel = { value: curVal, provider: curProv };
+        }
+        setChatModelSelection(gModel, gProvider);
+    } catch (_) {}
 
     const aiBubble = appendChatMessage('ai', '渲染中...', null, true);
     aiBubble.innerHTML = `
