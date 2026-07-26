@@ -3,10 +3,14 @@
  * 网关运行时打包 / 解压共用清单（单一真相源）。
  * pack-gateway-runtime.js 与 gateway-runtime.js 必须引用同一份。
  */
-const RUNTIME_PACK_ID = 'pack-ffff4b6eab7e';
+const RUNTIME_PACK_ID = 'pack-3c62ed40656f';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
 const ALL_RUNTIME_MARKERS = [
+  // 裸机自包含关键件：便携 Node + VC++ 运行库，缺任一则打包直接失败（不给出坏包）
+  ['.node-sandbox', 'node.exe'],
+  ['.node-sandbox', 'vcruntime140.dll'],
+  ['.node-sandbox', 'msvcp140.dll'],
   ['node_modules', 'openclaw', 'dist', 'index.js'],
   ['node_modules', '@tencent-weixin', 'openclaw-weixin', 'package.json'],
   ['node_modules', '@openclaw', 'feishu', 'package.json'],

@@ -1,10 +1,12 @@
 {
-    "id":  "auto-summary",
-    "name":  "每日自动总结",
-    "configSchema":  {
-                         "type":  "object"
-                     },
-    "description":  "每天凌晨2点自动总结聊天记录和训练数据，写入MEMORY.md",
-    "kind":  "extension",
-    "version":  "1.0.0"
+  "id": "auto-summary",
+  "name": "每日自动总结",
+  "configSchema": {
+    "type": "object"
+  },
+  "description": "每天凌晨2点自动总结聊天记录和训练数据，写入MEMORY.md",
+  "kind": "extension",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module"
 }

@@ -78,9 +78,19 @@ function toolName(t) {
   return (t && (t.name || t.function?.name || '')) || '';
 }
 
+/** 把多模态消息内容（可能是 parts 数组）安全归一成纯文本 */
+function normalizeMessageText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(p => (p && typeof p === 'object') ? (p.text || p.content || '') : (typeof p === 'string' ? p : '')).join(' ');
+  }
+  if (content && typeof content === 'object') return String(content.text || content.content || '');
+  return '';
+}
+
 /** 根据用户消息识别意图 */
 function detectIntent(message) {
-  const msg = (message || '').toLowerCase();
+  const msg = normalizeMessageText(message).toLowerCase();
   const scores = {};
 
   for (const [category, keywords] of Object.entries(INTENT_KEYWORDS)) {
@@ -113,7 +123,15 @@ function buildLeanSystemPrompt(basePrompt, intentCategories) {
   // 绝不能用一句通用英文 identity 替换掉（否则「机器人突然性格变了/不认得自己」）。
   // 保留足够大的开头预算以覆盖人格设定，再对其后的冗余内容做精简。
   const PERSONA_BUDGET = 14000;
-  const persona = String(basePrompt || '').slice(0, PERSONA_BUDGET).trim();
+  let persona = String(basePrompt || '').slice(0, PERSONA_BUDGET);
+  // 回退到最近的段落/换行边界，避免从句子/代码块中间硬切导致提示不连贯
+  if (String(basePrompt || '').length > PERSONA_BUDGET) {
+    const cut = Math.max(persona.lastIndexOf('\n\n'), persona.lastIndexOf('\n'));
+    if (cut > PERSONA_BUDGET * 0.6) persona = persona.slice(0, cut);
+    // 平衡未闭合的代码块围栏
+    if (((persona.match(/```/g) || []).length % 2) === 1) persona += '\n```';
+  }
+  persona = persona.trim();
   if (persona) sections.push(persona);
 
   // 若人格块之后仍有内容，补充抽取到的核心规则（可能位于后半段）
@@ -234,34 +252,31 @@ export default function createContextRouterPlugin(runtime) {
 
   console.log(`[${pluginName}] 上下文路由插件正在初始化...`);
 
-  let originalSystemPrompt = null;
-  let originalTools = null;
-  let originalSkills = null;
-
   return {
     name: pluginName,
 
     /** 在系统提示构建后拦截并精简 */
     async onBeforeCompile(context) {
-      if (!originalSystemPrompt) {
-        originalSystemPrompt = context.systemPrompt || '';
-        originalTools = context.tools || [];
-        originalSkills = context.skills || [];
-      }
+     try {
+      // 每轮都用宿主本轮重新构建的完整上下文，绝不缓存首轮快照：
+      // systemPrompt 含 MEMORY bootstrap / 活跃会话 / 时间等动态内容，缓存会永久发首轮旧值，并跨会话/人格互相污染。
+      const baseSystemPrompt = context.systemPrompt || '';
+      const baseTools = context.tools || [];
+      const baseSkills = context.skills || [];
 
       // 获取最后一条用户消息来识别意图
       const messages = context.messages || [];
       const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
 
-      // 识别意图
+      // 识别意图（无命中时用一份去重的默认类别，避免出现 ['utility','utility','utility'] 让提示重复三段）
       const intents = detectIntent(lastUserMsg);
-      const activeCategories = intents.length > 0 ? intents : getDefaultSkills().map(() => 'utility');
+      const activeCategories = intents.length > 0 ? intents : ['utility'];
 
       // 加载相关文件
       const relevantFiles = loadRelevantFiles(activeCategories);
 
       // 构建精简系统提示
-      let leanPrompt = originalSystemPrompt;
+      let leanPrompt = baseSystemPrompt;
 
       // 如果原始提示太长，裁剪掉冗余部分
       if (leanPrompt.length > 15000) {
@@ -278,11 +293,11 @@ export default function createContextRouterPlugin(runtime) {
       }
 
       // 精简工具列表：只保留当前意图相关的工具
-      let leanTools = originalTools;
-      if (originalTools && originalTools.length > 10) {
+      let leanTools = baseTools;
+      if (baseTools && baseTools.length > 10) {
         // desktop 意图会裁剪工具，但生图/生视频等 ALWAYS_KEEP 必须保留
         if (activeCategories.includes('desktop') && !activeCategories.includes('media')) {
-          leanTools = originalTools.filter(t => {
+          leanTools = baseTools.filter(t => {
             const name = toolName(t);
             if (!name) return false;
             if (ALWAYS_KEEP_TOOLS.has(name)) return true;
@@ -302,8 +317,8 @@ export default function createContextRouterPlugin(runtime) {
       }
 
       // 精简技能列表：只保留相关类别
-      let leanSkills = originalSkills;
-      if (originalSkills && originalSkills.length > 10) {
+      let leanSkills = baseSkills;
+      if (baseSkills && baseSkills.length > 10) {
         const relevantSkillIds = new Set();
         for (const cat of activeCategories) {
           if (SKILL_CATEGORIES[cat]) {
@@ -316,11 +331,11 @@ export default function createContextRouterPlugin(runtime) {
         for (const s of getDefaultSkills()) {
           relevantSkillIds.add(s);
         }
-        leanSkills = originalSkills.filter(s => relevantSkillIds.has(s.name || s.id));
+        leanSkills = baseSkills.filter(s => relevantSkillIds.has(s.name || s.id));
       }
 
       // 计算优化前后的大小
-      const beforeSize = calcContextSize(originalSystemPrompt, originalTools, originalSkills, messages);
+      const beforeSize = calcContextSize(baseSystemPrompt, baseTools, baseSkills, messages);
       const afterSize = calcContextSize(leanPrompt, leanTools, leanSkills, messages);
 
       // 记录优化报告
@@ -335,6 +350,11 @@ export default function createContextRouterPlugin(runtime) {
         tools: leanTools,
         skills: leanSkills,
       };
+     } catch (err) {
+      // 任何异常都不应中断宿主的本轮编译：原样返回上下文
+      console.warn(`[${pluginName}] onBeforeCompile 失败，跳过本轮精简:`, err && err.message);
+      return context;
+     }
     },
 
     /** 提供手动触发上下文优化的方法 */

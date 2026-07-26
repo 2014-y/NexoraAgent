@@ -56,6 +56,12 @@ export async function pollUntilDone({
       if (status === "failed") {
         throw new Error(parsed.error || "Media generation failed");
       }
+      // 兜底：有的供应商完成时不带标准 status 字段(status=unknown)，只返回 url；
+      // 只要拿到 url 且不是失败/明确处理中状态，就视为完成，避免明明好了却一直等到超时
+      const PROCESSING = ["processing", "pending", "running", "queued", "in_progress", "starting", "submitted", "waiting"];
+      if (parsed.url && status !== "failed" && !PROCESSING.includes(status)) {
+        return parsed.url;
+      }
     } catch (e) {
       if (/failed|no media URL|completed but no/i.test(e.message || "")) throw e;
       console.warn(`${logPrefix} Poll error: ${e.message}`);

@@ -34,8 +34,13 @@ export default function createPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 🔌 WeChat 自动重连插件 (v4 保守重连版) 已加载`);
 
   let consecutiveFailedProbes = 0;
+  let consecutiveUnknown = 0;
+  const UNKNOWN_GIVEUP = 4; // 连续 4 次(≈1min)拿不到状态即判定接口暂不可用，降频而非永久停表
   let isReconnecting = false;
   let timer = null;
+  let everGotStatus = false; // 是否曾成功拿到过状态：没成功过不轻易放弃（启动窗口期渠道路由/鉴权常需 >1min 才就绪）
+  let slowMode = false;
+  const SLOW_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 降频探测间隔，接口恢复后自动切回正常
   const authToken = resolveGatewayToken();
 
   /** 查询 WeChat channel 状态；返回 {connected:bool} 或 null(无法判定，绝不当断开处理) */
@@ -105,10 +110,34 @@ export default function createPlugin(runtime) {
    * 心跳检测循环（保守版）：
    * - 只有连续 REQUIRED_FAILED_PROBES 次「明确断开」才重启；
    * - 状态拿不到 / 空闲 / 长回复期间一律不动，避免打断正在生成的回复。
+   * - 若状态接口持续不可达（本网关渠道控制走 ACP RPC，而非这些 HTTP 路径），
+   *   则停止无谓轮询，交由渠道自身的内置重连处理（避免空转与误导日志）。
    */
   async function checkLoop() {
     if (isReconnecting) return;
     const status = await getChannelStatus();
+
+    if (status === null) {
+      consecutiveUnknown++;
+      // 只有「曾成功探测过」且未处于降频态时，才降到低频探测；绝不永久停表——
+      // 否则启动窗口期接口暂不可达会被误判为永久不可用，整段运行期自动重连失效。
+      if (consecutiveUnknown >= UNKNOWN_GIVEUP && everGotStatus && !slowMode) {
+        console.log(`[${PLUGIN_NAME}] ℹ️ 渠道状态接口暂不可达，转入低频探测（每 ${SLOW_CHECK_INTERVAL_MS/1000}s），恢复后自动切回`);
+        slowMode = true;
+        if (timer) { clearInterval(timer); }
+        timer = setInterval(checkLoop, SLOW_CHECK_INTERVAL_MS);
+      }
+      return;
+    }
+    consecutiveUnknown = 0;
+    everGotStatus = true;
+    // 接口恢复：若此前降频，切回正常检测频率
+    if (slowMode) {
+      slowMode = false;
+      console.log(`[${PLUGIN_NAME}] ✅ 渠道状态接口恢复，切回正常探测频率`);
+      if (timer) { clearInterval(timer); }
+      timer = setInterval(checkLoop, CHECK_INTERVAL_MS);
+    }
 
     if (isExplicitlyDisconnected(status)) {
       consecutiveFailedProbes++;
@@ -118,7 +147,7 @@ export default function createPlugin(runtime) {
         consecutiveFailedProbes = 0;
       }
     } else {
-      // 已连接、或无法判定：都视为正常，清零抖动计数，绝不重启
+      // 已连接：清零抖动计数，绝不重启
       if (consecutiveFailedProbes > 0) {
         console.log(`[${PLUGIN_NAME}] ✅ 通道恢复正常，取消重连计数`);
       }

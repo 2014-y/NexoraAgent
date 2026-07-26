@@ -108,12 +108,38 @@ function safeMainErrorLogPath() {
     return path.join(resolveOpenClawStateDir(), 'main_error.log');
 }
 
+/**
+ * 同步应急网络清理：崩溃/硬退出时(绕过 will-quit)必须做的两件事——
+ * 1) 若开过系统代理，清掉注册表代理开关，否则浏览器等全部走向已死端口 = 整机网络黑洞；
+ * 2) 杀掉可能残留的 mihomo 内核(含测速临时核)，避免占端口。
+ * 只用同步操作(process 'exit' 只允许同步)，且仅在确实用过加速时执行。
+ */
+let __nexoraAccelUsed = false; // 标记是否启用过加速/系统代理，避免误清用户自己设的代理
+function emergencyNetworkCleanupSync() {
+    if (!__nexoraAccelUsed) return;
+    try {
+        const st = (() => { try { return acceleration.getStatus(); } catch (_) { return null; } })();
+        if (!st || st.systemProxy) {
+            require('child_process').execSync(
+                'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f',
+                { windowsHide: true, timeout: 4000, stdio: 'ignore' }
+            );
+        }
+    } catch (_) {}
+    try {
+        require('child_process').execSync('taskkill /F /IM mihomo.exe /T', { windowsHide: true, timeout: 4000, stdio: 'ignore' });
+    } catch (_) {}
+}
+
+process.on('exit', () => { emergencyNetworkCleanupSync(); });
+
 process.on('uncaughtException', (err) => {
     try {
         const logPath = safeMainErrorLogPath();
         fs.mkdirSync(path.dirname(logPath), { recursive: true });
         fs.writeFileSync(logPath, err.stack || err.message, 'utf8');
     } catch(e) {}
+    emergencyNetworkCleanupSync();
 });
 process.on('unhandledRejection', (reason) => {
     try {
@@ -628,10 +654,19 @@ async function checkAndHealSandboxNode() {
     
     // 异步非阻塞运行 robocopy，防止进程阻塞导致无响应
     await new Promise((resolve) => {
-        exec(`robocopy "${path.join(extractedDir, 'node_modules')}" "${destModules}" /E /NJH /NJS /ndl /nc /ns`, () => {
+        exec(`robocopy "${path.join(extractedDir, 'node_modules')}" "${destModules}" /E /NJH /NJS /ndl /nc /ns`, (error) => {
+            // robocopy 退出码 <8 都算成功(0=无变化,1=已复制…)，≥8 才是真失败；
+            // Node exec 会把任何非零退出都塞进 error，故必须按 error.code 判断
+            const code = error && typeof error.code === 'number' ? error.code : 0;
+            if (code >= 8) console.warn(`[SandboxHeal] robocopy 复制 node_modules 失败 (exit=${code})，内置 npm 可能不完整`);
             resolve();
         });
     });
+    // 复制后校验关键文件到位，避免半残的内置 npm 之后在热更新时才暴露
+    try {
+        const npmCliCheck = path.join(destModules, 'npm', 'bin', 'npm-cli.js');
+        if (!fs.existsSync(npmCliCheck)) console.warn('[SandboxHeal] 复制后仍缺少 npm-cli.js，内置 npm 可能不可用');
+    } catch (_) {}
     
     // 清理临时文件
     try {
@@ -651,6 +686,9 @@ let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
 let gatewayStartInFlight = null;
+// 用户在「启动进行中」（gatewayProcess 尚未 fork、gatewayStartInFlight 挂起）时点停止的取消标记：
+// 启动流程会在关键节点（尤其 fork 前）检查它，若已请求取消则中止启动，避免停止被静默吞掉。
+let gatewayStartCancelRequested = false;
 let channelBreakerOverrideTimer = null;
 let overflowRolloverTriggerHelper = null;
 let gatewayHttpReadyTimer = null;
@@ -1106,6 +1144,7 @@ function writeConfigFileAtomic(contents) {
     const fs = require('fs');
     const path = require('path');
     const dir = path.dirname(CONFIG_PATH);
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
     const tmp = path.join(dir, `.openclaw.json.tmp-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
     try {
         const fd = fs.openSync(tmp, 'w');
@@ -1405,17 +1444,9 @@ const MEDIA_VIDEO_PREFS_FILE = 'video-generator.json';
 /** UI-only provider 显示名/备注；OpenClaw Schema 不接受 models.providers.*.label|remark */
 const PROVIDER_UI_META_FILE = 'provider-ui-meta.json';
 const PROVIDER_UI_ONLY_KEYS = ['label', 'displayName', 'remark'];
-const DEFAULT_MEDIA_IMAGE_PREFS = {
-    apiBase: 'https://apihub.agnes-ai.com/v1/images/generations',
-    apiKey: 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
-    model: 'agnes-ai/agnes-image-2.0-flash'
-};
-const DEFAULT_MEDIA_VIDEO_PREFS = {
-    apiBase: 'https://apihub.agnes-ai.com/v1/videos',
-    apiKey: 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
-    model: 'agnes-ai/agnes-video-v2.0'
-};
-const BUILTIN_AGNES_API_KEYS = [
+// ⚠️ 安全：以下内联 key 已泄露（进过源码/公网快照），仅作全新安装的最后兜底。
+// 轮换后用环境变量 AGNES_API_KEYS(逗号分隔) 或 ~/.openclaw/.agnes-keys.json 覆盖，无需改源码。
+const _COMPROMISED_AGNES_KEYS = [
     "sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY",
     "sk-z2NHJlR99oODMYvS9C5u8qLMNf6hmc9vRm5JenvHHStTfxZn",
     "sk-ct7MSvbC8LqL1gGqJuoVCKgjtecXwbjIUZhXQ0gITEaksCS0",
@@ -1424,6 +1455,40 @@ const BUILTIN_AGNES_API_KEYS = [
     "sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F",
     "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh"
 ];
+function loadAgnesApiKeys() {
+    const envRaw = process.env.AGNES_API_KEYS || process.env.AGNES_API_KEY || '';
+    const envKeys = String(envRaw).split(',').map(s => s.trim()).filter(Boolean);
+    if (envKeys.length) return envKeys;
+    try {
+        const os = require('os');
+        const p = path.join(
+            process.env.OPENCLAW_STATE_DIR || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || os.homedir(), '.openclaw'),
+            '.agnes-keys.json'
+        );
+        const arr = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const fileKeys = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean);
+        if (fileKeys.length) return fileKeys;
+    } catch (_) {}
+    return _COMPROMISED_AGNES_KEYS;
+}
+const BUILTIN_AGNES_API_KEYS = loadAgnesApiKeys();
+const _AGNES_PRIMARY_KEY = BUILTIN_AGNES_API_KEYS[0] || _COMPROMISED_AGNES_KEYS[0];
+// 供渲染层同步取内置 key（不再把 key 字面量打进 renderer.js 源码/asar）
+try {
+    ipcMain.on('get-builtin-agnes-key', (e) => {
+        try { e.returnValue = _AGNES_PRIMARY_KEY || ''; } catch (_) { e.returnValue = ''; }
+    });
+} catch (_) {}
+const DEFAULT_MEDIA_IMAGE_PREFS = {
+    apiBase: 'https://apihub.agnes-ai.com/v1/images/generations',
+    apiKey: _AGNES_PRIMARY_KEY,
+    model: 'agnes-ai/agnes-image-2.0-flash'
+};
+const DEFAULT_MEDIA_VIDEO_PREFS = {
+    apiBase: 'https://apihub.agnes-ai.com/v1/videos',
+    apiKey: _AGNES_PRIMARY_KEY,
+    model: 'agnes-ai/agnes-video-v2.0'
+};
 function normalizeMediaApiBase(apiBase, type) {
   const b = String(apiBase || '').trim().replace(/\/$/, '');
   if (!b) return type === 'video' ? 'https://apihub.agnes-ai.com/v1/videos' : 'https://apihub.agnes-ai.com/v1/images/generations';
@@ -1521,7 +1586,8 @@ function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeou
                 const tlsSocket = tls.connect({
                     socket,
                     servername: parsed.hostname,
-                    rejectUnauthorized: false
+                    // 校验远端证书（原先全关 = 经代理的出站可被中间人）；自签名场景可设 NEXORA_INSECURE_TLS=1
+                    rejectUnauthorized: !/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))
                 }, () => {
                     // TLS 已由 CONNECT 隧道完成，这里用 http 在加密套接字上发请求
                     const req = http.request({
@@ -1562,7 +1628,7 @@ function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeou
             method,
             headers,
             timeout,
-            rejectUnauthorized: false
+            rejectUnauthorized: !/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))
         }, handleResponse);
         req.on('error', reject);
         req.on('timeout', () => {
@@ -1594,7 +1660,11 @@ function isMediaApiNoiseLog(text) {
         l.includes('all video api keys failed') ||
         l.includes('parseerror') ||
         l.includes('unexpected token') ||
-        l.includes('failed to load plugin') ||
+        // 恢复类插件加载失败绝不能吞：它们挂了 = 溢出自愈网整个失效，必须让用户/日志看得见
+        (l.includes('failed to load plugin')
+            && !l.includes('session-overflow-rollover')
+            && !l.includes('error-filter')
+            && !l.includes('session-tool-heal')) ||
         l.includes('extensions/image-generator') ||
         l.includes('extensions/video-generator') ||
         l.includes('extensions\\image-generator') ||
@@ -2580,7 +2650,21 @@ function trimOversizedMainSessionTranscript() {
                 const buf = fs.readFileSync(full);
                 const keep = buf.slice(Math.max(0, buf.length - Math.floor(MAX_BYTES * 0.5)));
                 const nl = keep.indexOf(0x0a);
-                const out = nl >= 0 ? keep.slice(nl + 1) : keep;
+                let out = nl >= 0 ? keep.slice(nl + 1) : keep;
+                // 截断必须对齐到 user 消息边界：以 assistant/toolResult 开头的转录会触发
+                // 「roles must alternate」类拒绝，反而制造新的哑火
+                try {
+                    const kept = out.toString('utf8').split('\n');
+                    let firstUser = -1;
+                    for (let i = 0; i < kept.length; i++) {
+                        if (!kept[i].trim()) continue;
+                        try {
+                            const rec = JSON.parse(kept[i]);
+                            if (rec && rec.message && rec.message.role === 'user') { firstUser = i; break; }
+                        } catch (e2) {}
+                    }
+                    if (firstUser > 0) out = Buffer.from(kept.slice(firstUser).join('\n'), 'utf8');
+                } catch (e2) {}
                 fs.copyFileSync(full, full + '.bak-trim-' + Date.now());
                 fs.writeFileSync(full, out);
                 trimmed += 1;
@@ -2727,7 +2811,9 @@ function sanitizeMediaGeneratorPrefs(imageGenerator, videoGenerator) {
         if (!sec || typeof sec !== 'object') return null;
         const out = { ...sec };
         const rawKey = String(out.apiKey || '').trim();
-        if (!rawKey || rawKey === 'sk-builtin-agnes-key-mask' || rawKey === DEFAULT_MEDIA_IMAGE_PREFS.apiKey) {
+        // 额外剥掉 UI 的圆点遮罩(KEY_MASK)——否则内置模式下遮罩串会被当成真 key 写进媒体配置 → 生图/生视频鉴权失败
+        const isBulletMask = /^[•*·●•●]{6,}$/.test(rawKey);
+        if (!rawKey || isBulletMask || rawKey === 'sk-builtin-agnes-key-mask' || rawKey === DEFAULT_MEDIA_IMAGE_PREFS.apiKey) {
             delete out.apiKey;
         }
         if (out.apiBase) out.apiBase = normalizeMediaApiBase(out.apiBase, type);
@@ -2846,6 +2932,37 @@ function ensureSessionContinuityGuidance(wsDir) {
         console.log('[PluginSeed] Appended session continuity guidance to workspace AGENTS.md');
     } catch (e) {
         console.warn('[PluginSeed] ensureSessionContinuityGuidance:', e.message);
+    }
+}
+
+const FILE_HANDLING_AGENTS_MARKER = '<!-- nexora-file-handling-v1 -->';
+
+/**
+ * 文件消息处理规则：用户经微信等渠道发来的文件已下载到本地路径并随消息附带。
+ * 不写清楚每类文件怎么处理，模型会假装读过、或对二进制文件乱来。
+ */
+function ensureFileHandlingGuidance(wsDir) {
+    try {
+        const agentsPath = path.join(wsDir, 'AGENTS.md');
+        if (!fs.existsSync(agentsPath)) return;
+        const cur = fs.readFileSync(agentsPath, 'utf8');
+        if (cur.includes(FILE_HANDLING_AGENTS_MARKER)) return;
+        const section = [
+            '',
+            '## 文件消息',
+            FILE_HANDLING_AGENTS_MARKER,
+            '- 用户发来的文件已下载到本地，路径随消息附带（media/attachment 路径）',
+            '- 文本类（txt/md/csv/json/log/代码）：直接 `read` 该路径后回答；大文件先读开头，需要再分段读',
+            '- PDF：用 `pdf` 工具解析（可带 pages 参数节省 token）',
+            '- Word/Excel/PPT（docx/xlsx/pptx）：暂无解析工具——坦诚说明并请用户转成 PDF/文字/截图，**不要假装读过内容**',
+            '- 可执行文件或未知二进制：**绝不** `exec` 运行、**绝不**整读进上下文，提醒用户注意安全即可',
+            '- 语音已自动转文字、图片已自动生成描述，按文字内容正常回答；视频先确认用户想了解什么',
+            ''
+        ].join('\n');
+        fs.appendFileSync(agentsPath, section, 'utf8');
+        console.log('[PluginSeed] Appended file handling guidance to workspace AGENTS.md');
+    } catch (e) {
+        console.warn('[PluginSeed] ensureFileHandlingGuidance:', e.message);
     }
 }
 
@@ -3206,6 +3323,7 @@ function seedMediaRuntimeArtifacts(appVersion) {
         ensureReplyDedupeAgentsGuidance(wsDir);
         ensureStartupRulesOnceGuidance(wsDir);
         ensureSessionContinuityGuidance(wsDir);
+        ensureFileHandlingGuidance(wsDir);
         try { getSkillCenter().ensureSkillWorkshopGuidance(wsDir); } catch (e) {}
         ensureMediaMemoryGuidance(path.join(wsDir, 'MEMORY.md'));
     } catch (e) {
@@ -3305,6 +3423,13 @@ function seedBundledPlugins(options = {}) {
         syncBundledPluginFiles('disk-compact');
         syncBundledPluginFiles('session-overflow-rollover');
         syncBundledPluginFiles('memory-rotate');
+        // 本次修复涉及的其余插件也强制覆盖用户目录，避免 .bundle-version 戳导致修复不落地
+        syncBundledPluginFiles('weixin-reconnect');
+        syncBundledPluginFiles('dual-model-trainer');
+        syncBundledPluginFiles('health-check');
+        syncBundledPluginFiles('context-router');
+        syncBundledPluginFiles('compaction-memory-guard');
+        syncBundledPluginFiles('auto-summary');
         for (const name of BUNDLED_EXTENSION_PLUGINS) {
             syncBundledPluginFiles(name);
         }
@@ -3787,8 +3912,12 @@ function createWindow(existingSplash) {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            // webSecurity 仍为 false：内置 <webview> 需跨源加载本地控制台(127.0.0.1)与 file:// 媒体。
+            // 已用「XSS 入口关闭 + 导航守卫 + 源级权限 + 仅本地放行响应头」做补偿控制。
             webSecurity: false,
-            allowRunningInsecureContent: true,
+            // 关闭「HTTPS 上下文加载 HTTP 子资源」——主页面是 file://，关掉不影响本地/localhost 加载，
+            // 但能减少被嵌 webview 加载明文子资源被 MITM 注入的面。
+            allowRunningInsecureContent: false,
             webviewTag: true,
             backgroundThrottling: false
         }
@@ -3800,19 +3929,28 @@ function createWindow(existingSplash) {
         }
     } catch (e) {}
 
-    // 语音：允许麦克风（唤醒/语音对话）；默认不开启采集，仅授权
+    // 语音：仅对「应用自身页面」(file:// 的 index.html) 授权麦克风；
+    // webview 里加载的第三方/远端内容不得静默拿麦克风（原实现对任意源都放行）。
+    const isOwnAppOrigin = (url) => {
+        const u = String(url || '');
+        if (u.startsWith('file://')) return true;
+        try {
+            const h = new URL(u).hostname;
+            return h === '127.0.0.1' || h === 'localhost';
+        } catch (_) { return false; }
+    };
+    const isMediaPermission = (p) => p === 'media' || p === 'microphone' || p === 'audioCapture';
     try {
-        session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
-            if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+        session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+            const origin = (details && (details.requestingUrl || details.requestingOrigin)) || (wc && wc.getURL && wc.getURL());
+            if (isMediaPermission(permission) && isOwnAppOrigin(origin)) {
                 return callback(true);
             }
             callback(false);
         });
-        session.defaultSession.setPermissionCheckHandler((wc, permission) => {
-            if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
-                return true;
-            }
-            return false;
+        session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
+            const origin = requestingOrigin || (wc && wc.getURL && wc.getURL());
+            return isMediaPermission(permission) && isOwnAppOrigin(origin);
         });
     } catch (e) {}
 
@@ -3871,20 +4009,50 @@ function createWindow(existingSplash) {
         } catch (e) {}
     });
 
-    // 拦截本地Nexora Agent面板的 HTTP 响应头，移除 X-Frame-Options 限制，防止内置 iframe 跨域白屏/黑屏拒绝渲染
+    // 仅对「本地控制台(127.0.0.1/localhost)」响应移除 X-Frame-Options / CSP，让内置 iframe 能嵌入；
+    // 远端内容一律保留其 CSP / XFO（原实现对所有响应全局剥离 = 任何被嵌页面都失去 CSP 防护）。
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        let isLocal = false;
+        try {
+            const h = new URL(details.url).hostname;
+            isLocal = (h === '127.0.0.1' || h === 'localhost' || h === '::1');
+        } catch (_) {}
+        if (!isLocal) {
+            return callback({ cancel: false, responseHeaders: details.responseHeaders });
+        }
         const responseHeaders = { ...details.responseHeaders };
-        const headersToDelete = [
-            'x-frame-options', 
-            'X-Frame-Options', 
-            'content-security-policy', 
-            'Content-Security-Policy'
-        ];
-        headersToDelete.forEach(h => {
-            delete responseHeaders[h];
-        });
+        ['x-frame-options', 'X-Frame-Options', 'content-security-policy', 'Content-Security-Policy']
+            .forEach(hd => { delete responseHeaders[hd]; });
         callback({ cancel: false, responseHeaders });
     });
+
+    // 导航守卫：禁止主框架被导航到外部源、禁止 window.open 打开新窗口、净化 webview 权限。
+    // 配合 webSecurity:false，防止被注入内容把主页面导去攻击者站点后再放大权限。
+    try {
+        const allowNavigate = (url) => {
+            const u = String(url || '');
+            if (u.startsWith('file://')) return true;
+            try {
+                const h = new URL(u).hostname;
+                return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+            } catch (_) { return false; }
+        };
+        mainWindow.webContents.on('will-navigate', (ev, url) => {
+            if (!allowNavigate(url)) { ev.preventDefault(); try { require('electron').shell.openExternal(url); } catch (_) {} }
+        });
+        mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+            // 外链交给系统浏览器（open-external 已限定 http/https），不在应用内开新窗口
+            if (/^https?:\/\//i.test(String(url || ''))) { try { require('electron').shell.openExternal(url); } catch (_) {} }
+            return { action: 'deny' };
+        });
+        mainWindow.webContents.on('will-attach-webview', (ev, webPreferences) => {
+            // 净化 webview 的进程权限：禁 nodeIntegration、强制隔离，去掉可能被传入的 preload
+            webPreferences.nodeIntegration = false;
+            webPreferences.contextIsolation = true;
+            delete webPreferences.preload;
+            delete webPreferences.preloadURL;
+        });
+    } catch (e) {}
 
 
 
@@ -4022,6 +4190,29 @@ function execAsync(cmd, timeoutMs = 20000) {
     });
 }
 
+/** 与 execAsync 相同，但命令失败（非零退出/无法执行/超时）时 reject —— 供需要感知成败的调用方（如 taskkill 兜底）使用 */
+function execAsyncStrict(cmd, timeoutMs = 20000) {
+    const { exec } = require('child_process');
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const child = exec(cmd, { windowsHide: true }, (err, stdout) => {
+            if (settled) return;
+            settled = true;
+            if (err) reject(err);
+            else resolve(stdout || '');
+        });
+        if (timeoutMs > 0) {
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                try { child.kill(); } catch (e) {}
+                reject(new Error(`exec timeout ${timeoutMs}ms: ${String(cmd).slice(0, 120)}`));
+            }, timeoutMs);
+            child.on('exit', () => clearTimeout(timer));
+        }
+    });
+}
+
 /** 只杀占用指定端口的进程（快、可超时）；不要扫全机 node.exe */
 async function killPidsListeningOnPort(port, excludePids = []) {
     const exclude = new Set((excludePids || []).map((p) => String(p)).filter(Boolean));
@@ -4037,12 +4228,21 @@ async function killPidsListeningOnPort(port, excludePids = []) {
                 pids.add(pid);
             }
         }
+        let killed = 0;
         for (const pid of pids) {
             try {
+                // 安全护栏：只结束 node.exe（我们的网关就是 node 进程）。
+                // 否则若 18789 被无关的第三方软件占用，会连它整棵进程树一起强杀、可能导致对方数据丢失。
+                const imageLine = await execAsync(`tasklist /FI "PID eq ${pid}" /NH /FO CSV`, 5000);
+                if (!/(^|[",])"?node\.exe"?/i.test(String(imageLine || ''))) {
+                    console.warn(`[Gateway] port ${port} held by non-node PID ${pid}; refuse to kill unrelated process`);
+                    continue;
+                }
                 await execAsync(`taskkill /pid ${pid} /F /T`, 8000);
+                killed += 1;
             } catch (e) {}
         }
-        return pids.size;
+        return killed;
     } catch (e) {
         return 0;
     }
@@ -4051,6 +4251,8 @@ async function killPidsListeningOnPort(port, excludePids = []) {
 /** 渠道绑定/改配后热重载网关（防抖；先完整停再启，避免 setTimeout 竞态导致新凭证未加载） */
 let gatewayChannelReloadTimer = null;
 let gatewayChannelReloadInFlight = false;
+// 一次重载进行中又收到新的改配：记下待处理请求，本轮结束后补跑一次，避免新配置被静默丢弃
+let gatewayChannelReloadPending = null;
 /**
  * @param {string} reason
  * @param {{ startIfStopped?: boolean }} [opts]
@@ -4072,7 +4274,11 @@ function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
     }
     gatewayChannelReloadTimer = setTimeout(async () => {
         gatewayChannelReloadTimer = null;
-        if (gatewayChannelReloadInFlight) return;
+        if (gatewayChannelReloadInFlight) {
+            // 本轮重载还在跑：记下最新请求，等它结束后补跑，别丢
+            gatewayChannelReloadPending = { reason: label, opts };
+            return;
+        }
         const wasRunning = !!gatewayProcess || !!gatewayStartInFlight;
         if (!wasRunning) {
             if (wantedStartIfStopped && mainWindow && !mainWindow.isDestroyed()) {
@@ -4105,6 +4311,12 @@ function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
             }
         } finally {
             gatewayChannelReloadInFlight = false;
+            // 期间若有被搁置的改配，补跑一次（用最新一次的原因/选项）
+            if (gatewayChannelReloadPending) {
+                const next = gatewayChannelReloadPending;
+                gatewayChannelReloadPending = null;
+                scheduleGatewayReloadAfterChannelChange(next.reason, next.opts);
+            }
         }
     }, 600);
 }
@@ -4130,14 +4342,40 @@ function clearGatewayRuntimeLogsForFreshStart() {
 async function stopGatewayProcess(opts = {}) {
     const preserveClash = opts.preserveClash === true;
     resetGatewayCrashRestartBudget();
+    // 清掉待触发的渠道 crash-breaker override 定时器，否则它可能在网关已停/新实例上误触发
+    if (channelBreakerOverrideTimer) {
+        clearTimeout(channelBreakerOverrideTimer);
+        channelBreakerOverrideTimer = null;
+    }
+    // 用户在启动进行中（子进程尚未 fork）点停止：请求取消 in-flight 启动，并等它自行中止，
+    // 否则停止会被静默吞掉、启动流程照常 fork 出网关。cancelInFlightStart 仅由外部停止入口传入，
+    // 启动流程内部 terminateOldGatewayBeforeStart 调用本函数时不带该标记，避免自我取消。
+    if (opts.cancelInFlightStart && !gatewayProcess && gatewayStartInFlight) {
+        gatewayStartCancelRequested = true;
+        try { await gatewayStartInFlight; } catch (e) {}
+        // 启动流程中止后若确实没 fork 出进程，补一次端口清理并推送 stopped
+        if (!gatewayProcess) {
+            if (process.platform === 'win32') {
+                try { await killPidsListeningOnPort(resolveConfiguredGatewayPort(), [process.pid, process.ppid]); } catch (e) {}
+            }
+            if (mainWindow && !mainWindow.isDestroyed() && !preserveClash) {
+                mainWindow.webContents.send('gateway-status', 'stopped');
+                mainWindow.webContents.send('gateway-log', '\n[System] 已取消启动，Nexora Agent服务未运行。\n');
+            }
+            return;
+        }
+        // 若在等待期间启动流程已 fork 完成，则走下面正常停止逻辑
+    }
     if (gatewayProcess) {
         gatewayProcess.isIntentionallyStopped = true; // 标记为主动停止，避免触发意外退出警报
         const pid = gatewayProcess.pid;
         if (process.platform === 'win32') {
             try {
-                if (pid) await execAsync(`taskkill /pid ${pid} /T /F`, 8000);
+                // 用 strict 版本：taskkill 失败会真的抛错，下面的 SIGKILL 兜底才不是死代码
+                if (pid) await execAsyncStrict(`taskkill /pid ${pid} /T /F`, 8000);
             } catch (err) {
-                try { gatewayProcess.kill('SIGKILL'); } catch (e) {}
+                console.warn('[Gateway] taskkill failed, fallback to SIGKILL:', err && err.message);
+                try { if (gatewayProcess) gatewayProcess.kill('SIGKILL'); } catch (e) {}
             }
             // 只清本实例端口，避免全机扫 node 卡死
             try {
@@ -4145,8 +4383,19 @@ async function stopGatewayProcess(opts = {}) {
                 await killPidsListeningOnPort(port, [process.pid, process.ppid]);
             } catch (err) {}
         } else {
-            try { gatewayProcess.kill('SIGTERM'); } catch (e) {}
-            try { gatewayProcess.kill('SIGKILL'); } catch (e) {}
+            // mac/linux：先给优雅退出窗口（避免会话/sqlite 半写损坏），仍存活再 SIGKILL；
+            // 用负 pid 杀整个进程组，回收网关自己 spawn 的通道 worker（否则成孤儿占端口）
+            const proc = gatewayProcess;
+            const killTree = (sig) => {
+                try { process.kill(-proc.pid, sig); } catch (e) {
+                    try { proc.kill(sig); } catch (e2) {}
+                }
+            };
+            killTree('SIGTERM');
+            await new Promise((r) => setTimeout(r, 1500));
+            let alive = true;
+            try { process.kill(proc.pid, 0); } catch (e) { alive = false; }
+            if (alive) killTree('SIGKILL');
         }
         // Linkage: Stop Clash (if enabled in settings) when Agent stops — 仅为「真正停止」时联动，启用前清旧进程不关 Clash
         if (!preserveClash) {
@@ -4309,6 +4558,7 @@ async function startGatewayProcess(opts = {}) {
 
         // 取消尚未触发的崩溃自动重启，避免与手动/回收启动叠车
         clearGatewayCrashRestartSchedule();
+        gatewayStartCancelRequested = false;
         gatewayStartInFlight = (async () => {
         try {
         const preferredGatewayPort = resolveConfiguredGatewayPort();
@@ -4457,9 +4707,10 @@ async function startGatewayProcess(opts = {}) {
                         if (vision.changed) console.log('[VisionModel] Pre-gateway:', vision.visionModel);
                     }
                     // 小窗口：再压一次 workspace AGENTS.md + 过大会话 / 卡死 compaction
+                    // 顺序：先截断（可能切出坏 tool 对/角色错序），再修 tool 回合——反过来截断产生的损伤没人修
                     try {
-                        healBrokenToolTurnsOnBoot();
                         healOllamaContextOverflowOnBoot();
+                        healBrokenToolTurnsOnBoot();
                     } catch (e2) {}
                 }
             } catch (e) {
@@ -4503,7 +4754,11 @@ async function startGatewayProcess(opts = {}) {
             });
             // 加速通道开启时为网关注入本地 mihomo 代理；关闭时剥离继承的系统代理
             try { acceleration.applyProxyToEnvObject(childEnv); } catch (e) {}
-            childEnv.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            // 默认开启 TLS 校验（原先全关 = 网关所有出站可被中间人）。
+            // 仅当用户显式设 NEXORA_INSECURE_TLS=1（如自签名的内网中转）时才关闭。
+            if (/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))) {
+                childEnv.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            }
             childEnv.NEXORA_AGENT_PATCH_PATH = patchPath;
             childEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
             childEnv.NEXORA_AGENT_RUNTIME_DIR = process.env.NEXORA_AGENT_RUNTIME_DIR || path.dirname(patchPath);
@@ -4595,6 +4850,16 @@ async function startGatewayProcess(opts = {}) {
                 console.warn('[TokenGuard] Reset crash loop breaker warning:', e.message);
             }
 
+            // 用户在冗长的启动准备（清端口/自愈/harden，可达 10s+）期间点了停止 → 此处中止，绝不 fork
+            if (gatewayStartCancelRequested) {
+                console.log('[Gateway] start cancelled before fork by user stop request');
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('gateway-status', 'stopped');
+                    mainWindow.webContents.send('gateway-log', '\n[System] 启动已被取消（用户在启动过程中点击了停止）。\n');
+                }
+                return;
+            }
+
             console.log(`[TokenGuard] Fork gateway home=${lockedAuth.homePath} state=${lockedAuth.stateDir} token_len=${String(lockedAuth.token).length}`);
 
             // 启动子进程运行Nexora Agent（闭包绑定本代 child，避免旧 exit 误清新进程）
@@ -4606,6 +4871,7 @@ async function startGatewayProcess(opts = {}) {
             child.once('error', (err) => {
                 console.error('[gateway] fork error:', err && err.message ? err.message : err);
                 if (gatewayProcess === child) gatewayProcess = null;
+                try { stopGatewayHttpReadyWatch(); } catch (_) {}
                 try {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('gateway-status', 'stopped');
@@ -4641,13 +4907,28 @@ async function startGatewayProcess(opts = {}) {
 
                 tryAutoAnswerInstallPluginPrompt(child, text, 'Gateway');
                 
-                // 实时保存流日志用于诊断
+                // 实时保存流日志用于诊断（带体积上限，避免长跑无限增长撑满磁盘）。
+                // 全部走异步 IO，并用 promise 链串行化以保持写入顺序；避免在主进程事件循环上做同步磁盘读写（UI/IPC 卡顿）。
                 try {
-                    require('fs').appendFileSync(
-                        require('path').join(CONFIG_DIR, 'gateway_stdout.log'),
-                        text,
-                        'utf8'
-                    );
+                    const logFile = require('path').join(CONFIG_DIR, 'gateway_stdout.log');
+                    const fsp = require('fs').promises;
+                    global.__gwLogBytes = (global.__gwLogBytes || 0) + Buffer.byteLength(text, 'utf8');
+                    const needRollCheck = global.__gwLogBytes > 1024 * 1024;
+                    if (needRollCheck) global.__gwLogBytes = 0;
+                    global.__gwLogWriteChain = (global.__gwLogWriteChain || Promise.resolve()).then(async () => {
+                        try {
+                            if (needRollCheck) {
+                                try {
+                                    const st = await fsp.stat(logFile);
+                                    if (st.size > 8 * 1024 * 1024) {
+                                        const buf = await fsp.readFile(logFile);
+                                        await fsp.writeFile(logFile, buf.slice(buf.length - 2 * 1024 * 1024));
+                                    }
+                                } catch (_) {}
+                            }
+                            await fsp.appendFile(logFile, text, 'utf8');
+                        } catch (_) {}
+                    });
                 } catch(e) {}
 
                 // 渠道回复朗读兜底：不依赖 voice-bridge 插件是否成功挂上钩子
@@ -4656,10 +4937,12 @@ async function startGatewayProcess(opts = {}) {
                 } catch (e) {}
 
                 // 压缩失败只打日志、钩子漏检时：写触发文件，由 session-overflow-rollover 静默归档续聊（不依赖窗口）
+                // 用 chunk 入口：内部按行缓冲，避免特征行被 stdout 分块截断漏检、以及跨行错配 sessionKey
                 try {
                     const helper = getOverflowRolloverTriggerHelper();
-                    if (helper && typeof helper.queueOverflowRolloverFromLog === 'function') {
-                        const queued = helper.queueOverflowRolloverFromLog(CONFIG_DIR, text);
+                    const feed = helper && (helper.queueOverflowRolloverFromLogChunk || helper.queueOverflowRolloverFromLog);
+                    if (typeof feed === 'function') {
+                        const queued = feed(CONFIG_DIR, text);
                         if (queued && queued.queued) {
                             console.log(
                                 `[OverflowRollover] queued trigger key=${queued.sessionKey || '(auto)'} from gateway log`
@@ -4798,7 +5081,7 @@ ipcMain.on('gateway-action', (event, action, opts) => {
         }
         startGatewayProcess({ source });
     } else if (action === 'stop') {
-        stopGatewayProcess();
+        stopGatewayProcess({ cancelInFlightStart: true });
     } else if (action === 'query-status') {
         if (mainWindow) {
             let st = 'stopped';
@@ -5058,6 +5341,41 @@ ipcMain.on('builtin-terminal-resize', (event, size) => {
     }
 });
 
+/**
+ * openclaw.json 损坏自愈：旧版本非原子写/断电写一半留下的坏 JSON 会让网关永远起不来。
+ * 策略：备份坏文件 → 尝试最近可解析的 .bak-* 备份 → 都不行则用模板重建
+ *（重建后 ensure* 流程会照常补齐 token/插件 allow，等同全新初始化）。
+ */
+function recoverCorruptOpenClawConfig(parseErr) {
+    console.error('[ConfigRepair] openclaw.json is corrupt:', parseErr && parseErr.message);
+    try {
+        fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + '.bak-corrupt-' + Date.now());
+    } catch (e) {}
+    try {
+        const cands = fs.readdirSync(CONFIG_DIR)
+            .filter((n) => n.startsWith('openclaw.json.bak-') && !n.includes('corrupt'))
+            .map((n) => path.join(CONFIG_DIR, n))
+            .sort((a, b) => {
+                try { return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs; } catch (e) { return 0; }
+            });
+        for (const f of cands.slice(0, 5)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, ''));
+                fs.copyFileSync(f, CONFIG_PATH);
+                console.warn('[ConfigRepair] Restored openclaw.json from backup:', path.basename(f));
+                return cfg;
+            } catch (e) {}
+        }
+    } catch (e) {}
+    const examplePath = path.join(__dirname, 'config', 'openclaw.json.example');
+    const tpl = JSON.parse(fs.readFileSync(examplePath, 'utf8').replace(/^﻿/, ''));
+    try {
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(tpl, null, 2), 'utf8');
+    } catch (e) {}
+    console.warn('[ConfigRepair] Rebuilt openclaw.json from template (corrupt file kept as .bak-corrupt-*)');
+    return tpl;
+}
+
 // 提取的配置初始化逻辑：确保在 Gateway 启动前就把默认插件（如 health-check 等）写入 allow 列表
 function ensureOpenClawConfigInitialized() {
     try {
@@ -5078,9 +5396,16 @@ function ensureOpenClawConfigInitialized() {
         }
         let content = fs.readFileSync(CONFIG_PATH, 'utf8');
         content = content.replace(/^\uFEFF/, '');
-        let config = JSON.parse(content);
-        // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
+        let config;
         let needsSave = false;
+        try {
+            config = JSON.parse(content);
+        } catch (parseErr) {
+            // 坏配置绝不能让启动流程带病继续（网关会起不来）——就地自愈
+            config = recoverCorruptOpenClawConfig(parseErr);
+            needsSave = true;
+        }
+        // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
         if (!config.ui) { config.ui = {}; needsSave = true; }
         if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
         if (!config.ui.assistant.avatar) {
@@ -5098,6 +5423,34 @@ function ensureOpenClawConfigInitialized() {
             if (norm.changed) {
                 needsSave = true;
                 console.log('[System] Persisted default gateway.auth.token for dashboard auto-login');
+            }
+        }
+        // PDF 解析：内核 pdf 工具对 agnes 走「文本/图像抽取」降级（用已配置的视觉模型），
+        // 历史配置误把它 deny 了 → 用户发 PDF 模型无法解析。一次性摘除该 deny 项。
+        try {
+            const agnesTools = config.tools && config.tools.byProvider && config.tools.byProvider['agnes-ai'];
+            if (agnesTools && Array.isArray(agnesTools.deny) && agnesTools.deny.includes('pdf')) {
+                agnesTools.deny = agnesTools.deny.filter((t) => t !== 'pdf');
+                needsSave = true;
+                console.log('[System] Removed pdf from agnes-ai tool deny list (enable PDF analysis)');
+            }
+        } catch (e) {}
+
+        // 微信入站去抖：500ms 兜不住真人分段打字（一句话拆三四条、间隔一两秒），
+        // 会导致「一条一条回」。升到 2000ms 让分段消息合并成一个回合、模型拿到完整意图。
+        // 仅当当前值还是旧默认 500（或缺失）时升级——用户自己调过的值不动。
+        {
+            if (!config.channels) { config.channels = {}; needsSave = true; }
+            const wx = config.channels['openclaw-weixin'];
+            if (wx && typeof wx === 'object') {
+                if (!wx.inbound || typeof wx.inbound !== 'object') {
+                    wx.inbound = { debounceMs: 2000 };
+                    needsSave = true;
+                } else if (wx.inbound.debounceMs === 500 || wx.inbound.debounceMs == null) {
+                    wx.inbound.debounceMs = 2000;
+                    needsSave = true;
+                    console.log('[System] Raised weixin inbound debounce 500 -> 2000ms (merge split-typing bursts)');
+                }
             }
         }
         // 确保微信插件始终处于启用状态
@@ -5803,15 +6156,113 @@ function watchRoleConfigFile() {
 }
 
 // 配置文件的读写 IPC
+/**
+ * 上下文窗口实测（适配任意 OpenAI 兼容自定义服务商）：
+ * 1) 报错解析：超长请求被拒时从错误信息提取 "maximum context length is N"（权威、通常不计费）
+ * 2) 标记回忆：在填充文本开头埋随机标记让模型复述；静默截断（截头）时必然答不出
+ * 不采用「问模型」——模型对自己的部署参数没有可靠认知，答案是幻觉
+ */
+async function probeModelContextWindow(providerId, modelId, targetTokens) {
+    const target = Number(targetTokens) > 0 ? Math.min(Number(targetTokens), 1200000) : 140000;
+    let cfg;
+    try {
+        cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, ''));
+    } catch (e) {
+        return { ok: false, error: '读取配置失败: ' + e.message };
+    }
+    const prov = cfg.models && cfg.models.providers && cfg.models.providers[providerId];
+    if (!prov || !prov.baseUrl) return { ok: false, error: '服务商不存在或缺少 baseUrl' };
+    const apiType = String(prov.api || 'openai-completions');
+    if (!/openai/i.test(apiType)) {
+        return { ok: false, error: `暂不支持 ${apiType} 类型服务商的实测（仅 OpenAI 兼容接口）` };
+    }
+    const envName = String(providerId).toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_API_KEY';
+    const key = String((cfg.env && cfg.env[envName]) || prov.apiKey || process.env[envName] || '').trim();
+    if (!key) return { ok: false, error: '找不到该服务商的 API Key（env 块与 apiKey 均为空）' };
+
+    const marker = 'MARKER-' + require('crypto').randomBytes(6).toString('hex');
+    const filler = 'probe '.repeat(Math.ceil(target / 1.25));
+    const body = JSON.stringify({
+        model: modelId,
+        messages: [{
+            role: 'user',
+            content: `记住这个标记：${marker}\n下面是无意义的填充文本，请忽略其内容：\n${filler}\n` +
+                `填充结束。现在请只回复最开头让你记住的那个标记（MARKER- 开头），不要任何其它文字。`
+        }],
+        max_tokens: 32,
+        temperature: 0
+    });
+    let url;
+    try {
+        url = new URL(String(prov.baseUrl).replace(/\/$/, '') + '/chat/completions');
+    } catch (e) {
+        return { ok: false, error: 'baseUrl 无效: ' + prov.baseUrl };
+    }
+    const resp = await new Promise((resolve) => {
+        const mod = url.protocol === 'http:' ? require('http') : require('https');
+        const req = mod.request(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + key,
+                'Content-Length': Buffer.byteLength(body)
+            },
+            timeout: 120000
+        }, (res) => {
+            let buf = '';
+            res.on('data', (d) => { buf += d; });
+            res.on('end', () => resolve({ status: res.statusCode || 0, text: buf }));
+        });
+        req.on('timeout', () => { req.destroy(new Error('请求超时(120s)')); });
+        req.on('error', (e) => resolve({ status: 0, text: String((e && e.message) || e) }));
+        req.write(body);
+        req.end();
+    });
+
+    if (resp.status === 0) return { ok: false, error: '网络错误: ' + resp.text };
+    if (resp.status >= 400) {
+        const t = String(resp.text || '');
+        const m =
+            t.match(/maximum context length is[^\d]{0,10}(\d{4,9})/i) ||
+            t.match(/context[_\s-]?(?:length|window)[^\d]{0,20}(\d{4,9})/i) ||
+            t.match(/(\d{4,9})\s*tokens?[^\n]{0,40}(?:maximum|limit|exceed)/i);
+        if (m) return { ok: true, verdict: 'limit', limit: Number(m[1]) };
+        return { ok: false, error: `HTTP ${resp.status}: ` + t.replace(/\s+/g, ' ').slice(0, 200) };
+    }
+    let reply = '';
+    try {
+        const j = JSON.parse(resp.text);
+        reply = String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '');
+    } catch (e) {}
+    if (reply.includes(marker)) return { ok: true, verdict: 'ge', target };
+    return { ok: true, verdict: 'lt', target };
+}
+
+ipcMain.handle('model-probe-context', async (event, providerId, modelId, targetTokens) => {
+    try {
+        return await probeModelContextWindow(String(providerId || ''), String(modelId || ''), targetTokens);
+    } catch (e) {
+        return { ok: false, error: (e && e.message) || String(e) };
+    }
+});
+
 ipcMain.handle('config-read', async () => {
     try {
+        // \u8BFB\u64CD\u4F5C\u4E0D\u518D\u89E6\u53D1\u89C4\u8303\u5316\u5199\u76D8\uFF1A\u539F\u5148\u6BCF\u6B21\u6253\u5F00\u8BBE\u7F6E\u9875\u90FD ensureOpenClawConfigInitialized() \u2192 \u6539\u5199 openclaw.json\uFF0C
+        // \u653E\u5927\u914D\u7F6E\u6296\u52A8\u4E0E\u548C\u7F51\u5173\u7684 clobber \u7ADE\u4E89\u3002\u5DF2\u5B58\u5728\u914D\u7F6E\u76F4\u63A5\u8BFB\u53D6\uFF1B\u4EC5\u89E3\u6790\u5931\u8D25\u6216\u9996\u6B21\u624D\u8D70\u521D\u59CB\u5316/\u4FEE\u590D\u8DEF\u5F84\u3002
+        if (fs.existsSync(CONFIG_PATH)) {
+            try {
+                const content = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
+                return applyProviderUiMetaToConfig(JSON.parse(content));
+            } catch (parseErr) {
+                const repaired = ensureOpenClawConfigInitialized();
+                if (repaired) return applyProviderUiMetaToConfig(repaired);
+                return null;
+            }
+        }
         const config = ensureOpenClawConfigInitialized();
         if (config) return applyProviderUiMetaToConfig(config);
-        
-        if (!fs.existsSync(CONFIG_PATH)) return null;
-        let content = fs.readFileSync(CONFIG_PATH, 'utf8');
-        content = content.replace(/^\uFEFF/, '');
-        return applyProviderUiMetaToConfig(JSON.parse(content));
+        return null;
     } catch (e) {
         console.error('Failed to read config:', e);
         return null;
@@ -6553,8 +7004,9 @@ function forceKillChildProcess(proc) {
     if (!proc) return;
     try {
         if (process.platform === 'win32' && proc.pid) {
-            const { execSync } = require('child_process');
-            execSync(`taskkill /pid ${proc.pid} /T /F`, { stdio: 'ignore' });
+            // 非阻塞：execFile 代替 execSync，避免在 UI 线程同步等待 taskkill（可达数百 ms）
+            const { execFile } = require('child_process');
+            execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }, () => {});
         } else {
             proc.kill('SIGKILL');
         }
@@ -6654,6 +7106,11 @@ function resolveAsyncChannelLoginSpec(pluginIdOrOpts) {
 function stopActiveChannelLogin(opts = {}) {
     const sess = activeChannelLogin;
     if (!sess) return;
+    // 标记已取消，并清掉挂起的成功校验计时器——否则取消后 verifyAndNotify 仍会触发，
+    // 误报绑定成功、改写配置并热重载网关
+    sess.cancelled = true;
+    if (sess.verifyTimer) { clearTimeout(sess.verifyTimer); sess.verifyTimer = null; }
+    if (sess.verifyTimer2) { clearTimeout(sess.verifyTimer2); sess.verifyTimer2 = null; }
     if (sess.wakeTimer) {
         clearTimeout(sess.wakeTimer);
         sess.wakeTimer = null;
@@ -6836,7 +7293,11 @@ function startDirectWeixinChannelLogin(spec) {
     }
     
     const { spawn } = require('child_process');
-    const env = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
+    // 默认 TLS 校验开启；仅 NEXORA_INSECURE_TLS=1 时关闭（微信登录会把凭据发往 weixin.qq.com）
+    const env = { ...process.env };
+    if (/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))) {
+        env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
     for (const key of Object.keys(env)) {
         if (key.toLowerCase().includes('proxy')) delete env[key];
     }
@@ -6923,6 +7384,7 @@ function startDirectWeixinChannelLogin(spec) {
                 const accountId = msg.accountId || 'weixin';
                 // 延迟检查：给文件系统足够的时间落盘
                 const verifyAndNotify = () => {
+                    if (sess.cancelled) return; // 已取消：不再上报成功
                     try {
                         let status = getWeChatStatus();
                         // 如果凭证文件不存在，创建目录后再试一次
@@ -6934,7 +7396,8 @@ function startDirectWeixinChannelLogin(spec) {
                                 fs.mkdirSync(path.join(weixinDir, 'accounts'), { recursive: true });
                             } catch (e) {}
                             // 再等 1.5s 后最终检查
-                            setTimeout(() => {
+                            sess.verifyTimer2 = setTimeout(() => {
+                                if (sess.cancelled) return;
                                 try {
                                     status = getWeChatStatus();
                                     emitWeChatResult(status, accountId, msg.userId);
@@ -6952,6 +7415,7 @@ function startDirectWeixinChannelLogin(spec) {
                     }
                 };
                 const emitWeChatResult = (status, acctId, userId) => {
+                    if (sess.cancelled) return; // 已取消：不改配置、不热重载
                     if (!mainWindow || mainWindow.isDestroyed()) return;
                     if (status.bound) {
                         mainWindow.webContents.send('wechat-login-success', status);
@@ -6987,7 +7451,7 @@ function startDirectWeixinChannelLogin(spec) {
                     // 凭证已落盘：立刻热重载网关，否则运行中的实例收不到微信消息
                     scheduleGatewayReloadAfterChannelChange('wechat-bind', { startIfStopped: true });
                 };
-                setTimeout(verifyAndNotify, 500);
+                sess.verifyTimer = setTimeout(verifyAndNotify, 500);
             } else if (msg.type === 'error') {
                 emitChannelLoginFailed(sess, msg.message || '微信绑定失败');
             }
@@ -7070,9 +7534,12 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
             : path.join(__dirname, 'patch_gateway.js').replace(/\\/g, '/'));
     const cleanEnv = {
         ...process.env,
-        NODE_TLS_REJECT_UNAUTHORIZED: '0',
         NEXORA_AGENT_PATCH_PATH: patchPath
     };
+    // 默认 TLS 校验开启；仅 NEXORA_INSECURE_TLS=1 时关闭（渠道登录会传输账号凭据）
+    if (/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))) {
+        cleanEnv.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
     for (const key of Object.keys(cleanEnv)) {
         if (key.toLowerCase().includes('proxy')) delete cleanEnv[key];
     }
@@ -7953,6 +8420,7 @@ ipcMain.handle('acceleration-close-connection', async (event, id) => {
 
 ipcMain.handle('acceleration-set-enabled', async (event, enabled, profileId) => {
     try {
+        if (enabled) __nexoraAccelUsed = true; // 标记用过加速：崩溃时才需应急清代理/杀内核
         const onProgress = (p) => {
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('acceleration-core-progress', p);
@@ -8068,6 +8536,7 @@ ipcMain.handle('acceleration-select-proxy', async (event, payload) => {
 
 ipcMain.handle('acceleration-delay-test', async (event, names) => {
     try {
+        __nexoraAccelUsed = true; // 测速会拉起临时 mihomo 内核，崩溃时需应急清理
         // 记录用户在测速前是否已手动启用。未启用时 acceleration.delayTest
         // 会使用临时内核，完成后自动关闭，不能改变用户的启用状态。
         const manuallyEnabled = !!acceleration.getStatus().enabled;
@@ -8292,13 +8761,15 @@ ipcMain.handle('stats-append', async (event, logEntry) => {
 
         if (realTokensPath) {
             let realLogs = [];
+            let parseFailed = false;
             try {
                 const content = fs.readFileSync(realTokensPath, 'utf8');
                 realLogs = JSON.parse(content);
-            } catch (e) {}
-            
+            } catch (e) { parseFailed = true; }
+            // 解析失败(可能读到网关半截写入)：不要清空重来，避免把网关刚写的历史抹掉；本次直接跳过追加
+            if (parseFailed) return true;
             if (!Array.isArray(realLogs)) realLogs = [];
-            
+
             if (!logEntry.time) {
                 const dt = new Date();
                 const pad = (n) => n < 10 ? '0' + n : n;
@@ -8308,8 +8779,12 @@ ipcMain.handle('stats-append', async (event, logEntry) => {
             if (!logEntry.status) logEntry.status = '成功';
 
             realLogs.push(logEntry);
-            
-            fs.writeFileSync(realTokensPath, JSON.stringify(realLogs, null, 2), 'utf8');
+            // 加上限(与网关侧一致的 1000 条)，避免无限增长拖慢统计加载
+            if (realLogs.length > 1000) realLogs = realLogs.slice(-1000);
+            // 原子写(临时文件 + rename)，避免网关并发读到半截 JSON 而误判损坏后清空
+            const tmp = realTokensPath + `.tmp-${process.pid}-${Date.now()}`;
+            fs.writeFileSync(tmp, JSON.stringify(realLogs, null, 2), 'utf8');
+            fs.renameSync(tmp, realTokensPath);
         }
         return true;
     } catch (err) {
@@ -8631,7 +9106,8 @@ function httpsRequest(urlStr, { method = 'GET', headers = {}, timeout = 10000, m
                 method,
                 headers: { 'User-Agent': UPDATE_UA, ...headers },
                 timeout,
-                rejectUnauthorized: false
+                // 更新检查必须校验 TLS（更新源证书有效）；否则可被中间人篡改版本/下载地址
+                rejectUnauthorized: true
             }, (res) => {
                 const status = res.statusCode || 0;
                 const location = res.headers.location;
@@ -8694,18 +9170,44 @@ function isSameNpmCoreVersion(left, right) {
 }
 
 function isNewerVersion(latest, current) {
-    const normalize = (v) => normalizeNpmCoreVersion(v).split(/[.-]/).map((p) => {
-        const n = parseInt(p, 10);
-        return Number.isFinite(n) ? n : 0;
-    });
-    const lParts = normalize(latest);
-    const cParts = normalize(current);
-    const len = Math.max(lParts.length, cParts.length, 3);
+    // 正确的 semver 预发布优先级：同一核心版本下，「正式版」比「预发布」更新
+    // （原实现把 1.2.3-beta 拆成 [1,2,3,0,beta段] 反而判成比 1.2.3 更新，会误报/回退更新）
+    const parse = (v) => {
+        const s = normalizeNpmCoreVersion(v);
+        const dash = s.indexOf('-');
+        const core = (dash >= 0 ? s.slice(0, dash) : s).split('.').map((p) => {
+            const n = parseInt(p, 10);
+            return Number.isFinite(n) ? n : 0;
+        });
+        return { core, pre: dash >= 0 ? s.slice(dash + 1) : '' };
+    };
+    const L = parse(latest);
+    const C = parse(current);
+    const len = Math.max(L.core.length, C.core.length, 3);
     for (let i = 0; i < len; i++) {
-        const lVal = lParts[i] || 0;
-        const cVal = cParts[i] || 0;
-        if (lVal > cVal) return true;
-        if (lVal < cVal) return false;
+        const lv = L.core[i] || 0;
+        const cv = C.core[i] || 0;
+        if (lv > cv) return true;
+        if (lv < cv) return false;
+    }
+    // 核心版本相等：无预发布后缀者更新
+    if (!L.pre && C.pre) return true;
+    if (L.pre && !C.pre) return false;
+    if (L.pre && C.pre) {
+        const lp = L.pre.split('.');
+        const cp = C.pre.split('.');
+        const n = Math.max(lp.length, cp.length);
+        for (let i = 0; i < n; i++) {
+            const a = lp[i];
+            const b = cp[i];
+            if (a === undefined) return false;
+            if (b === undefined) return true;
+            const an = parseInt(a, 10);
+            const bn = parseInt(b, 10);
+            const bothNum = String(an) === a && String(bn) === b;
+            if (bothNum) { if (an > bn) return true; if (an < bn) return false; }
+            else { if (a > b) return true; if (a < b) return false; }
+        }
     }
     return false;
 }
@@ -8840,6 +9342,19 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
     if (!/\.exe($|\?)/i.test(downloadUrl) && !/\/releases\/download\//i.test(downloadUrl)) {
         return { success: false, message: '当前链接不是可下载的安装包，请前往 Releases 页面手动下载' };
     }
+    // 主机白名单：下载源必须是 GitHub 官方（含其 release 资源 CDN）。
+    // 否则被入侵的渲染进程可传入 https://evil.com/x.exe，主进程下载后经 install-update 直接执行 → RCE。
+    // 下面的国内镜像代理仅在基址为 github.com 时才由本进程拼接，属可信来源。
+    try {
+        const host = new URL(downloadUrl).hostname.toLowerCase();
+        const ALLOWED_UPDATE_HOSTS = ['github.com', 'www.github.com', 'objects.githubusercontent.com', 'github-releases.githubusercontent.com', 'raw.githubusercontent.com', 'codeload.github.com'];
+        const allowed = ALLOWED_UPDATE_HOSTS.includes(host) || host.endsWith('.githubusercontent.com');
+        if (!allowed) {
+            return { success: false, message: '下载源不受信任，已拒绝（仅允许 GitHub 官方发布源）' };
+        }
+    } catch (e) {
+        return { success: false, message: '无效的下载链接' };
+    }
 
     const candidateUrls = [];
     const pushUnique = (u) => { if (u && !candidateUrls.includes(u)) candidateUrls.push(u); };
@@ -8851,7 +9366,10 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
     pushUnique(downloadUrl);
 
     const tempDir = app.getPath('temp');
-    const savePath = path.join(tempDir, fileName || 'NexoraAgent-Setup-Latest.exe');
+    // 净化渲染层传入的文件名：只取 basename、白名单字符、强制 .exe，防目录穿越写到 temp 之外
+    let safeName = path.basename(String(fileName || '')).replace(/[^A-Za-z0-9._-]/g, '');
+    if (!/\.exe$/i.test(safeName) || safeName.length < 5) safeName = 'NexoraAgent-Setup-Latest.exe';
+    const savePath = path.join(tempDir, safeName);
 
     const downloadOnce = (url) => new Promise((resolve, reject) => {
         let receivedBytes = 0;
@@ -8942,13 +9460,38 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
 ipcMain.handle('install-update', async (event, savePath) => {
     const { shell } = require('electron');
     const fs = require('fs');
-    if (!savePath || !fs.existsSync(savePath)) {
+    const path = require('path');
+    // 只允许执行「本进程写入 temp 目录、且以 .exe 结尾」的安装包，
+    // 防止被注入的渲染层传入任意本地路径让主进程去执行（RCE 面）。
+    const resolved = path.resolve(String(savePath || ''));
+    const tempRoot = path.resolve(app.getPath('temp')).toLowerCase();
+    if (!resolved.toLowerCase().startsWith(tempRoot + path.sep) || !/\.exe$/i.test(resolved)) {
+        return { success: false, message: '安装包路径不合法' };
+    }
+    if (!fs.existsSync(resolved)) {
         return { success: false, message: '未找到安装包文件' };
     }
-    
-    // 使用 Electron shell 安全拉起安装程序（完美支持 .exe, .msi, .dmg 等各种格式）
+    // 尽力校验 Authenticode 签名：若安装包「已签名但签名无效（HashMismatch/被篡改）」则拒绝执行，
+    // 可挡下经中间人替换的已签名安装包。未签名（NotSigned）不阻断，避免误伤尚未配置签名证书的构建。
     try {
-        await shell.openPath(savePath);
+        const sigStatus = await new Promise((resolve) => {
+            const ps = require('child_process').spawn('powershell.exe', [
+                '-NoProfile', '-NonInteractive', '-Command',
+                `(Get-AuthenticodeSignature -LiteralPath ${JSON.stringify(resolved)}).Status.ToString()`
+            ], { windowsHide: true });
+            let out = '';
+            ps.stdout.on('data', (d) => { out += d.toString(); });
+            ps.on('error', () => resolve(null));
+            ps.on('close', () => resolve(out.trim()));
+            setTimeout(() => { try { ps.kill(); } catch (e) {} resolve(null); }, 8000);
+        });
+        if (sigStatus === 'HashMismatch' || sigStatus === 'NotTrusted') {
+            return { success: false, message: '安装包签名校验失败（可能已被篡改），已拒绝执行' };
+        }
+    } catch (e) { /* 校验本身出错不阻断正常更新 */ }
+    // 使用 Electron shell 拉起安装程序
+    try {
+        await shell.openPath(resolved);
         app.quit();
         return { success: true };
     } catch (err) {
@@ -8966,11 +9509,18 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
     const fs = require('fs');
 
     const appDir = resolveAppFsRoot();
+    const ocDir = path.join(appDir, 'node_modules', 'openclaw');
+    let ocRollbackDir = null; // 安装失败时用于回滚的旧版核心备份目录
     const log = (msg) => {
         console.log(`[GatewayUpdate] ${msg}`);
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('gateway-update-progress', { message: msg });
         }
+    };
+    const startGatewayBestEffort = async () => {
+        try { await withGatewayRestartPermit(() => startGatewayProcess({ source: 'update' })); } catch (_) {}
+        await new Promise(r => setTimeout(r, 2500));
+        return !!gatewayProcess;
     };
 
     try {
@@ -9043,6 +9593,19 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
         gatewayProcess = null;
         await new Promise(r => setTimeout(r, 1500));
 
+        // 3.1) 备份当前核心用于失败回滚：改名(快、原子)而非拷贝；npm install 会新建 openclaw 目录。
+        //      若后续 npm install / 冒烟测试失败，把备份改名回来 → 网关永不被留在半残状态。
+        try {
+            if (fs.existsSync(ocDir)) {
+                ocRollbackDir = path.join(appDir, 'node_modules', `.openclaw.rollback-${Date.now()}`);
+                fs.renameSync(ocDir, ocRollbackDir);
+                log('已备份当前核心（用于失败自动回滚）');
+            }
+        } catch (e) {
+            ocRollbackDir = null;
+            log('备份当前核心失败，将在无回滚保护下继续: ' + e.message);
+        }
+
         // 3.5) 如需升级内置 Node 运行时，下载并替换 .node-sandbox/node.exe
         if (nodeUpgrade) {
             try {
@@ -9106,6 +9669,32 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
         } catch (e) {}
         log(`已安装版本: openclaw@${installedVersion}`);
 
+        // 5.5) 冒烟测试：新核心必须有 dist/index.js 且能被内置 Node require；
+        //      不通过则视为安装失败，触发回滚（下方 catch），绝不用半残核心重启。
+        const distEntry = path.join(ocDir, 'dist', 'index.js');
+        if (!fs.existsSync(distEntry)) {
+            throw new Error('新核心缺少 dist/index.js（安装不完整）');
+        }
+        try {
+            const nodeExe = getAvailableNodePath();
+            if (nodeExe) {
+                require('child_process').execFileSync(
+                    nodeExe,
+                    ['-e', `require(${JSON.stringify(distEntry)}); process.exit(0);`],
+                    { timeout: 30000, windowsHide: true, stdio: 'ignore' }
+                );
+                log('新核心冒烟测试通过（可正常 require）');
+            }
+        } catch (smokeErr) {
+            throw new Error('新核心冒烟测试失败（无法 require，可能与 Node 版本不兼容）: ' + (smokeErr.message || smokeErr));
+        }
+
+        // 安装 + 冒烟均通过：删除回滚备份
+        if (ocRollbackDir) {
+            try { fs.rmSync(ocRollbackDir, { recursive: true, force: true }); } catch (_) {}
+            ocRollbackDir = null;
+        }
+
         // 6) 同步锁定 package.json 中的版本号
         try {
             const appPkgPath = path.join(appDir, 'package.json');
@@ -9164,9 +9753,29 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
 
     } catch (err) {
         console.error('[GatewayUpdate] 更新失败:', err);
+        // 失败回滚：把可能半残的新核心删掉，改名恢复旧核心，再用旧版重启网关——绝不把用户留在打不开状态
+        let rolledBack = false;
+        if (ocRollbackDir) {
+            try {
+                try { if (fs.existsSync(ocDir)) fs.rmSync(ocDir, { recursive: true, force: true }); } catch (_) {}
+                fs.renameSync(ocRollbackDir, ocDir);
+                rolledBack = true;
+                log('安装失败，已回滚到更新前的旧版核心');
+            } catch (rbErr) {
+                log('回滚失败（旧核心备份仍在 ' + ocRollbackDir + '）: ' + (rbErr.message || rbErr));
+            }
+        }
+        // 无论是否回滚，都尝试把网关重新拉起（回滚成功=旧版，否则=尽力）
+        let restarted = false;
+        try { gatewayProcess = null; restarted = await startGatewayBestEffort(); } catch (_) {}
+        if (!restarted && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gateway-control-trigger', 'start');
+        }
         return {
             success: false,
-            message: `更新失败: ${err.message}`
+            rolledBack,
+            restarted,
+            message: `更新失败: ${err.message}` + (rolledBack ? '（已自动回滚到旧版并重启）' : '')
         };
     }
 });
@@ -9509,6 +10118,8 @@ app.on('window-all-closed', () => {
 // 应用退出时必须清理本实例内核；系统代理仅在本实例开启过时才关闭（避免多开误关主实例代理）
 app.on('will-quit', async (e) => {
     e.preventDefault();
+    // 兜底：任一清理步骤(数据中心/加速内核/系统代理)若卡住不 resolve，8 秒后强制退出，避免退不掉
+    try { setTimeout(() => { try { app.exit(0); } catch (_) {} }, 8000).unref(); } catch (_) {}
     try {
         voiceRuntime.dispose();
     } catch (err) {}
@@ -9519,6 +10130,8 @@ app.on('will-quit', async (e) => {
         acceleration.setIsQuitting(true);
         const st = acceleration.getStatus();
         await acceleration.stopCore();
+        // 同时停掉测速用的临时内核(原先只停主核，临时核会成孤儿占端口)
+        try { if (typeof acceleration.stopTempMihomoCore === 'function') await acceleration.stopTempMihomoCore(); } catch (_) {}
         if (st && st.systemProxy) {
             await acceleration.applySystemProxy(false);
         }

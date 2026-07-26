@@ -2,7 +2,7 @@
 // Nexora Agent - Node.js 启动入口
 // 用法: node start-gateway.js
 
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -108,23 +108,33 @@ function checkPrerequisites() {
 }
 
 function startGateway() {
-  try {
-    let cmd;
-    if (localOpenClawPath) {
-      cmd = `"${nodeExePath}" "${localOpenClawPath}" gateway run --force`;
-    } else {
-      cmd = 'openclaw gateway run --force';
-    }
-    
-    execSync(cmd, {
-      cwd: BASE_PATH,
-      stdio: 'inherit',
-      shell: true,
-      env: process.env
-    });
-  } catch (e) {
-    console.error('Gateway 启动失败:', e.message);
+  // 用参数数组启动, 避免安装路径里的 & / ^ 等字符破坏 shell 命令行
+  let exePath;
+  let args;
+  if (localOpenClawPath) {
+    exePath = nodeExePath;
+    args = [localOpenClawPath, 'gateway', 'run', '--force'];
+  } else {
+    exePath = 'openclaw';
+    args = ['gateway', 'run', '--force'];
+  }
+
+  // 本地路径直接跑 node(无 shell, 路径安全); 全局 openclaw 在 Windows 是 .cmd, 需 shell 解析 PATH
+  // (此分支不含用户安装路径, 无特殊字符注入风险)
+  const useShell = !localOpenClawPath;
+  const result = spawnSync(exePath, args, {
+    cwd: BASE_PATH,
+    stdio: 'inherit',
+    shell: useShell,
+    env: process.env
+  });
+
+  if (result.error) {
+    console.error('Gateway 启动失败:', result.error.message);
     process.exit(1);
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    process.exit(result.status);
   }
 }
 

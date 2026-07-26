@@ -105,7 +105,7 @@
         "*"
       ],
       "inbound": {
-        "debounceMs": 500
+        "debounceMs": 2000
       }
     }
   },
@@ -138,6 +138,15 @@
         "enabled": true
       },
       "compaction-memory-guard": {
+        "enabled": true
+      },
+      "session-overflow-rollover": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      },
+      "session-tool-heal": {
         "enabled": true
       },
       "context-router": {
@@ -301,6 +310,8 @@
     "allow": [
       "openclaw-weixin",
       "error-filter",
+      "session-overflow-rollover",
+      "session-tool-heal",
       "weixin-reconnect",
       "auto-summary",
       "dual-model-trainer",
@@ -356,7 +367,7 @@
     "mode": "local",
     "auth": {
       "mode": "token",
-      "token": "openclaw-dev-token-998877"
+      "token": ""
     },
     "controlUi": {
       "basePath": "/acp"
@@ -415,7 +426,6 @@
           "gateway",
           "tts",
           "browser",
-          "pdf",
           "feishu",
           "qqbot",
           "whatsapp",

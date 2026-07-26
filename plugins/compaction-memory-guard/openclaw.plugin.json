@@ -1,10 +1,12 @@
 {
-    "id":  "compaction-memory-guard",
-    "name":  "Compaction Memory Guard",
-    "configSchema":  {
-                         "type":  "object"
-                     },
-    "description":  "对话过长时自动备份关键信息到 MEMORY.md",
-    "kind":  "extension",
-    "version":  "1.0.0"
+  "id": "compaction-memory-guard",
+  "name": "Compaction Memory Guard",
+  "configSchema": {
+    "type": "object"
+  },
+  "description": "对话过长时自动备份关键信息到 MEMORY.md",
+  "kind": "extension",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module"
 }

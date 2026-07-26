@@ -18,6 +18,20 @@ const MEMORY_DIR = path.join(STATE_DIR, 'workspace', 'memory');
 const SUMMARIZE_EVERY = 10;
 let conversationCount = 0;
 
+/**
+ * 隐私开关（defect 7）：runSummary 会把近期聊天记录 + 训练数据（含原始用户消息）拼进 prompt
+ * 发给云端 LLM 做总结。以下任一为「关闭」值时跳过自动总结，不把原始用户消息送云端：
+ *   - NEXORA_AUTO_SUMMARY = 0/false/off/no  → 显式关闭本插件
+ *   - NEXORA_TRAINING_COLLECT = 0/false/off/no → 复用数据收集总开关一并关闭
+ * 未设置时保持原有默认行为。
+ */
+function autoSummaryEnabled() {
+  const off = (v) => v != null && /^(0|false|off|no)$/i.test(String(v).trim());
+  if (off(process.env.NEXORA_AUTO_SUMMARY)) return false;
+  if (off(process.env.NEXORA_TRAINING_COLLECT)) return false;
+  return true;
+}
+
 export default function createPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 📅 长期记忆·自动摘要已加载`);
 
@@ -160,6 +174,8 @@ ${currentMem || '(无)'}
     name: PLUGIN_NAME,
 
     async onAfterResponse(context) {
+      // 隐私开关关闭时不把原始用户消息送云端总结（defect 7）
+      if (!autoSummaryEnabled()) return;
       conversationCount++;
       if (conversationCount >= SUMMARIZE_EVERY) {
         conversationCount = 0;

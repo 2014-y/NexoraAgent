@@ -22,7 +22,10 @@ const DEFAULTS = {
   /** 本地模型：尽量少注入，但仍靠更大窗口兜底 */
   smallBootstrapMaxChars: 1200,
   smallBootstrapTotalMaxChars: 2800,
-  cloudContextWindowCap: 131072,
+  /** 云端模型窗口封顶（成本+压缩时长安全阀）。可用 NEXORA_CLOUD_CTX_CAP 放宽；
+   *  注意：历史已被封顶写回 openclaw.json 的模型需手动改回原声明值才能享受更大窗口 */
+  cloudContextWindowCap:
+    Number(process.env.NEXORA_CLOUD_CTX_CAP) > 0 ? Number(process.env.NEXORA_CLOUD_CTX_CAP) : 131072,
   // 云端大窗：预留足够压缩缓冲，尽早触发压缩，避免撑到 overflow 后 120s 超时
   reserveTokensFloor: 8000,
   /** 大上下文云端模型的主动压缩地板（勿再压回 8000） */

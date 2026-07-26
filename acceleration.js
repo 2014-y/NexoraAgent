@@ -137,7 +137,9 @@ function scheduleUnexpectedCoreRestart(exitCode) {
         }
         startCore(id).then(() => {
             unexpectedRestartAttempts = 0;
-            unexpectedRestartWindowStart = 0;
+            // 记录成功时刻(而非置 0)：否则 now-0 恒 >60s 使计数永远清零，
+            // 一个「起来 30 秒又崩」的核会无限重启、永远触发不了「3 次放弃」
+            unexpectedRestartWindowStart = Date.now();
             emitStatusChange({ reason: 'core-restarted', restarting: false });
             console.log('[Acceleration] mihomo auto-restart succeeded');
         }).catch((err) => {
@@ -985,7 +987,9 @@ function fetchSubscriptionViaProxy(url, proxyPort, redirects, timeoutMs) {
                 const tlsSocket = tls.connect({
                     socket,
                     servername: parsed.hostname,
-                    rejectUnauthorized: false
+                    // 安全：此处 TLS 目标是远端订阅服务器（parsed.hostname），并非可证明的本地回环地址，
+                    // 因此必须校验证书，防止中间人攻击（合法订阅服务器均使用有效证书）。
+                    rejectUnauthorized: true
                 }, () => finishWithSocket(tlsSocket));
                 tlsSocket.on('error', reject);
             } else {
@@ -1381,7 +1385,9 @@ function buildRuntimeYaml(profileContent) {
         '    - any:53',
         'dns:',
         '  enable: true',
-        '  listen: 0.0.0.0:1053',
+        // 安全：DNS 默认仅监听本地回环，避免向局域网暴露 DNS 服务；
+        // 如确需 LAN 内共享，可通过环境变量 NEXORA_DNS_LISTEN 覆盖（如 0.0.0.0:1053）。
+        `  listen: ${process.env.NEXORA_DNS_LISTEN || '127.0.0.1:1053'}`,
         '  ipv6: false',
         '  enhanced-mode: fake-ip',
         '  fake-ip-range: 198.18.0.1/16',
@@ -1839,6 +1845,24 @@ async function startCoreInner(id, content, onProgress) {
     if (mihomoProc.stderr) mihomoProc.stderr.on('data', appendBootLog);
 
     const currentProc = mihomoProc;
+    // 健壮性：spawn 失败（如可执行文件缺失/权限不足）会触发 'error' 事件，
+    // 若未监听将导致未捕获异常使进程崩溃。此处记录日志并清理状态，与 exit 处理保持一致。
+    mihomoProc.on('error', (err) => {
+        const isCurrent = (mihomoProc === currentProc);
+        if (isCurrent) mihomoProc = null;
+        if (mihomoMemoryTimer) {
+            clearInterval(mihomoMemoryTimer);
+            mihomoMemoryTimer = null;
+        }
+        lastMihomoMemoryText = 'INACTIVE';
+        console.log(`[Acceleration] mihomo spawn error: ${err && err.message ? err.message : err}`);
+        // 与 exit 处理一致：启动后的 IO/管道错误也要还原系统代理并触发重启，
+        // 否则 state.enabled 仍为 true、系统代理还指着死端口，UI 显示「已连接」却全网黑洞
+        if (isCurrent && state.enabled && !appIsQuitting && !startingCore) {
+            applySystemProxy(false).catch(() => {});
+            scheduleUnexpectedCoreRestart(-1);
+        }
+    });
     mihomoProc.on('exit', (code) => {
         const isCurrent = (mihomoProc === currentProc);
         if (isCurrent) mihomoProc = null;
@@ -2980,6 +3004,7 @@ module.exports = {
     setEnabled,
     startCore,
     stopCore,
+    stopTempMihomoCore,
     getStatus,
     getDashboardData,
     selectProxy,

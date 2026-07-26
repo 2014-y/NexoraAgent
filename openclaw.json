@@ -63,8 +63,6 @@
   },
   "agents": {
     "defaults": {
-      "timeoutMs": 120000,
-      "maxTokens": 16384,
       "model": {
         "primary": "agnes-ai/agnes-2.0-flash",
         "fallbacks": [
@@ -87,8 +85,7 @@
         "reserveTokensFloor": 35000,
         "mode": "safeguard",
         "timeoutSeconds": 240,
-        "maxHistoryShare": 0.35,
-        "autoTrim": true
+        "maxHistoryShare": 0.35
       }
     }
   },
@@ -386,12 +383,8 @@
     "mode": "local",
     "auth": {
       "mode": "token",
-      "token": "openclaw-dev-token-998877"
-    },
-    "crashLoopBreaker": {
-      "enabled": false
-    },
-    "autoStartChannels": true
+      "token": ""
+    }
   },
   "auth": {
     "cooldowns": {
@@ -433,9 +426,7 @@
         "enabled": true
       },
       "fetch": {
-        "enabled": true,
-        "allowPrivateNetwork": false,
-        "ssrfPolicy": "strict"
+        "enabled": true
       }
     }
   }

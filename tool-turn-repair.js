@@ -428,7 +428,9 @@ function healSessionTranscriptFile(filePath, fsMod) {
     const fs = fsMod || require('fs');
     if (!filePath || !fs.existsSync(filePath)) return { changed: false, reason: 'missing' };
     let raw;
+    let beforeMtimeMs = 0;
     try {
+        try { beforeMtimeMs = fs.statSync(filePath).mtimeMs; } catch (_) {}
         raw = fs.readFileSync(filePath, 'utf8');
     } catch (e) {
         return { changed: false, reason: 'read-fail' };
@@ -493,8 +495,18 @@ function healSessionTranscriptFile(filePath, fsMod) {
     }
 
     try {
+        // 写前复核 mtime：读取后若文件又被网关追加过，放弃本次修复（避免用陈旧内容覆盖丢消息）
+        try {
+            const st = fs.statSync(filePath);
+            if (beforeMtimeMs > 0 && st.mtimeMs > beforeMtimeMs) {
+                return { changed: false, reason: 'stale-skip' };
+            }
+        } catch (_) {}
         fs.copyFileSync(filePath, `${filePath}.bak-toolheal-${Date.now()}`);
-        fs.writeFileSync(filePath, outLines.join('\n') + '\n', 'utf8');
+        // 原子写：写临时文件 → rename，避免与网关并发读到半截 / 交错写入丢消息
+        const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+        fs.writeFileSync(tmp, outLines.join('\n') + '\n', 'utf8');
+        fs.renameSync(tmp, filePath);
     } catch (e) {
         return { changed: false, reason: 'write-fail' };
     }

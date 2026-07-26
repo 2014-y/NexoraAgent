@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Nexora Agent",
   "keywords": [
     "ai",
@@ -26,11 +26,11 @@
   "scripts": {
     "start": "node start-gateway.js",
     "setup": "npm run install:deps && npm run init:config",
-    "install:deps": "npm install -g openclaw@2026.6.11 open-computer-use@0.1.54",
-    "init:config": "if not exist openclaw.json copy config\\openclaw.json.example openclaw.json",
+    "install:deps": "npm install -g openclaw@2026.7.1-2 open-computer-use@0.1.54",
+    "init:config": "node -e \"const fs=require('fs');if(!fs.existsSync('openclaw.json'))fs.copyFileSync('config/openclaw.json.example','openclaw.json')\"",
     "doctor": "openclaw mcp doctor",
     "probe": "openclaw mcp probe",
-    "logs": "type logs\\openclaw-%date%.log",
+    "logs": "node -e \"const fs=require('fs'),p=require('path');const d='logs';const f=fs.existsSync(d)?fs.readdirSync(d).filter(x=>x.startsWith('openclaw-')).sort():[];process.stdout.write(f.length?fs.readFileSync(p.join(d,f[f.length-1]),'utf8'):'no logs found');\"",
     "app:start": "electron .",
     "preapp:dist": "node scripts/ensure-asr-release-asset.js && node scripts/ensure-voice-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "app:dist": "electron-builder --windows nsis",
@@ -79,7 +79,7 @@
     "appId": "com.2014y.aigateway",
     "productName": "Nexora Agent",
     "asar": true,
-    "compression": "maximum",
+    "compression": "normal",
     "npmRebuild": false,
     "nodeGypRebuild": false,
     "forceCodeSigning": false,

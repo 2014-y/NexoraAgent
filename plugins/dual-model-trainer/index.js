@@ -168,24 +168,53 @@ export default function createPlugin(runtime) {
     return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   }
 
+  // 上次清理 .tmp 碎片的时间戳（节流，避免每次写入都 readdir）
+  let lastTmpCleanupAt = 0;
+
   /**
-   * 原子化文件写入（防止训练数据损坏）
-   * 先写入临时文件，再替换原文件
+   * 清理历史遗留的 .tmp 碎片。
+   * 旧实现用 `filePath + '.tmp.*'` 当字面路径去 unlink，通配符永远不匹配 → 碎片持续堆积。
+   * 这里真正读目录、按前缀匹配删除（defect 6a）。
+   */
+  function cleanupStaleTmp(filePath) {
+    const now = Date.now();
+    if (now - lastTmpCleanupAt < 60_000) return; // 最多每 60s 清一次
+    lastTmpCleanupAt = now;
+    try {
+      const dir = path.dirname(filePath);
+      const prefix = path.basename(filePath) + '.tmp.';
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(prefix)) {
+          try { fs.unlinkSync(path.join(dir, name)); } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  /**
+   * 追加写入训练数据。
+   * 直接 appendFileSync（append 本身对单行是安全的），不再写临时文件——
+   * 旧实现写完 tmp 又用错误的通配符清理，导致 tmp 碎片泄漏（defect 6a）。
    */
   function atomicAppend(filePath, line) {
     try {
-      // 先写入临时文件
-      const tmpPath = filePath + '.tmp.' + Date.now() + '.' + Math.random().toString(36).substring(2, 8);
-      fs.writeFileSync(tmpPath, line + '\n', 'utf-8');
-      // 再追加到原文件（原子操作）
       fs.appendFileSync(filePath, line + '\n', 'utf-8');
-      // 删除临时文件
-      try { fs.unlinkSync(tmpPath); } catch {}
     } catch (e) {
       console.error(`[${pluginName}] ❌ 文件写入失败: ${e.message}`);
-      // 清理临时文件
-      try { fs.unlinkSync(filePath + '.tmp.*'); } catch {}
     }
+    // 顺带清理旧实现遗留的 tmp 碎片
+    cleanupStaleTmp(filePath);
+  }
+
+  /**
+   * 训练数据收集开关（defect 6b：learning_log.jsonl 会明文存用户 PII）。
+   * 未设置该环境变量时保持原有行为（插件已启用即收集）；
+   * 显式设为 '0'/'false'/'off'/'no' 时停止收集（不删除已有数据）。
+   */
+  function trainingCollectEnabled() {
+    const v = process.env.NEXORA_TRAINING_COLLECT;
+    if (v == null || String(v).trim() === '') return true;
+    return !/^(0|false|off|no)$/i.test(String(v).trim());
   }
 
   // ═══ 模型调用层 ═══
@@ -208,31 +237,33 @@ export default function createPlugin(runtime) {
     if (!stats.modelCalls[modelName]) stats.modelCalls[modelName] = 0;
     stats.modelCalls[modelName]++;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const attemptStart = Date.now();
-      try {
-        // 检查全局超时
-        if (Date.now() - attemptStart > config.timeoutMs) {
-          return { success: false, error: 'Global timeout exceeded', code: 'TIMEOUT' };
-        }
+    // 真正的超时保护：底层 llm 调用不接受 AbortSignal，用 Promise.race 兜底，
+    // 否则半开连接会让整轮教学无限挂起（原先的 Date.now()-attemptStart 自比较恒为 false，是死代码）。
+    const timeoutMs = Number(config.timeoutMs) > 0 ? Number(config.timeoutMs) : 120000;
+    const withTimeout = (p) => Promise.race([
+      p,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`model call timeout ${timeoutMs}ms`)), timeoutMs)),
+    ]);
 
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
         let result;
 
         // 尝试 runtime.llm 接口
         if (runtime?.llm) {
-          result = await runtime.llm.complete({
+          result = await withTimeout(runtime.llm.complete({
             model: modelName,
             messages: messages,
             maxTokens: 8192,
-          });
+          }));
         }
 
         // 尝试 runtime.chat 接口
         if (!result && runtime?.chat?.send) {
-          result = await runtime.chat.send({
+          result = await withTimeout(runtime.chat.send({
             model: modelName,
             messages: messages,
-          });
+          }));
         }
 
         // 提取内容
@@ -377,8 +408,9 @@ export default function createPlugin(runtime) {
       // 段落数
       analysis.paragraphCount = answer.split(/\n\n+/).filter(p => p.trim()).length || 1;
 
-      // Emoji 检测
+      // Emoji 检测：EMOTICON_REGEX 带 g 标志，.test() 会保留 lastIndex 导致跨调用结果在 true/false 间抖动，先重置
       try {
+        EMOTICON_REGEX.lastIndex = 0;
         analysis.hasEmojis = EMOTICON_REGEX.test(answer);
       } catch {
         analysis.hasEmojis = false;
@@ -389,8 +421,16 @@ export default function createPlugin(runtime) {
         const stopWords = new Set(['的', '了', '是', '在', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '会', '给', '如', '如果', '因为', '但是', '所以', '然而', '此外', '另外', '这个', '那个', '什么', '怎么', '如何', '可以', '可能', '应该']);
         const wordMap = {};
         sentences.forEach(s => {
-          const chars = s.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').split('');
-          chars.forEach(c => {
+          // \u4e4b\u524d split('') \u62c6\u6210\u5355\u5b57\u7b26\u518d\u5224 length>=2 \u6052\u4e3a false\uff08\u9ad8\u9891\u8bcd\u6c38\u8fdc\u4e3a\u7a7a\uff09\u3002
+          // \u6539\u4e3a\u63d0\u53d6 2 \u5b57\u4e2d\u6587\u8bcd\u7ec4 + \u82f1\u6587/\u6570\u5b57\u5355\u8bcd\u3002
+          const cleaned = s.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, ' ');
+          const words = [];
+          // \u82f1\u6587/\u6570\u5b57\u8bcd
+          (cleaned.match(/[a-zA-Z0-9]{2,}/g) || []).forEach(w => words.push(w.toLowerCase()));
+          // \u4e2d\u6587\u6309 2 \u5b57\u6ed1\u7a97\u5207\u8bcd\u7ec4
+          const zh = cleaned.replace(/[^\u4e00-\u9fa5]/g, '');
+          for (let i = 0; i + 2 <= zh.length; i++) words.push(zh.slice(i, i + 2));
+          words.forEach(c => {
             if (c.length >= 2 && c.length <= 8 && !stopWords.has(c)) {
               wordMap[c] = (wordMap[c] || 0) + 1;
             }
@@ -524,6 +564,8 @@ ${question}
    */
   function saveTrainingData(record) {
     try {
+      // PII 收集开关：NEXORA_TRAINING_COLLECT=0 时不落盘原始用户数据（defect 6b）
+      if (!trainingCollectEnabled()) return;
       if (!record?.question) return;
 
       // 清理可能破坏 JSON 的内容

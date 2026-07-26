@@ -9,6 +9,15 @@ function escapeHtml(unsafe) {
          .replace(/'/g, '&#039;');
 }
 
+/**
+ * 用于内联事件处理器（onclick="fn('${...}')" ）中的 JS 单引号字符串上下文。
+ * 仅 escapeHtml 不够：HTML 属性解析会先把 &#039; 解码回 ' 再交给 JS，导致单引号闭合字符串注入。
+ * 因此先做 JS 转义（\ 与 '），再套 escapeHtml 处理属性上下文。理想情况应改用事件委托，此为不改结构的安全兜底。
+ */
+function escapeJsAttr(unsafe) {
+    return escapeHtml(String(unsafe).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
 // 🌟 跨环境通用高可靠剪贴板复制工具
 async function copyToClipboard(text) {
     if (!text) return false;
@@ -44,7 +53,7 @@ function renderFlag(flag) {
         return `<img src="https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/${cleanFlag}.svg" class="acc-flag-icon" alt="${cleanFlag}" onerror="this.outerHTML='🌐'">`;
     }
     if (cleanFlag === 'globe') return '🌐';
-    return flag;
+    return escapeHtml(flag);
 }
 
 // renderer.js - 渲染进程交互逻辑
@@ -2492,41 +2501,76 @@ function mergeLegacyActivityLogsIfNeeded() {
     } catch (_) {}
 }
 
-function getPersistedActivityLogs(scope = getCurrentActivityScope()) {
+// 活动日志缓存：原先每写一行都 getItem+JSON.parse+push+JSON.stringify+setItem 整个 300 项数组（单行 O(n)、n 行 O(n²)，且 localStorage 是主线程同步 API）。
+// 改为内存缓存为真相源 + 防抖批量落盘，写一行只是内存 push。
+let __activityLogCache = null;
+let __activityLogFlushTimer = null;
+
+function loadActivityLogCache() {
+    if (__activityLogCache) return __activityLogCache;
     mergeLegacyActivityLogsIfNeeded();
     try {
         const raw = localStorage.getItem(getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE));
         const list = raw ? JSON.parse(raw) : [];
-        return Array.isArray(list) ? list.filter(Boolean).slice(-ACTIVITY_LOG_PERSIST_MAX) : [];
+        __activityLogCache = Array.isArray(list) ? list.filter(Boolean).slice(-ACTIVITY_LOG_PERSIST_MAX) : [];
     } catch (_) {
-        return [];
+        __activityLogCache = [];
     }
+    return __activityLogCache;
 }
 
-function savePersistedActivityLogs(list, scope = getCurrentActivityScope()) {
+function flushActivityLogCache() {
+    if (__activityLogFlushTimer) { clearTimeout(__activityLogFlushTimer); __activityLogFlushTimer = null; }
+    if (!__activityLogCache) return;
     try {
         localStorage.setItem(
             getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE),
-            JSON.stringify((Array.isArray(list) ? list : []).slice(-ACTIVITY_LOG_PERSIST_MAX))
+            JSON.stringify(__activityLogCache.slice(-ACTIVITY_LOG_PERSIST_MAX))
         );
     } catch (_) {}
 }
 
+function scheduleActivityLogFlush() {
+    if (__activityLogFlushTimer) return;
+    __activityLogFlushTimer = setTimeout(flushActivityLogCache, 600);
+}
+
+// 关窗/切后台时把未落盘的缓存补写，避免丢最后一批日志
+if (typeof window !== 'undefined' && !window.__activityLogFlushHooked) {
+    window.__activityLogFlushHooked = true;
+    window.addEventListener('beforeunload', flushActivityLogCache);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushActivityLogCache(); });
+}
+
+function getPersistedActivityLogs(scope = getCurrentActivityScope()) {
+    return loadActivityLogCache().slice();
+}
+
+function savePersistedActivityLogs(list, scope = getCurrentActivityScope()) {
+    __activityLogCache = (Array.isArray(list) ? list : []).slice(-ACTIVITY_LOG_PERSIST_MAX);
+    scheduleActivityLogFlush();
+}
+
 function persistActivityLogLine(lineHtml) {
     if (!lineHtml) return;
-    const list = getPersistedActivityLogs();
-    list.push(lineHtml);
-    savePersistedActivityLogs(list);
+    const cache = loadActivityLogCache();
+    cache.push(lineHtml);
+    if (cache.length > ACTIVITY_LOG_PERSIST_MAX) cache.splice(0, cache.length - ACTIVITY_LOG_PERSIST_MAX);
+    scheduleActivityLogFlush();
 }
 
 function persistActivityLogLines(lines) {
     if (!Array.isArray(lines) || !lines.length) return;
-    const list = getPersistedActivityLogs();
-    lines.forEach((line) => { if (line) list.push(line); });
-    savePersistedActivityLogs(list);
+    const cache = loadActivityLogCache();
+    lines.forEach((line) => { if (line) cache.push(line); });
+    if (cache.length > ACTIVITY_LOG_PERSIST_MAX) cache.splice(0, cache.length - ACTIVITY_LOG_PERSIST_MAX);
+    scheduleActivityLogFlush();
 }
 
 function clearPersistedActivityLogs(scope = getCurrentActivityScope()) {
+    // 先清空缓存并取消待落盘，避免防抖 flush 在 remove 之后又把旧内容写回去
+    __activityLogCache = [];
+    if (__activityLogFlushTimer) { clearTimeout(__activityLogFlushTimer); __activityLogFlushTimer = null; }
     try { localStorage.removeItem(getActivityLogStorageKey(ACTIVITY_LOG_SHARED_SCOPE)); } catch (_) {}
     for (const legacy of ACTIVITY_LOG_LEGACY_SCOPES) {
         try { localStorage.removeItem(`${ACTIVITY_LOG_STORAGE_KEY}:${legacy}`); } catch (_) {}
@@ -3287,7 +3331,8 @@ function formatLogForUser(text) {
         if (/[\[\]=]|status=|elapsedms|durationms|stack|errno|ecode|gateway|openclaw|plugin/i.test(cleanLine)) {
             return null;
         }
-        return `[⚠️ 系统警报] ⚠️ 系统运行警告：${cleanLine}`;
+        // 转义日志正文（可能含渠道消息内容）后再拼入，最终经 innerHTML 渲染——防御性去除 XSS 面
+        return `[⚠️ 系统警报] ⚠️ 系统运行警告：${escapeHtml(cleanLine)}`;
     }
 
     // 服务已停止
@@ -3702,7 +3747,10 @@ function setupIpcListeners() {
         });
 
         if (logTerminal && logTerminal.innerText.length > 25000) {
-            logTerminal.innerHTML = logTerminal.innerHTML.substring(5000);
+            // 按整段子节点从头删除，避免 innerHTML.substring 从标签中间切开导致标记错乱/显示损坏
+            while (logTerminal.firstChild && logTerminal.innerText.length > 20000) {
+                logTerminal.removeChild(logTerminal.firstChild);
+            }
         }
         if (logTerminal) {
             logTerminal.scrollTop = logTerminal.scrollHeight;
@@ -3981,7 +4029,8 @@ function setupIpcListeners() {
 
 // 5. 动态大模型提供商与配置数据管理
 let localProviders = {};
-const AGNES_BUILT_IN_KEY = 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY';
+// 内置 key 不再硬编码：由 preload 启动时经 IPC 从主进程取（主进程按 env/config/密钥文件加载）
+const AGNES_BUILT_IN_KEY = (typeof window !== 'undefined' && window.api && window.api.builtinAgnesKey) || '';
 const KEY_MASK = '••••••••••••••••••••••••••••••••••••••••••••••••';
 
 async function syncMediaGeneratorPrefsToDisk(cfg) {
@@ -4116,15 +4165,17 @@ function applyBuiltInModelPolicy(cfg) {
         agnes.baseUrl = 'https://apihub.agnes-ai.com/v1';
         changed = true;
     }
-    if (agnes.apiKey !== AGNES_BUILT_IN_KEY) {
-        agnes.apiKey = AGNES_BUILT_IN_KEY;
-        changed = true;
-    }
-
-    if (!cfg.env) cfg.env = {};
-    if (cfg.env.AGNES_AI_API_KEY !== AGNES_BUILT_IN_KEY) {
-        cfg.env.AGNES_AI_API_KEY = AGNES_BUILT_IN_KEY;
-        changed = true;
+    // 仅在拿到有效内置 key 时才写；否则若 IPC 偶发返空会把真实 key 覆盖为空 → 401 静默不回复
+    if (AGNES_BUILT_IN_KEY) {
+        if (agnes.apiKey !== AGNES_BUILT_IN_KEY) {
+            agnes.apiKey = AGNES_BUILT_IN_KEY;
+            changed = true;
+        }
+        if (!cfg.env) cfg.env = {};
+        if (cfg.env.AGNES_AI_API_KEY !== AGNES_BUILT_IN_KEY) {
+            cfg.env.AGNES_AI_API_KEY = AGNES_BUILT_IN_KEY;
+            changed = true;
+        }
     }
 
     return changed;
@@ -4256,7 +4307,7 @@ async function loadAndRenderConfig() {
         document.getElementById('gateway-port').value = configData.gateway.port || 18789;
         statPort.innerText = configData.gateway.port || 18789;
         const auth = configData.gateway.auth;
-        document.getElementById('gateway-token').value = (auth && auth.token) || 'openclaw-dev-token-998877';
+        document.getElementById('gateway-token').value = (auth && auth.token) || '';
     }
 
     // 渲染功能插件列表卡片
@@ -4684,13 +4735,14 @@ function renderProvidersList() {
         
         models.forEach((model, index) => {
             const row = document.createElement('div');
-            row.style.cssText = 'display: grid; grid-template-columns: 1fr 120px 40px; gap: 12px; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.01); border-radius: 6px;';
+            row.style.cssText = 'display: grid; grid-template-columns: 1fr 156px 40px; gap: 12px; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.01); border-radius: 6px;';
             row.innerHTML = `
                 <div>
                     <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="${t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
-                <div>
-                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow)}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                <div style="display: flex; gap: 4px; align-items: center;">
+                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow)}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <button type="button" class="btn-probe-context" data-provider="${key}" data-index="${index}" title="${t('实测真实上下文窗口（发送探测请求）', 'Probe real context window (sends a test request)', '實測真實上下文視窗（發送探測請求）')}" style="background: none; border: 1px solid var(--border-color); border-radius: 6px; color: #aaa; cursor: pointer; font-size: 13px; height: 30px; width: 30px; flex: none; line-height: 1; padding: 0;">📏</button>
                 </div>
                 <div style="text-align: center;">
                     <button type="button" class="btn-delete-model-row" data-provider="${key}" data-index="${index}" style="background: none; border: none; color: #ff5252; cursor: pointer; font-size: 14px; padding: 4px; line-height: 1;">🗑️</button>
@@ -5185,6 +5237,61 @@ function bindProviderEvents() {
                 const parsedVal = parseContextWindow(e.target.value);
                 localProviders[provider].models[index].contextWindow = parsedVal;
                 markConfigDirty();
+            }
+        });
+    });
+
+    // 实测上下文窗口：报错解析 + 开头标记回忆；适配任意 OpenAI 兼容自定义服务商
+    document.querySelectorAll('.btn-probe-context').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const el = e.currentTarget;
+            const provider = el.getAttribute('data-provider');
+            const index = parseInt(el.getAttribute('data-index'), 10);
+            const model = localProviders[provider] && localProviders[provider].models && localProviders[provider].models[index];
+            if (!model || !model.id) {
+                showToast(t('请先填写模型名称并保存', 'Fill in and save the model ID first', '請先填寫模型名稱並保存'));
+                return;
+            }
+            const declared = Number(model.contextWindow) || 128000;
+            const target = Math.max(140000, Math.round(declared * 1.15));
+            const okGo = await confirm(t(
+                `将向 ${model.id} 发送约 ${Math.round(target / 1000)}K token 的探测请求实测真实窗口。若上游拒绝并声明上限则几乎免费；若上游静默截断则按输入计费（通常几分钱）。继续？`,
+                `Will send a ~${Math.round(target / 1000)}K-token probe to ${model.id}. Nearly free if upstream rejects with a stated limit; billed as input if it silently truncates. Continue?`,
+                `將向 ${model.id} 發送約 ${Math.round(target / 1000)}K token 的探測請求實測真實視窗。若上游拒絕並聲明上限則幾乎免費；若靜默截斷則按輸入計費。繼續？`
+            ));
+            if (!okGo) return;
+            const prevTxt = el.textContent;
+            el.disabled = true;
+            el.textContent = '⏳';
+            try {
+                const res = await window.api.probeModelContext(provider, model.id, target);
+                if (!res || !res.ok) {
+                    showToast((res && res.error) || t('探测失败', 'Probe failed', '探測失敗'));
+                    return;
+                }
+                const capHint = (v) => v > 131072
+                    ? t('（超过 131072 封顶值，需设置 NEXORA_CLOUD_CTX_CAP 环境变量才生效）', ' (exceeds the 131072 cap; set NEXORA_CLOUD_CTX_CAP to take effect)', '（超過 131072 封頂值，需設定 NEXORA_CLOUD_CTX_CAP 才生效）')
+                    : '';
+                if (res.verdict === 'limit') {
+                    model.contextWindow = res.limit;
+                    markConfigDirty();
+                    renderProvidersList();
+                    updateModelsDatalist();
+                    showToast(t(`上游声明上限 ${res.limit} tokens，已写入`, `Upstream limit ${res.limit} tokens, applied`, `上游聲明上限 ${res.limit} tokens，已寫入`) + capHint(res.limit));
+                } else if (res.verdict === 'ge') {
+                    if (target > declared) {
+                        model.contextWindow = target;
+                        markConfigDirty();
+                        renderProvidersList();
+                        updateModelsDatalist();
+                    }
+                    showToast(t(`实测真实窗口 ≥ ${target} tokens；如需探更高可再点一次`, `Measured real window ≥ ${target} tokens; probe again for higher`, `實測真實視窗 ≥ ${target} tokens`) + capHint(target));
+                } else {
+                    showToast(t(`上游接受但静默截断：真实有效窗口小于 ${target}，建议保持或调低当前声明值`, `Accepted but silently truncated below ${target}; keep or lower the declared value`, `上游靜默截斷：真實視窗小於 ${target}，建議保持或調低聲明值`));
+                }
+            } finally {
+                el.disabled = false;
+                el.textContent = prevTxt;
             }
         });
     });
@@ -6321,7 +6428,9 @@ const handleSaveConfigAction = async () => {
     
     if (useBuiltIn && finalProviders['agnes-ai']) {
         finalProviders['agnes-ai'].baseUrl = 'https://apihub.agnes-ai.com/v1';
-        finalProviders['agnes-ai'].apiKey = AGNES_BUILT_IN_KEY;
+        // 仅在拿到有效内置 key 时才写；否则 IPC 偶发返空会把真实 key 覆盖为空 → 401 静默不回复
+        // （与加载路径 applyBuiltInModelPolicy 的守卫保持一致）
+        if (AGNES_BUILT_IN_KEY) finalProviders['agnes-ai'].apiKey = AGNES_BUILT_IN_KEY;
     }
     
     configData.models.providers = finalProviders;
@@ -6331,11 +6440,15 @@ const handleSaveConfigAction = async () => {
     for (const key of Object.keys(localProviders)) {
         const envKeyName = key.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase() + '_API_KEY';
         let val = localProviders[key].apiKey;
-        if (key === 'agnes-ai' && useBuiltIn) {
+        if (key === 'agnes-ai' && useBuiltIn && AGNES_BUILT_IN_KEY) {
             val = AGNES_BUILT_IN_KEY;
         }
         if (val) {
             configData.env[envKeyName] = val;
+        } else {
+            // 用户清空了该 provider 的 key：删掉对应 env 项，否则旧 key 残留、网关继续用它
+            // （表现为「我删了 key 但它还能用」）
+            delete configData.env[envKeyName];
         }
     }
 
@@ -7994,6 +8107,8 @@ function setupTabSwitching() {
 
     /** 进入某页后的实质加载（遮罩盖住直到完成） */
     async function hydrateTabContent(tabId) {
+        // 离开加速页时停掉连接轮询(每 1.5s 一次 IPC)，否则切走后仍在后台空跑一整个会话
+        if (tabId !== 'acceleration-view') { try { stopConnectionPolling(); } catch (_) {} }
         if (tabId === 'dashboard-view') {
             try { renderUsageCharts(); } catch (err) { console.error(err); }
             return;
@@ -9279,7 +9394,8 @@ window.addEventListener('DOMContentLoaded', init);
 // 14. 内置插件异步操作闭环（通讯扫码 / 插件页 / 以后任意内置扫码插件共用）
 // 保证：全局遮罩、可取消、唤醒超时、扫码超时、成功/失败都能解除，绝不无限卡死。
 const COMM_BINDING_WAKE_MS = 120000; // 慢机器冷启动也够用；扫码阶段另有 5 分钟
-const COMM_BINDING_SCAN_MS = 5 * 60 * 1000;
+// ≥ 后端 weixin-direct-login 的 8 分钟等待；原先 5 分钟会在用户 5-8 分钟间扫码成功前就掐掉后端登录
+const COMM_BINDING_SCAN_MS = 9 * 60 * 1000;
 let __commBindingSession = {
     active: false,
     channel: null,
@@ -10329,6 +10445,24 @@ function sanitizeTextForSpeech(text) {
     return s;
 }
 
+// TTS 气泡协调：原先每个气泡都往 window 挂一个永不移除的 'global-tts-start' 监听器（长会话无限累积 + 闭包锁住已脱离的 DOM 造成内存泄漏）。
+// 改为全局仅一个监听器 + 自清理注册表：每次派发时顺带剔除已从文档移除的气泡，闭包随之可被 GC。
+const __ttsBubbleControllers = [];
+let __ttsGlobalListenerInstalled = false;
+function ensureGlobalTtsListener() {
+    if (__ttsGlobalListenerInstalled) return;
+    __ttsGlobalListenerInstalled = true;
+    window.addEventListener('global-tts-start', (e) => {
+        const activeBtn = e && e.detail ? e.detail.activeBtn : null;
+        for (let i = __ttsBubbleControllers.length - 1; i >= 0; i--) {
+            const c = __ttsBubbleControllers[i];
+            const btn = c.getBtn();
+            if (!btn || !document.contains(btn)) { __ttsBubbleControllers.splice(i, 1); continue; }
+            if (activeBtn !== btn) c.onOtherStart();
+        }
+    });
+}
+
 // 为 AI 的气泡消息添加朗读操作按钮
 function addTtsToAiBubble(msgDiv, bubble) {
     if (!msgDiv || !bubble) return;
@@ -10492,13 +10626,18 @@ function addTtsToAiBubble(msgDiv, bubble) {
         }
     });
 
-    window.addEventListener('global-tts-start', (e) => {
-        if (e.detail.activeBtn !== speakBtn && isSpeaking) {
-            speakBtn.innerHTML = speakerSvg;
-            isSpeaking = false;
-            if (localVoiceStopListener) {
-                localVoiceStopListener();
-                localVoiceStopListener = null;
+    // 注册到全局单例监听器（替代此前每气泡一个 window 监听器，避免泄漏）
+    ensureGlobalTtsListener();
+    __ttsBubbleControllers.push({
+        getBtn: () => speakBtn,
+        onOtherStart: () => {
+            if (isSpeaking) {
+                speakBtn.innerHTML = speakerSvg;
+                isSpeaking = false;
+                if (localVoiceStopListener) {
+                    localVoiceStopListener();
+                    localVoiceStopListener = null;
+                }
             }
         }
     });
@@ -11634,7 +11773,7 @@ async function handleActionGenerate(type) {
 
             if (!response.ok) {
                 const errText = await response.text();
-                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生图接口错误 (HTTP ${response.status}): ${errText}</span>`;
+                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生图接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
                 return;
             }
 
@@ -11693,7 +11832,7 @@ async function handleActionGenerate(type) {
 
             if (!response.ok) {
                 const errText = await response.text();
-                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生视频接口错误 (HTTP ${response.status}): ${errText}</span>`;
+                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生视频接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
                 return;
             }
 
@@ -12930,6 +13069,21 @@ function extractSolidBgFromCssValue(raw, fallback = '#06020f') {
     return fallback;
 }
 
+/** OpenClaw 新版设置页（qs- 组件、.btn）自带浅色底且用 color(srgb) 语法，通用白底查杀规则罩不住，这里单独压成主题深色 */
+function buildOpenclawQsComponentCss(paint) {
+    const text = paint.textPrimary;
+    const muted = paint.textSecondary;
+    const accentRgb = paint.accentRgb;
+    return [
+        '.qs-segmented { background: rgba(0, 0, 0, 0.28) !important; background-color: rgba(0, 0, 0, 0.28) !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; }',
+        'button.qs-segmented__btn { background: transparent !important; background-color: transparent !important; border: none !important; box-shadow: none !important; color: ' + muted + ' !important; }',
+        'button.qs-segmented__btn--active { background: rgba(' + accentRgb + ', 0.24) !important; background-color: rgba(' + accentRgb + ', 0.24) !important; color: #ffffff !important; box-shadow: inset 0 0 0 1px rgba(' + accentRgb + ', 0.45) !important; }',
+        '.btn, label.btn, .qs-link-btn { background: rgba(255, 255, 255, 0.08) !important; background-color: rgba(255, 255, 255, 0.08) !important; color: ' + text + ' !important; border: 1px solid rgba(255, 255, 255, 0.16) !important; }',
+        '.btn:hover, .qs-link-btn:hover { background: rgba(' + accentRgb + ', 0.18) !important; background-color: rgba(' + accentRgb + ', 0.18) !important; }',
+        '.qs-preset__meta span, .qs-preset__badges span, .qs-badge { background: rgba(255, 255, 255, 0.08) !important; background-color: rgba(255, 255, 255, 0.08) !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: ' + muted + ' !important; }'
+    ];
+}
+
 function buildOpenclawPanelCss(paint) {
     const p = paint || getOpenclawHostThemePaint();
     const bg = p.bgBase;
@@ -12953,22 +13107,24 @@ function buildOpenclawPanelCss(paint) {
         'body { color-scheme: dark !important; }',
         'div, p, span, label, button, a, h1, h2, h3, h4, h5, h6, time, th, td, tr, li, dt, dd, tbody, thead, table, legend, caption, [class*="text"], [class*="label"], [class*="title"], [class*="desc"], .ant-table-cell { color: ' + text + ' !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }',
         '.text-muted-foreground, .text-muted, [class*="muted"], [class*="text-zinc"], [class*="text-slate"], [class*="text-neutral"], [class*="text-gray"], [class*="text-secondary"], [class*="text-dim"], [class*="subtle"], [class*="hint"], [class*="status"], [class*="badge"], [class*="meta"], time { color: ' + muted + ' !important; opacity: 1 !important; }',
-        '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected) { color: ' + muted + ' !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
+        '[data-state="inactive"], [data-state="unchecked"], [data-state="off"], [aria-selected="false"], button:not(.session-action):not([data-state="active"]):not([aria-selected="true"]):not(.ant-segmented-item-selected):not(.qs-segmented__btn--active) { color: ' + muted + ' !important; opacity: 0.95 !important; background: transparent !important; background-color: transparent !important; }',
         '[data-state="active"], [data-state="checked"], [data-state="on"], [aria-selected="true"], .ant-segmented-item-selected { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; color: #ffffff !important; opacity: 1 !important; box-shadow: none !important; }',
         '[class*="bg-white"], [style*="background: white"], [style*="background-color: white"], [style*="background: #fff"], [style*="background-color: #fff"], [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"] { background: transparent !important; background-color: transparent !important; }',
         '.ant-segmented-thumb, [class*="indicator"], [class*="slider"] { background: rgba(255, 255, 255, 0.15) !important; background-color: rgba(255, 255, 255, 0.15) !important; box-shadow: none !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 6px !important; }',
         'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"], .ant-segmented-item { border: 1px solid rgba(255, 255, 255, 0.1) !important; box-shadow: none !important; }',
         '.session-action { border: none !important; box-shadow: none !important; }',
         '.ant-segmented { background: transparent !important; background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }',
-        'button:not([data-state="active"]):not([data-state="checked"]):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
+        'button:not([data-state="active"]):not([data-state="checked"]):not(.qs-segmented__btn--active):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
         'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: ' + accent + ' !important; }',
         'textarea::placeholder, input::placeholder, [class*="placeholder"] { color: ' + muted + ' !important; opacity: 0.85 !important; }',
         'svg { color: ' + accent + ' !important; opacity: 1 !important; }',
         'pre, code { background-color: rgba(0, 0, 0, 0.3) !important; color: #e0f2fe !important; }',
-        '::-webkit-scrollbar { width: 14px !important; height: 14px !important; }',
+        /* 标准滚动条属性(scrollbar-width/color)一旦被设置，Chromium 会整体忽略 ::-webkit-scrollbar 美化，必须重置回 auto 让下面的胶囊样式生效 */
+        '*, html, body { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
+        '::-webkit-scrollbar { width: 12px !important; height: 12px !important; }',
         '::-webkit-scrollbar-track { background: transparent !important; }',
-        '::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.4) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
-        '::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6) !important; border: 4px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+        '::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.4) !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
+        '::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 163, 184, 0.6) !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 9999px !important; }',
         '::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; -webkit-appearance: none !important; }',
         '::-webkit-scrollbar-corner { background: transparent !important; }',
         '.simplebar-scrollbar::before, .ms-thumb, .os-scrollbar-handle { background-color: rgba(148, 163, 184, 0.4) !important; border-radius: 9999px !important; }',
@@ -12976,10 +13132,9 @@ function buildOpenclawPanelCss(paint) {
         '.sidebar-sessions { padding-right: 14px !important; box-sizing: border-box !important; }',
         '.sidebar-recent-session__aside, .session-row-aside { padding-right: 8px !important; flex-shrink: 0 !important; }',
         '.session-row-actions, .session-action { flex-shrink: 0 !important; }',
-        '.sidebar-nav, .sidebar-sessions { scrollbar-width: thin !important; }',
-        '.sidebar-nav::-webkit-scrollbar, .sidebar-sessions::-webkit-scrollbar { width: 6px !important; }',
+        '.sidebar-nav, .sidebar-sessions, .sidebar-recent-sessions__list, main.content { scrollbar-width: auto !important; scrollbar-color: auto !important; }',
         'body > div:not(#root):not(#__next):not([id="root"]) > div, body > div:not(#root):not(#__next):not([id="root"]) [role="menu"]:not(.sidebar-session-menu):not(.sidebar-customize-menu):not(.sidebar-session-sort-menu), body > div:not(#root):not(#__next):not([id="root"]) [role="dialog"], body > div:not(#root):not(#__next):not([id="root"]) [role="listbox"], body > div:not(#root):not(#__next):not([id="root"]) [role="tooltip"], body > div:not(#root):not(#__next):not([id="root"]) [class*="popover"] { background: ' + panel + ' !important; background-color: ' + panel + ' !important; border: 1px solid rgba(255,255,255,0.15) !important; box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important; opacity: 1 !important; z-index: 99999 !important; border-radius: 8px !important; }'
-    ].join('\n');
+    ].concat(buildOpenclawQsComponentCss({ textPrimary: text, textSecondary: muted, accentRgb: accentRgb })).join('\n');
 }
 
 /** @deprecated 兼容旧引用：静态兜底，实际注入走 buildOpenclawPanelCss */
@@ -13053,7 +13208,7 @@ function buildOpenclawDynamicThemeCss(paint) {
         '}',
         'svg { color: ' + accentColor + ' !important; }',
         'button:not(.session-action), [role="button"]:not(.session-action), [class*="card"], [class*="prompt"], [class*="suggestion"] { border-color: ' + borderColor + ' !important; }'
-    ].join('\n');
+    ].concat(buildOpenclawQsComponentCss(paint)).join('\n');
 }
 
 function syncOpenclawThemeToWebview() {
@@ -13075,7 +13230,8 @@ function syncOpenclawThemeToWebview() {
         const payload = JSON.stringify({
             css: css,
             bgBase: paint.bgBase,
-            accentRgb: paint.accentRgb
+            accentRgb: paint.accentRgb,
+            textPrimary: paint.textPrimary
         });
         webview.executeJavaScript(
             '(function(payload){\n' +
@@ -13097,6 +13253,65 @@ function syncOpenclawThemeToWebview() {
             '      document.body.style.setProperty("background-color", bg, "important");\n' +
             '      document.body.style.setProperty("background-image", "radial-gradient(ellipse at 50% 35%, rgba("+(payload.accentRgb||"220,38,38")+", 0.16) 0%, transparent 58%)", "important");\n' +
             '    }\n' +
+            '  } catch(e) {}\n' +
+            /* 更新防护兜底：不认类名，直接按计算样式找“深色主题下的近白亮底”并压暗。
+               OpenClaw 改版换类名（如 ant-* → qs-*）时上面的选择器会漏，这层仍然兜得住。 */
+            '  try {\n' +
+            '    window.__NEXORA_THEME_TEXT = payload.textPrimary || "#eef2ff";\n' +
+            /* Shadow DOM 穿不进文档级样式，胶囊滚动条 CSS 用 constructable stylesheet 逐个 shadow root 采纳 */
+            '    if(!window.__nexoraShadowSheet && typeof CSSStyleSheet === "function"){\n' +
+            '      try {\n' +
+            '        window.__nexoraShadowSheet = new CSSStyleSheet();\n' +
+            '        window.__nexoraShadowSheet.replaceSync("*{scrollbar-width:auto!important;scrollbar-color:auto!important}::-webkit-scrollbar{width:12px!important;height:12px!important}::-webkit-scrollbar-track{background:transparent!important}::-webkit-scrollbar-thumb{background-color:rgba(148,163,184,0.4)!important;border:3px solid transparent!important;background-clip:padding-box!important;border-radius:9999px!important}::-webkit-scrollbar-thumb:hover{background-color:rgba(148,163,184,0.6)!important}::-webkit-scrollbar-button{display:none!important;width:0!important;height:0!important}::-webkit-scrollbar-corner{background:transparent!important}");\n' +
+            '      } catch(_) { window.__nexoraShadowSheet = null; }\n' +
+            '    }\n' +
+            '    if(!window.__nexoraDeWhiten){\n' +
+            '      window.__nexoraDeWhiten = function(){\n' +
+            '        function parse(v){\n' +
+            '          var s = String(v||"");\n' +
+            '          var m = s.match(/rgba?\\((\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)(?:[,\\s\\/]+([\\d.]+%?))?\\)/);\n' +
+            '          if(m){ return {r:+m[1], g:+m[2], b:+m[3], a: m[4]===undefined?1:(String(m[4]).indexOf("%")>-1?parseFloat(m[4])/100:parseFloat(m[4]))}; }\n' +
+            '          m = s.match(/color\\(srgb\\s+([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)(?:\\s*\\/\\s*([\\d.]+%?))?\\)/);\n' +
+            '          if(m){ return {r:255*m[1], g:255*m[2], b:255*m[3], a: m[4]===undefined?1:(String(m[4]).indexOf("%")>-1?parseFloat(m[4])/100:parseFloat(m[4]))}; }\n' +
+            '          return null;\n' +
+            '        }\n' +
+            '        function walk(root){\n' +
+            '          var all = root.querySelectorAll("*");\n' +
+            '          for(var i=0;i<all.length;i++){\n' +
+            '            var el = all[i];\n' +
+            '            if(el.shadowRoot){\n' +
+            '              try {\n' +
+            '                if(window.__nexoraShadowSheet && el.shadowRoot.adoptedStyleSheets.indexOf(window.__nexoraShadowSheet) < 0){\n' +
+            '                  el.shadowRoot.adoptedStyleSheets = el.shadowRoot.adoptedStyleSheets.concat(window.__nexoraShadowSheet);\n' +
+            '                }\n' +
+            '              } catch(_) {}\n' +
+            '              walk(el.shadowRoot);\n' +
+            '            }\n' +
+            /* 已评估过的元素跳过：JS 属性标记不落 DOM、不触发观察器，让重复全量遍历变廉价 */
+            '            if(el.__nexoraDW) continue;\n' +
+            '            var tag = el.tagName;\n' +
+            '            if(tag==="IMG"||tag==="VIDEO"||tag==="CANVAS"||tag==="svg"||tag==="SVG") continue;\n' +
+            '            var cs; try { cs = getComputedStyle(el); } catch(_) { continue; }\n' +
+            '            el.__nexoraDW = 1;\n' +
+            '            var c = parse(cs.backgroundColor);\n' +
+            '            if(!c || c.a < 0.35) continue;\n' +
+            /* 只处理近中性的亮底（min 通道 >= 180）；饱和色如橙色开关、状态灯不动 */
+            '            if(Math.min(c.r, c.g, c.b) < 180) continue;\n' +
+            '            el.style.setProperty("background-color", "rgba(255,255,255,0.08)", "important");\n' +
+            '            el.style.setProperty("background-image", "none", "important");\n' +
+            '            var t2 = parse(cs.color);\n' +
+            '            if(t2 && (0.2126*t2.r + 0.7152*t2.g + 0.0722*t2.b) < 110) el.style.setProperty("color", window.__NEXORA_THEME_TEXT, "important");\n' +
+            '          }\n' +
+            '        }\n' +
+            '        try { walk(document); } catch(_) {}\n' +
+            '      };\n' +
+            '      var deb;\n' +
+            /* 只监听 class 变化（不监听 style）：fixEl 自己写的是 style，若监听 style 会自触发无限全树遍历。
+               class 变化的元素清掉标记以便重评估；新增节点无标记，全量遍历时自然会处理。 */
+            '      window.__nexoraDeWhitenObs = new MutationObserver(function(muts){ try { for(var i=0;i<muts.length;i++){ var mr=muts[i]; if(mr.type==="attributes" && mr.target){ mr.target.__nexoraDW=0; } } } catch(_){} clearTimeout(deb); deb = setTimeout(window.__nexoraDeWhiten, 400); });\n' +
+            '      window.__nexoraDeWhitenObs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ["class"]});\n' +
+            '    }\n' +
+            '    window.__nexoraDeWhiten();\n' +
             '  } catch(e) {}\n' +
             '})(' + payload + ');'
         ).catch(function () {});
@@ -14530,7 +14745,7 @@ function renderConnections(data) {
                 <td style="padding: 10px; font-family: var(--font-mono); color: var(--text-secondary); white-space: nowrap;">${trafficStr}</td>
                 <td style="padding: 10px; font-family: var(--font-mono); color: var(--text-secondary);">${durationStr}</td>
                 <td style="padding: 10px; text-align: center;">
-                    <button type="button" class="btn-secondary acc-danger-btn" style="padding: 3px 8px; font-size: 10px;" onclick="closeSingleConnection('${c.id}')">断开</button>
+                    <button type="button" class="btn-secondary acc-danger-btn" style="padding: 3px 8px; font-size: 10px;" onclick="closeSingleConnection('${escapeJsAttr(c.id)}')">断开</button>
                 </td>
             </tr>
         `;
@@ -14733,13 +14948,15 @@ function getNodeCountryCode(n) {
     const flag = String(n.flag || '').toLowerCase();
     if (flag && ACC_KNOWN_COUNTRY_FLAGS.includes(flag)) return flag;
     const name = String(n.name || '').toLowerCase();
-    if (name.includes('hk') || name.includes('香港') || name.includes('hongkong')) return 'hk';
-    if (name.includes('jp') || name.includes('日本') || name.includes('japan')) return 'jp';
-    if (name.includes('sg') || name.includes('新加坡') || name.includes('singapore')) return 'sg';
-    if (name.includes('us') || name.includes('美国') || name.includes('america') || name.includes('united states')) return 'us';
-    if (name.includes('tw') || name.includes('台湾') || name.includes('taiwan')) return 'tw';
-    if (name.includes('kr') || name.includes('韩国') || name.includes('korea')) return 'kr';
-    if (name.includes('gb') || name.includes('uk') || name.includes('英国') || name.includes('london')) return 'gb';
+    // 两字母国家码用词边界匹配，避免 Russia/Belarus 含 "us"、AUS 含 "us" 等被误判为美国
+    const hasCode = (code) => new RegExp('(^|[^a-z])' + code + '($|[^a-z])').test(name);
+    if (hasCode('hk') || name.includes('香港') || name.includes('hongkong')) return 'hk';
+    if (hasCode('jp') || name.includes('日本') || name.includes('japan')) return 'jp';
+    if (hasCode('sg') || name.includes('新加坡') || name.includes('singapore')) return 'sg';
+    if (hasCode('us') || name.includes('美国') || name.includes('america') || name.includes('united states')) return 'us';
+    if (hasCode('tw') || name.includes('台湾') || name.includes('taiwan')) return 'tw';
+    if (hasCode('kr') || name.includes('韩国') || name.includes('korea')) return 'kr';
+    if (hasCode('gb') || hasCode('uk') || name.includes('英国') || name.includes('london')) return 'gb';
     return flag || 'other';
 }
 
@@ -15113,7 +15330,9 @@ function renderAccelerationChannel(data) {
         if (data.selectedProxy) {
             matchedSelectedNode = (data.nodes || []).find(n => n.name === data.selectedProxy);
             const displayName = sanitizeAccelerationNodeDisplayName(data.selectedProxy);
-            const htmlContent = `<span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: block;">${escapeHtml(displayName)}</span>`;
+            const countryCode = getNodeCountryCode(matchedSelectedNode || { name: data.selectedProxy });
+            const flagHtml = renderFlag(countryCode === 'other' ? '' : countryCode);
+            const htmlContent = `<span style="display: inline-flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden;"><span style="display: inline-flex; align-items: center; flex-shrink: 0;">${flagHtml}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(displayName)}</span></span>`;
             if (current) current.innerHTML = htmlContent;
             if (dashCurrent) {
                 dashCurrent.innerHTML = htmlContent;
@@ -15398,7 +15617,7 @@ function renderAccelerationChannel(data) {
                                                border: 1px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)'}; 
                                                color: ${isSelected ? '#e9d5ff' : 'var(--text-primary)'}; 
                                                padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.15s ease;"
-                                        onclick="selectGroupProxy('${escapeHtml(g.name)}', '${escapeHtml(nodeName)}')">
+                                        onclick="selectGroupProxy('${escapeJsAttr(g.name)}', '${escapeJsAttr(nodeName)}')">
                                         <span style="display: inline-flex; align-items: center;">${renderFlag(nodeFlag)}</span>
                                         <span>${escapeHtml(nodeName)}</span>
                                         <span class="acc-group-node-delay ${latencyClass}" style="font-size: 9px; font-family: var(--font-mono);">${nodeDelayStr}</span>
@@ -15411,7 +15630,7 @@ function renderAccelerationChannel(data) {
 
                 return `
                     <div class="acc-group-card" style="background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px; padding: 14px; margin-bottom: 10px; transition: border-color 0.2s;">
-                        <div class="acc-group-card-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleGroupExpand('${escapeHtml(g.name)}')">
+                        <div class="acc-group-card-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleGroupExpand('${escapeJsAttr(g.name)}')">
                            <div>
                                <div style="font-weight: 600; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
                                    <span>🧩</span>
@@ -17938,6 +18157,33 @@ let __localSilenceStart = null;
 let __localSpeaking = false;
 /** 提高阈值，减少环境噪音/键盘/回声误触发 */
 let __localRmsThreshold = 0.038;
+/** 自适应底噪：固定阈值在高增益麦克风/风扇空调环境下会被环境声常年压过，
+ *  导致「一直在说话」的过灵敏误触发。EMA 跟踪环境底噪，有效阈值随环境抬升。 */
+let __localNoiseFloor = 0.01;
+const __noiseFloorAlpha = 0.05;
+const __noiseFloorMult = 3.2;
+const __noiseFloorMin = 0.004;
+const __noiseFloorMax = 0.08;
+function effectiveRmsThreshold() {
+    return Math.max(__localRmsThreshold, __localNoiseFloor * __noiseFloorMult);
+}
+function updateNoiseFloor(rms) {
+    // 仅用「明显低于当前有效阈值」的帧学习底噪，避免把说话声学进去
+    if (rms < effectiveRmsThreshold()) {
+        __localNoiseFloor = Math.min(
+            __noiseFloorMax,
+            Math.max(__noiseFloorMin, __localNoiseFloor * (1 - __noiseFloorAlpha) + rms * __noiseFloorAlpha)
+        );
+    }
+}
+/** 噪音幻听过滤：ASR 对咳嗽/键盘/风声常输出单字或纯语气词，不能当成用户说话 */
+function isJunkAsrText(text) {
+    const stripped = String(text || '').trim().replace(/[\s。，、,.!?！？~～·…-]/g, '');
+    if (!stripped) return true;
+    if (stripped.length <= 1) return true;
+    if (/^[嗯啊哦呃唉哎嘿哈呀噢喔诶]+$/.test(stripped)) return true;
+    return false;
+}
 let __localSpeechStartAt = null;
 const __localSpeechStartHoldMs = 280;
 const __localMinPcmSamples = 9600; // ~0.6s @16kHz，太短的噪点不送识别
@@ -18123,10 +18369,13 @@ function startLocalVoiceRecognition(mode) {
                 return;
             }
 
+            // 非说话状态持续学习环境底噪，让阈值自适应麦克风增益/环境噪音
+            if (!__localSpeaking) updateNoiseFloor(rms);
+
             if (__voiceRecMode === 'chat') {
                 // 朗读尾音回灌：冷却期内不因「开始说话」打断刚排队的下一句
                 const inPostTtsCooldown = (Date.now() - (__voiceTtsEndedAt || 0)) < __voicePostTtsCooldownMs;
-                if (rms > __localRmsThreshold) {
+                if (rms > effectiveRmsThreshold()) {
                     if (!__localSpeaking) {
                         if (!__localSpeechStartAt) __localSpeechStartAt = Date.now();
                         else if (Date.now() - __localSpeechStartAt >= __localSpeechStartHoldMs) {
@@ -18167,7 +18416,7 @@ function startLocalVoiceRecognition(mode) {
                     __localAudioChunks.push(new Float32Array(channelData));
                 }
             } else if (__voiceRecMode === 'wake') {
-                if (rms > __localRmsThreshold) {
+                if (rms > effectiveRmsThreshold()) {
                     if (!__localSpeaking) {
                         if (!__localSpeechStartAt) __localSpeechStartAt = Date.now();
                         else if (Date.now() - __localSpeechStartAt >= __localSpeechStartHoldMs) {
@@ -18230,11 +18479,14 @@ async function triggerLocalAsr(pcmData) {
     if (statusText) statusText.textContent = '正在识别中...';
 
     const res = await window.api.voice.recognizeOffline(Array.from(pcmData));
-    if (res && res.success && res.text) {
+    if (res && res.success && res.text && !isJunkAsrText(res.text)) {
         const text = res.text.trim();
         console.log('[Voice] Local ASR recognized:', text);
         submitVoiceChatUtterance(text);
     } else {
+        if (res && res.success && res.text) {
+            console.log('[Voice] Local ASR junk filtered:', res.text.trim());
+        }
         console.log('[Voice] Local ASR empty or failed:', res && res.error);
         if (__voiceRecMode === 'chat') {
             __localAudioChunks = [];

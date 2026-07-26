@@ -140,7 +140,7 @@ if (cfg.plugins) {
 if (cfg.gateway) {
     cfg.gateway.auth = {
         mode: 'token',
-        token: 'openclaw-dev-token-998877'
+        token: ''
     };
 }
 

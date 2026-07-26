@@ -175,7 +175,9 @@ async function callWithKeyRotation({ kind, config, invoke }) {
     } catch (err) {
       console.warn(`[media-core] Custom API key failed: ${err.message}`);
       if (!useBuiltinFallback) throw err;
-      if (isNetworkOrTimeoutError(err) && !isAuthKeyError(err)) throw err;
+      // 只有「鉴权/额度」类错误才回退到内置 key；生成失败/取消/无URL/网络错误直接抛出，
+      // 否则会在内置 key 上把同一任务(尤其视频)重新提交一遍 = 重复计费 / 取消反触发新任务
+      if (!isAuthKeyError(err)) throw err;
       console.warn(`[media-core] Falling back to built-in keys...`);
     }
   }
@@ -195,7 +197,8 @@ async function callWithKeyRotation({ kind, config, invoke }) {
       return await invoke(apiKey, defaultBase);
     } catch (err) {
       lastError = err;
-      if (isNetworkOrTimeoutError(err) && !isAuthKeyError(err)) break;
+      // 只在鉴权/额度错误时换下一个 key；生成失败/取消/无URL/网络错误一律终止，避免逐个 key 重复提交
+      if (!isAuthKeyError(err)) break;
     }
   }
 
@@ -287,7 +290,9 @@ export async function generateImage(params = {}, runtimeOverlay = null) {
  * Generate video using configured provider.
  */
 export async function generateVideo(params = {}, runtimeOverlay = null, toolOpts = {}) {
-  const config = loadVideoConfig(runtimePrefs(runtimeOverlay, "video"));
+  // 与 generateImage 一致，套用自定义供应商默认值(apiBase/model 等)——
+  // 否则自定义视频供应商的轮询地址会仍指向默认 agnes 主机 → 轮询 404/超时
+  const config = applyCustomProviderDefaults(loadVideoConfig(runtimePrefs(runtimeOverlay, "video")), "video");
   const provider = resolveProvider("video", config);
   const model = cleanModelId(params.model || config.model || "agnes-video-v2.0");
   const dir = params.output_dir || path.join(resolveStateDir(), "video-output");

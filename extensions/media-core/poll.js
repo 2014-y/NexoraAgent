@@ -56,6 +56,10 @@ export async function pollUntilDone({
       if (status === "failed") {
         throw new Error(parsed.error || "Media generation failed");
       }
+      const PROCESSING = ["processing", "pending", "running", "queued", "in_progress", "starting", "submitted", "waiting"];
+      if (parsed.url && status !== "failed" && !PROCESSING.includes(status)) {
+        return parsed.url;
+      }
     } catch (e) {
       if (/failed|no media URL|completed but no/i.test(e.message || "")) throw e;
       console.warn(`${logPrefix} Poll error: ${e.message}`);

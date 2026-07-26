@@ -2,6 +2,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+    // 内置 agnes key：启动时从主进程同步取一次（key 不再硬编码在 renderer 源码/asar 里）
+    builtinAgnesKey: (() => { try { return ipcRenderer.sendSync('get-builtin-agnes-key') || ''; } catch (_) { return ''; } })(),
+
     // 窗口控制
     windowAction: (action) => ipcRenderer.send('window-action', action),
     
@@ -18,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
     // 配置读写
     readConfig: () => ipcRenderer.invoke('config-read'),
     saveConfig: (newConfig) => ipcRenderer.invoke('config-save', newConfig),
+    /** 实测模型真实上下文窗口（报错解析+标记回忆），适配任意 OpenAI 兼容自定义服务商 */
+    probeModelContext: (provider, model, target) => ipcRenderer.invoke('model-probe-context', provider, model, target),
     persistMediaPrefs: (payload) => ipcRenderer.invoke('persist-media-prefs', payload),
     verifyBuiltInAgnes: (payload) => ipcRenderer.invoke('verify-builtin-agnes', payload || {}),
     readRoleConfig: () => ipcRenderer.invoke('role-config-read'),

@@ -1,10 +1,12 @@
 {
-    "id":  "weixin-reconnect",
-    "name":  "WeChat Auto-Reconnect",
-    "configSchema":  {
-                         "type":  "object"
-                     },
-    "description":  "监控微信通道断线并自动重连",
-    "kind":  "extension",
-    "version":  "1.0.0"
+  "id": "weixin-reconnect",
+  "name": "WeChat Auto-Reconnect",
+  "configSchema": {
+    "type": "object"
+  },
+  "description": "监控微信通道断线并自动重连",
+  "kind": "extension",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module"
 }

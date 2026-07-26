@@ -94,6 +94,22 @@ function extractErrorText(event, ctx) {
   return parts.join('\n');
 }
 
+/** 网络 / 超时 / 限流等瞬时错误：不是 tool 配对损坏，绝不能拿它去改写会话文件（defect 3a） */
+function looksLikeTransientError(text) {
+  const t = String(text || '');
+  if (!t) return false;
+  return /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|fetch failed|rate[\s-]?limit|rate-limited|too many requests|\b429\b|\b503\b|\b502\b|\b500\b|overloaded|temporarily/i.test(t);
+}
+
+/** 文件在 ~5s 内被写过：很可能正被另一个联系人的 active 会话写入，跳过修复以免损坏（defect 3b） */
+function fileRecentlyWritten(file, ms = 5000) {
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs < ms;
+  } catch (_) {
+    return false;
+  }
+}
+
 function register(api) {
   const repair = resolveRepairMod();
   if (!repair) {
@@ -121,15 +137,19 @@ function register(api) {
   const healCurrent = (event, ctx, via) => {
     try {
       const errText = extractErrorText(event, ctx);
-      const failed = event && event.success === false;
+      // (a) 只在 format/role 类错误时修复；网络/超时/限流等瞬时错误绝不动会话文件
+      if (looksLikeTransientError(errText)) return;
       const formatErr =
         repair.looksLikeToolPairFormatError(errText) ||
         repair.looksLikeToolPairFormatError(JSON.stringify(event || {}));
+      // 不再因「任何 success===false」就修复：仅 format/role 配对损坏才修，避免误改别的会话
+      if (!formatErr) return;
 
-      // 有明确 session 文件时：失败即检查修复（clean 则 no-op）
-      // 无文件时：仅 format 错误才允许 mtime/全盘扫描，避免误伤
+      // (c) 已知 sessionId/文件时只修这一个文件，绝不回退到 mtime 全盘扫描（以免改到别人 active 会话）
+      // 注意：这里文件身份是确定的(由 sessionId 解析)，不做 mtime<5s 跳过——
+      // 刚失败的会话必然是几秒内刚写过的，若跳过就等于「该修的永远不修」，会话一直卡死。
       const knownFile = resolveSessionFile(ctx, event, { allowMtimeFallback: false });
-      if (knownFile && (failed || formatErr)) {
+      if (knownFile) {
         const r = repair.healSessionTranscriptFile(knownFile, fs);
         if (r.changed) {
           console.log(`[${PLUGIN_ID}] healed session (${via}): ${knownFile} (${r.before}->${r.after})`);
@@ -137,14 +157,18 @@ function register(api) {
         return;
       }
 
-      if (!formatErr) return;
-
+      // 无明确 session 文件：format 错误才允许 mtime 回退 / 全盘扫描
       const file = resolveSessionFile(ctx, event, { allowMtimeFallback: true });
       if (!file) {
         const summary = repair.healAllSessionTranscripts(resolveStateDir(), fs, path);
         if (summary.healed > 0) {
           console.log(`[${PLUGIN_ID}] healed ${summary.healed} session(s) via scan (${via})`);
         }
+        return;
+      }
+      // (b) mtime 命中的文件若 <5s 前刚写过，很可能是另一联系人正在写入的 active 会话，跳过
+      if (fileRecentlyWritten(file)) {
+        console.log(`[${PLUGIN_ID}] skip heal (${via}): mtime file written <5s ago (likely active): ${file}`);
         return;
       }
       const r = repair.healSessionTranscriptFile(file, fs);

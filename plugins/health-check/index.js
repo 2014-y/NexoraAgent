@@ -201,7 +201,7 @@ async function runHealthCheck() {
     if (test.special) {
       // cache-save 特殊处理：需要传 JSON 到 stdin
       try {
-        const tmpFile = path.join(require('os').tmpdir(), `_health_cache_test_${process.pid}.json`);
+        const tmpFile = path.join(os.tmpdir(), `_health_cache_test_${process.pid}.json`);
         fs.writeFileSync(tmpFile, JSON.stringify({ appName: '_health_test', version: 1, controls: {} }), 'utf-8');
         psResult = await runPsCommand(['cache-save', '_health_test', '--json-file', tmpFile]);
         try { fs.unlinkSync(tmpFile); } catch {}
@@ -271,14 +271,18 @@ async function runHealthCheck() {
   if (results.tests['brightness-set'].passed) results.summary.passed++;
   else results.summary.failed++;
 
-  // 生成可用/不可用命令列表
+  // 生成可用/不可用命令列表（跳过的破坏性探测单列，不能混进「不可用」，否则 AI 会被告知 "xxx: undefined"）
   results.availableCommands = Object.entries(results.tests)
     .filter(([, t]) => t.passed)
     .map(([id, t]) => `${id}: ${t.note}`);
 
   results.unavailableCommands = Object.entries(results.tests)
-    .filter(([, t]) => !t.passed)
-    .map(([id, t]) => `${id}: ${t.error || t.note}`);
+    .filter(([, t]) => !t.passed && !t.skipped)
+    .map(([id, t]) => `${id}: ${t.error || t.note || 'unknown'}`);
+
+  results.skippedCommands = Object.entries(results.tests)
+    .filter(([, t]) => t.skipped)
+    .map(([id, t]) => `${id}: ${t.reason || 'skipped'}`);
 
   return results;
 }

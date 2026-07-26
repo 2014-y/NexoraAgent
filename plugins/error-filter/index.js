@@ -292,6 +292,11 @@ function shouldBlockOutbound(text) {
   if (!raw) return false;
   // 已改写的中文提示放行
   if (isUserFacingSubstituteNotice(raw)) return false;
+  // 后台进程系统通知（⚠️ 🧰 Process: lucky-basil failed/exited）：内核对 exec 后台进程
+  // 的异步提示，不是模型回复；普通用户看不懂且会误以为出故障——拦截。
+  // 前缀锚定 + 表情符号双重特征，正常聊天文本不可能命中
+  if (/^\s*(?:⚠️|⚠)?\s*🧰\s*Process:\s*\S+\s+(failed|exited|killed|stopped|timed out)/i.test(raw)) return true;
+  if (/^\s*(?:⚠️|⚠)\s*🧰/.test(raw)) return true;
   // 网络失败横幅：仍视为「应拦截英文原样」；投递路径会改写为中文提示
   if (isNetworkFailureBanner(raw)) return true;
   if (isModelFallbackNoticeOnly(raw)) return true;
@@ -532,6 +537,14 @@ function resolveSessionKeyFromEvent(event) {
   return '';
 }
 
+/** message_sending 事件本身不带 sessionKey（核心只放在 ctx 里）——两处都要查 */
+function resolveSessionKeyFromHook(event, ctx) {
+  const fromEvent = resolveSessionKeyFromEvent(event);
+  if (fromEvent) return fromEvent;
+  const k = ctx && (ctx.sessionKey || ctx.session_key);
+  return typeof k === 'string' && k.trim() ? k.trim() : '';
+}
+
 function queueOverflowRolloverTrigger(sessionKey, preview) {
   try {
     const file = path.join(stateDir(), 'overflow-rollover.trigger.json');
@@ -544,7 +557,7 @@ function queueOverflowRolloverTrigger(sessionKey, preview) {
     };
     fs.mkdirSync(stateDir(), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(payload), 'utf8');
-    console.log(`[${PLUGIN_ID}] queued overflow-rollover trigger key=${sessionKey || '(freshest)'}`);
+    console.log(`[${PLUGIN_ID}] queued overflow-rollover trigger key=${sessionKey || '(none)'}`);
   } catch (e) {
     console.warn(`[${PLUGIN_ID}] queue rollover trigger failed:`, e && e.message);
   }
@@ -794,7 +807,15 @@ function getCachedPseudoMedia(text) {
   return hit;
 }
 
+/** 清理过期条目：原先只有「同 key 再次命中」时才删，不同 prompt 的历史条目永不回收 → 长跑缓慢泄漏 */
+function prunePseudoMediaCache(now = Date.now()) {
+  for (const [k, v] of _pseudoMediaSideEffectCache) {
+    if (!v || now - v.at > PSEUDO_MEDIA_CACHE_TTL_MS) _pseudoMediaSideEffectCache.delete(k);
+  }
+}
+
 function setCachedPseudoMedia(text, kind, mediaUrls, replyText) {
+  prunePseudoMediaCache();
   const entry = {
     at: Date.now(),
     kind,
@@ -1131,7 +1152,7 @@ function register(api) {
     api.logger?.info?.(`[${PLUGIN_ID}] loaded: suppress warnings and repair pseudo media commands`);
   } catch (_) {}
 
-  api.on('reply_payload_sending', async (event) => {
+  api.on('reply_payload_sending', async (event, ctx) => {
     try {
       const incoming = event?.payload && typeof event.payload === 'object' ? event.payload : {};
       const rawText = payloadText(incoming);
@@ -1202,17 +1223,19 @@ function register(api) {
         try { api.logger?.info?.(`[${PLUGIN_ID}] rewrote silent-failure reply payload`); } catch (_) {}
         console.log(`[${PLUGIN_ID}] rewrote silent-failure reply payload`);
         rememberRunOutbound(event, silentRewrite);
-        return { content: silentRewrite };
+        // reply_payload_sending 层只认 { payload }；{ content } 会被核心忽略（改写变空操作）
+        return { payload: { ...(event && event.payload ? event.payload : {}), text: silentRewrite } };
       }
       if (rawText && !shouldBlockOutbound(rawText)) {
         rememberRunOutbound(event, rawText);
       } else if (shouldBlockOutbound(rawText)) {
-        // 与 message_sending 分支保持一致：取消溢出/奇偶横幅的同时排队续聊，
-        // 否则若本 hook 先短路取消，session-overflow-rollover 收不到信号 →
-        // 之后每条消息都再次溢出被取消 → 用户「发很多不回复」直到手动 /new。
         const preview = String(rawText || '').replace(/\s+/g, ' ').slice(0, 100);
         if (needsSessionRollover(rawText)) {
-          queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+          // 溢出/奇偶横幅：只记信号、绝不在这里 cancel——本插件按字母序先注册，
+          // cancel 会短路后面的 session-overflow-rollover 钩子，它才有完整的
+          // 「取消必有下文（补答/提示/放行）」保障。触发文件仅作冗余信号。
+          queueOverflowRolloverTrigger(resolveSessionKeyFromHook(event, ctx), preview);
+          return;
         }
         return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
       }
@@ -1221,7 +1244,7 @@ function register(api) {
     }
   });
 
-  api.on('message_sending', async (event) => {
+  api.on('message_sending', async (event, ctx) => {
     try {
       // ── 微信投递二道门 ──
       // reply_payload_sending 已去重/占坑；此处再 cancel 会掐死渠道唯一发送 → 模型 200 但用户静默。
@@ -1261,10 +1284,13 @@ function register(api) {
         }
         if (shouldBlockOutbound(text)) {
           const preview = text.replace(/\s+/g, ' ').slice(0, 100);
-          console.log(`[${PLUGIN_ID}] channel-layer cancelled banner (post-approve): ${preview}`);
           if (needsSessionRollover(text)) {
-            queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
+            // 溢出横幅交给 session-overflow-rollover（在本钩子之后执行）处理；只记冗余信号
+            console.log(`[${PLUGIN_ID}] pass overflow banner to rollover plugin (post-approve): ${preview}`);
+            queueOverflowRolloverTrigger(resolveSessionKeyFromHook(event, ctx), preview);
+            return;
           }
+          console.log(`[${PLUGIN_ID}] channel-layer cancelled banner (post-approve): ${preview}`);
           return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
         }
         return;
@@ -1344,11 +1370,14 @@ function register(api) {
 
       if (shouldBlockOutbound(text)) {
         const preview = text.replace(/\s+/g, ' ').slice(0, 100);
+        if (needsSessionRollover(text)) {
+          // 溢出横幅交给 session-overflow-rollover（在本钩子之后执行）处理；只记冗余信号
+          console.log(`[${PLUGIN_ID}] pass overflow banner to rollover plugin: ${preview}`);
+          queueOverflowRolloverTrigger(resolveSessionKeyFromHook(event, ctx), preview);
+          return;
+        }
         try { api.logger?.info?.(`[${PLUGIN_ID}] cancelled outbound: ${preview}`); } catch (_) {}
         console.log(`[${PLUGIN_ID}] cancelled outbound: ${preview}`);
-        if (needsSessionRollover(text)) {
-          queueOverflowRolloverTrigger(resolveSessionKeyFromEvent(event), preview);
-        }
         return { cancel: true, cancelReason: 'error-filter:suppress-warning-banner' };
       }
 

@@ -1,0 +1,8 @@
+Nexora Agent 朗读音色：微软 Edge 在线「云扬」神经男声（zh-CN-YunyangNeural）
+
+特点：
+- 更自然、有语气；需联网
+- 应用内默认使用，无需下载离线语音大包
+
+本目录文件会在 npm run app:dist 之后复制到 dist/，方便随安装包一起上传 GitHub Release。
+yunyang-edge-tts-demo.mp3 为发版试听样例。

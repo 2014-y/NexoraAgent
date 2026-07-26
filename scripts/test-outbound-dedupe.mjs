@@ -33,7 +33,9 @@ const overflow = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'session-
 const overflowChecks = [
   ['no event stringify', !/JSON\.stringify\(\s*event\s*\)/.test(overflow)],
   ['success gate', /event\.success !== false/.test(overflow)],
-  ['silent-retry disabled', /skip silent-retry \(disabled to prevent double replies\)/.test(overflow)],
+  // silent-retry 必须处于禁用状态以防双回复：要么整套机制已移除（无 scheduleSilentRetry 调用），
+  // 要么保留了明确的 disabled 守卫日志。二者皆可，避免测试锁死具体实现细节。
+  ['silent-retry disabled', !/\bscheduleSilentRetry\s*\(/.test(overflow) || /disabled to prevent double replies/.test(overflow)],
   ['skip resume if delivered', /already delivered/.test(overflow)],
   ['no reset after delivery', /skip rollover entirely \(already delivered, no reset\)/.test(overflow)],
   ['unwrap continuity', /function unwrapUserQuestion/.test(overflow)],

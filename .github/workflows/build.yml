@@ -39,6 +39,12 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      # .node-sandbox/ is gitignored (normally created by init.bat locally). The Windows
+      # gateway-runtime pack hard-requires it, so provision it from the runner's Node here.
+      - name: Provision .node-sandbox (Windows only)
+        if: runner.os == 'Windows'
+        run: node scripts/provision-node-sandbox.js
+
       # npmRebuild is disabled in electron-builder config, so node-pty must be
       # compiled against Electron's ABI explicitly (npm install builds it for Node).
       - name: Rebuild node-pty for Electron

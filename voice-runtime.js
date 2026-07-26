@@ -738,7 +738,16 @@ class VoiceRuntime extends EventEmitter {
         this._speaking = true;
         this._setStatus('speaking');
         try {
-            await this._speakJob(job);
+            // 看门狗：任一朗读任务超过 130s 仍未结束(如损坏音频/卡死的播放进程)，强杀并继续队列，
+            // 防止 _speaking 永久为 true 导致之后所有语音都发不出。
+            await Promise.race([
+                this._speakJob(job),
+                new Promise((resolve) => setTimeout(() => {
+                    try { if (this._currentProc) this._currentProc.kill(); } catch (_) {}
+                    console.warn('[VoiceRuntime] speak watchdog fired — killed stuck playback');
+                    resolve();
+                }, 130000))
+            ]);
         } catch (e) {
             console.warn('[VoiceRuntime] speak failed:', e && e.message);
         } finally {
@@ -1058,9 +1067,12 @@ $p.Open([Uri]'${wavPath.replace(/'/g, "''")}')
 $p.Volume = ${Math.max(0, Math.min(1, volume / 100))}
 $p.Play()
 Start-Sleep -Milliseconds 80
-while ($p.NaturalDuration.HasTimeSpan -eq $false) { Start-Sleep -Milliseconds 40 }
-$ms = [int]$p.NaturalDuration.TimeSpan.TotalMilliseconds
+# 墙钟上限：损坏/无时长的音频不会让 NaturalDuration 永远解析不出，最多等 3 秒
+$waited = 0
+while ($p.NaturalDuration.HasTimeSpan -eq $false -and $waited -lt 3000) { Start-Sleep -Milliseconds 40; $waited += 40 }
+if ($p.NaturalDuration.HasTimeSpan) { $ms = [int]$p.NaturalDuration.TimeSpan.TotalMilliseconds } else { $ms = 8000 }
 if ($ms -lt 100) { $ms = 100 }
+if ($ms -gt 120000) { $ms = 120000 }
 Start-Sleep -Milliseconds ($ms + 40)
 $p.Close()
 `;

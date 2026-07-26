@@ -15,7 +15,9 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
     try {
         if (globalThis.__NEXORA_ORPHAN_GUARD__) return;
         globalThis.__NEXORA_ORPHAN_GUARD__ = true;
-        if (typeof process.send === 'function') {
+        // 只在「网关主 fork」装守卫（由 Electron 用 NEXORA_GATEWAY_MAIN=1 显式标记）；
+        // 网关自己派生的 worker 不带该标记（patchFork 已剥除），避免它们在 disconnect 时被误杀。
+        if (process.env.NEXORA_GATEWAY_MAIN === '1' && typeof process.send === 'function') {
             process.on('disconnect', () => {
                 try { console.warn('[patch_gateway] parent IPC disconnected — exiting to avoid orphan'); } catch (_) {}
                 process.exit(0);
@@ -1182,12 +1184,36 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
 }
 
 // ─── 全局 API Key 轮询负载均衡器 ───
-const BUILT_IN_KEYS = [
+// ⚠️ 安全：以下内联 key 已泄露（进过源码/公网快照），仅作全新安装的最后兜底。
+// 请轮换后用环境变量 AGNES_API_KEYS(逗号分隔) 或 ~/.openclaw/.agnes-keys.json 覆盖，无需改源码。
+const _COMPROMISED_FALLBACK_KEYS = [
     'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
     'sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh',
     'sk-Y6ORz4nnuXHUpwjdXv2WlmLMwCfPBMtmh69iuXxZkQtZazyV',
     'sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F'
 ];
+
+function loadRotationKeys() {
+    // 1) 环境变量优先
+    const envRaw = process.env.AGNES_API_KEYS || process.env.AGNES_API_KEY || '';
+    const envKeys = String(envRaw).split(',').map(s => s.trim()).filter(Boolean);
+    if (envKeys.length) return envKeys;
+    // 2) 独立密钥文件（不进 shipped 源码）
+    try {
+        const os = require('os');
+        const p = require('path').join(
+            process.env.OPENCLAW_STATE_DIR || require('path').join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || os.homedir(), '.openclaw'),
+            '.agnes-keys.json'
+        );
+        const arr = JSON.parse(require('fs').readFileSync(p, 'utf8'));
+        const fileKeys = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean);
+        if (fileKeys.length) return fileKeys;
+    } catch (_) {}
+    // 3) 兜底：内联（已泄露，需尽快轮换）
+    return _COMPROMISED_FALLBACK_KEYS;
+}
+
+const BUILT_IN_KEYS = loadRotationKeys();
 
 const rotators = new Map();
 function getNextKey(rawKey, keys) {
@@ -1565,6 +1591,8 @@ child_process.spawnSync = function(command, args, options) {
     
     // 1. 无差别强制注入 env.NODE_OPTIONS
     const env = { ...(newOptions.env || process.env) };
+    // 网关派生的子 worker 不应继承「主网关」标记，否则孤儿守卫会误把它们当主网关而在 disconnect 时自杀
+    delete env.NEXORA_GATEWAY_MAIN;
     const injected = `--require "${patchPath}" --dns-result-order=ipv4first --no-warnings`;
     const existing = (env.NODE_OPTIONS || '').trim();
     if (!existing.includes(patchPath)) {
@@ -1594,6 +1622,8 @@ child_process.fork = function(modulePath, args, options) {
     
     // 1. 无差别强制注入 env.NODE_OPTIONS
     const env = { ...(newOptions.env || process.env) };
+    // 网关派生的子 worker 不应继承「主网关」标记，否则孤儿守卫会误把它们当主网关而在 disconnect 时自杀
+    delete env.NEXORA_GATEWAY_MAIN;
     const injected = `--require "${patchPath}" --dns-result-order=ipv4first --no-warnings`;
     const existing = (env.NODE_OPTIONS || '').trim();
     if (!existing.includes(patchPath)) {
@@ -1637,6 +1667,19 @@ const HTTPDNS_ENDPOINTS = [
 // 简单的解析结果缓存 (host -> { ips, expire })
 const dnsCache = new Map();
 const DNS_CACHE_TTL = 60 * 1000;
+const DNS_CACHE_MAX = 256;
+/** 写缓存前驱逐过期项并封顶，避免长跑网关下 Map 无界增长 */
+function dnsCacheSet(host, value) {
+    const now = Date.now();
+    for (const [k, v] of dnsCache) {
+        if (!v || v.expire <= now) dnsCache.delete(k);
+    }
+    if (dnsCache.size >= DNS_CACHE_MAX) {
+        const oldest = dnsCache.keys().next().value;
+        if (oldest !== undefined) dnsCache.delete(oldest);
+    }
+    dnsCache.set(host, value);
+}
 
 function isForceHttpDns(hostname) {
     const h = (hostname || '').toLowerCase();
@@ -1647,6 +1690,8 @@ function httpDnsQueryOnce(endpoint, hostname) {
     return new Promise((resolve, reject) => {
         const url = `${endpoint}?name=${encodeURIComponent(hostname)}&type=1`;
         const options = {
+            // DoH 直连纯 IP（223.5.5.5 等），证书按 IP 校验会因 SAN 差异失败而断掉微信登录 DNS；
+            // 且拿到 IP 后下游仍会对 weixin.qq.com 做正常 TLS 校验兜底，故此处保持不校验。
             rejectUnauthorized: false,
             headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/dns-json' },
             timeout: 2500
@@ -1692,7 +1737,7 @@ async function resolveViaHttpDns(hostname) {
         try {
             const ips = await httpDnsQueryOnce(endpoint, hostname);
             if (ips && ips.length > 0) {
-                dnsCache.set(hostname, { ips, expire: Date.now() + DNS_CACHE_TTL });
+                dnsCacheSet(hostname, { ips, expire: Date.now() + DNS_CACHE_TTL });
                 return ips;
             }
         } catch (e) { /* 尝试下一个 HTTPDNS 端点 */ }
@@ -2227,10 +2272,13 @@ function __tgInfo(msg) {
 }
 __tgInfo('[TokenGuard] Transparent HTTP/HTTPS request hooks successfully loaded.');
 
-/** 上游 503/429 等：主模型连续重试，达到上限后才交给 OpenClaw 切备援 */
+/** 上游 503/429 等：主模型重试，达到上限后才交给 OpenClaw 切备援 */
 const LLM_TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
-const LLM_TRANSIENT_MAX_ATTEMPTS = 30; // 含首次；连续失败 30 次才放弃本次请求
-const LLM_TRANSIENT_RETRY_DELAY_MS = 800;
+const LLM_TRANSIENT_MAX_ATTEMPTS = 20; // 硬上限；实际由下面的总时长预算提前收敛
+const LLM_TRANSIENT_BASE_DELAY_MS = 800;   // 指数退避基值
+const LLM_TRANSIENT_MAX_DELAY_MS = 8000;   // 单次退避上限
+const LLM_TRANSIENT_TOTAL_BUDGET_MS = 30000; // 重试总时长预算，超过即交给 failover，避免长时间卡住用户
+const LLM_RETRY_AFTER_CAP_MS = 15000;      // 尊重 Retry-After，但单次最多等这么久
 /** 网络层（UND_ERR_SOCKET 等）：含首次共 4 次，退避 1.5s / 2s / 3s */
 const LLM_NETWORK_RETRY_DELAYS_MS = [1500, 2000, 3000];
 
@@ -2240,6 +2288,28 @@ function __tgSleep(ms) {
 
 function isTransientLlmHttpStatus(status) {
     return LLM_TRANSIENT_HTTP_STATUSES.has(Number(status));
+}
+
+/** 解析 429/503 的 Retry-After（秒数或 HTTP 日期）；无/非法返回 null */
+function parseRetryAfterMs(response) {
+    try {
+        const h = response && response.headers && typeof response.headers.get === 'function'
+            ? response.headers.get('retry-after') : null;
+        if (!h) return null;
+        const s = String(h).trim();
+        if (/^\d+$/.test(s)) return Math.min(Number(s) * 1000, LLM_RETRY_AFTER_CAP_MS);
+        const dateMs = Date.parse(s);
+        if (!isNaN(dateMs)) return Math.max(0, Math.min(dateMs - Date.now(), LLM_RETRY_AFTER_CAP_MS));
+    } catch (_) {}
+    return null;
+}
+
+/** 计算本次退避：优先 Retry-After（429/503 限流信号），否则指数退避 + 抖动，均设上限 */
+function computeLlmBackoffMs(response, attempt) {
+    const ra = parseRetryAfterMs(response);
+    if (ra != null) return ra;
+    const expo = Math.min(LLM_TRANSIENT_BASE_DELAY_MS * Math.pow(2, attempt - 1), LLM_TRANSIENT_MAX_DELAY_MS);
+    return Math.round(expo * (0.7 + Math.random() * 0.6)); // ±30% 抖动，避免多会话同步重试形成尖刺
 }
 
 async function drainFetchResponseBody(response) {
@@ -2254,7 +2324,9 @@ async function fetchLlmWithTransientRetry(originalFetch, args, urlHint) {
     let lastResponse = null;
     let lastStartMs = Date.now();
     const maxAttempts = LLM_TRANSIENT_MAX_ATTEMPTS;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const retryDeadline = Date.now() + LLM_TRANSIENT_TOTAL_BUDGET_MS;
+    let attempt = 0;
+    for (attempt = 1; attempt <= maxAttempts; attempt++) {
         lastStartMs = Date.now();
         lastResponse = await originalFetch.apply(this, args);
         if (!isTransientLlmHttpStatus(lastResponse && lastResponse.status)) {
@@ -2266,26 +2338,29 @@ async function fetchLlmWithTransientRetry(originalFetch, args, urlHint) {
             return { response: lastResponse, startMs: lastStartMs, attempts: attempt };
         }
         if (attempt >= maxAttempts) break;
-        if (attempt === 1 || attempt % 5 === 0 || attempt === maxAttempts - 1) {
+        // 指数退避 + 尊重 Retry-After（429/503），并受总时长预算约束，避免对限流上游持续高频打点招致封禁
+        const delay = computeLlmBackoffMs(lastResponse, attempt);
+        if (Date.now() + delay >= retryDeadline) break;
+        if (attempt === 1 || attempt % 5 === 0) {
             try {
                 const hint = urlHint ? (' url=' + String(urlHint).slice(0, 96)) : '';
                 console.log(
                     '[TokenGuard] LLM HTTP ' + lastResponse.status +
                     ' — keep primary, retry ' + attempt + '/' + maxAttempts +
-                    ' in ' + LLM_TRANSIENT_RETRY_DELAY_MS + 'ms' + hint
+                    ' in ' + delay + 'ms' + hint
                 );
             } catch (_) {}
         }
         await drainFetchResponseBody(lastResponse);
-        await __tgSleep(LLM_TRANSIENT_RETRY_DELAY_MS);
+        await __tgSleep(delay);
     }
     try {
         console.log(
-            '[TokenGuard] LLM still failing after ' + maxAttempts +
-            ' attempts (status=' + (lastResponse && lastResponse.status) + '); hand off to failover'
+            '[TokenGuard] LLM still failing after ' + attempt +
+            ' attempt(s) (status=' + (lastResponse && lastResponse.status) + '); hand off to failover'
         );
     } catch (_) {}
-    return { response: lastResponse, startMs: lastStartMs, attempts: maxAttempts };
+    return { response: lastResponse, startMs: lastStartMs, attempts: attempt };
 }
 
 // ─── 代理 2：fetch / globalThis.fetch 拦截通道 (Node 18+ 闭环) ───

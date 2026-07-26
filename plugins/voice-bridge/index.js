@@ -168,7 +168,9 @@ function postSpeak(port, text, meta) {
 function register(api) {
   const cfg = (api && (api.pluginConfig || api.config)) || {};
   const port = Number(cfg.httpPort) || DEFAULT_PORT;
-  let lastSpoken = { text: '', at: 0 };
+  // 去重按会话隔离：原来单个全局 lastSpoken 会把「用户B 的相同回复」误当重复吞掉（defect 5）
+  /** @type {Map<string, { text: string, at: number }>} */
+  const lastSpokenBySession = new Map();
   let httpBackoffUntil = 0;
   let httpOfflineHinted = false;
 
@@ -180,8 +182,20 @@ function register(api) {
       const text = sanitize(rawText);
       if (shouldSkipText(text)) return;
       const now = Date.now();
-      if (text === lastSpoken.text && now - lastSpoken.at < DEDUPE_MS) return;
-      lastSpoken = { text, at: now };
+      // 按来源做去重：优先 sessionKey，其次 to/channel。完全无来源标识时不去重，
+      // 否则空 key 会把不同用户的相同回复塌成一个桶 → 第二个用户被吞掉没声音。
+      const skey = String((meta && (meta.sessionKey || meta.to || meta.channel)) || '');
+      if (skey) {
+        const prev = lastSpokenBySession.get(skey);
+        if (prev && text === prev.text && now - prev.at < DEDUPE_MS) return;
+        lastSpokenBySession.set(skey, { text, at: now });
+        // 轻量封顶，避免 Map 随会话数无界增长
+        if (lastSpokenBySession.size > 500) {
+          for (const [k, v] of lastSpokenBySession) {
+            if (now - (v && v.at || 0) > DEDUPE_MS) lastSpokenBySession.delete(k);
+          }
+        }
+      }
       const result = await postSpeak(port, text, meta);
       if (result.ok) {
         httpBackoffUntil = 0;

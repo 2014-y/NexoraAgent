@@ -1,8 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 
 const PLUGIN_NAME = 'compaction-memory-guard';
+/** 每会话最短追加间隔：默认 10 分钟，避免每回合都写 MEMORY.md 跟 memory-rotate 抢写（defect 4） */
+const APPEND_THROTTLE_MS = Number(process.env.NEXORA_MEMORY_GUARD_THROTTLE_MS || 10 * 60 * 1000);
+/** 每会话上次追加记录：sessionFile -> { at, fp }（fp = 内容指纹，用于跳过重复块） */
+const lastAppendBySession = new Map();
 const MEMORY_FILE = path.join(
   process.env.OPENCLAW_STATE_DIR
     || path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw'),
@@ -57,7 +62,26 @@ export default function createPlugin(runtime) {
               } catch {}
               return '';
             }).filter(Boolean).join('\n');
-            if (summary) appendToMemory(summary);
+            if (summary) {
+              // 节流 + 去重：每会话最多每 APPEND_THROTTLE_MS 追加一次，且内容与上次相同则跳过，
+              // 避免每回合都写「最近 10 行」把 MEMORY.md 撑爆并与 memory-rotate 互相打架（defect 4）
+              const sessKey = String(sessionFile);
+              const fp = crypto.createHash('sha1').update(summary).digest('hex');
+              const prev = lastAppendBySession.get(sessKey);
+              const now = Date.now();
+              if (prev && (now - prev.at < APPEND_THROTTLE_MS || prev.fp === fp)) {
+                // 距上次太近或内容重复：本轮不写
+              } else {
+                lastAppendBySession.set(sessKey, { at: now, fp });
+                // 轻量封顶，避免 Map 随会话数无界增长
+                if (lastAppendBySession.size > 500) {
+                  for (const [k, v] of lastAppendBySession) {
+                    if (now - (v && v.at || 0) > APPEND_THROTTLE_MS) lastAppendBySession.delete(k);
+                  }
+                }
+                appendToMemory(summary);
+              }
+            }
           }
         }
       } catch (e) {}

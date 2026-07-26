@@ -181,7 +181,9 @@ function buildGatewayChildEnv(baseEnv, opts) {
         OPENCLAW_HOME: homePath,
         OPENCLAW_STATE_DIR: stateDir,
         // OpenClaw ensureGatewayStartupAuth 会优先认环境变量，作为配置分叉时的最后保险
-        OPENCLAW_GATEWAY_TOKEN: token
+        OPENCLAW_GATEWAY_TOKEN: token,
+        // 仅标记「网关主 fork」——孤儿自杀守卫只认这个，避免误杀网关自己派生的 IPC worker
+        NEXORA_GATEWAY_MAIN: '1'
     };
     // 剥掉「supervisor 存在」的假标记：否则 OpenClaw 内部重启时会「退出等计划任务拉起」，
     // 而这里是 Electron fork 的子进程、根本没有 schtasks/systemd 守护 → 网关一去不回。

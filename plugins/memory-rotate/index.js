@@ -60,9 +60,10 @@ export default function createPlugin(runtime) {
       const protectedSecs = sections.filter((s) => PROTECTED_HEADING.test(s.heading));
       const normalSecs = sections.filter((s) => !PROTECTED_HEADING.test(s.heading));
 
-      // 保留：全部受保护区 + 最多 2 个普通区；其余归档
-      const keepNormal = normalSecs.slice(0, 2);
-      const archiveSecs = normalSecs.slice(2);
+      // 保留：全部受保护区 + 最近 2 个普通区（新区由 compaction-guard/auto-summary 追加在末尾，
+      // 故取末尾 2 个才是最新；原先 slice(0,2) 会保留最旧、把最新记忆归档掉，导致注入的是过时内容）；其余归档
+      const keepNormal = normalSecs.slice(-2);
+      const archiveSecs = normalSecs.slice(0, -2);
       if (archiveSecs.length === 0 && content.length > MAX_CHARS) {
         // 普通区本来就很少但仍超长：截断受保护区正文，不整段丢掉
         const now = new Date();

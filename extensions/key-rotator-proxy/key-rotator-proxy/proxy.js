@@ -7,16 +7,56 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-const KEYS = [
-    'sk-z2NHJlR99oODMYvS9C5u8qLMNf6hmc9vRm5JenvHHStTfxZn',
-    'sk-ct7MSvbC8LqL1gGqJuoVCKgjtecXwbjIUZhXQ0gITEaksCS0',
-    'sk-nZtkk9AAyZl3sbkv8Gw4R1R99NnkgUWhRGL4Cp0Dl7LSPsUu',
-    'sk-Y6ORz4nnuXHUpwjdXv2WlmLMwCfPBMtmh69iuXxZkQtZazyV',
-    'sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F',
-    'sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh',
-    'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
-];
+/**
+ * Agnes API 密钥加载器。
+ * 安全警告：历史内联的 sk- 密钥已泄露（COMPROMISED），已移出源码，用户必须尽快轮换/吊销。
+ * 加载优先级：env AGNES_API_KEYS(逗号分隔)/AGNES_API_KEY
+ *   → ~/.openclaw/openclaw.json (models.providers.agnes-ai.apiKey)
+ *   → 本地兜底文件 media-cli/media-core/.agnes-keys.json
+ */
+function loadAgnesApiKeys() {
+    // 1) 环境变量
+    const envList = process.env.AGNES_API_KEYS || process.env.AGNES_API_KEY;
+    if (envList) {
+        const keys = String(envList).split(',').map(s => s.trim()).filter(Boolean);
+        if (keys.length) return keys;
+    }
+    // 2) openclaw.json 配置
+    try {
+        const cfgPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        const p = cfg && cfg.models && cfg.models.providers && cfg.models.providers['agnes-ai'];
+        const apiKey = p && p.apiKey;
+        if (Array.isArray(apiKey)) {
+            const keys = apiKey.map(s => String(s).trim()).filter(Boolean);
+            if (keys.length) return keys;
+        } else if (apiKey && String(apiKey).trim()) {
+            return [String(apiKey).trim()];
+        }
+    } catch (e) { /* 忽略：配置不存在或无效 */ }
+    // 3) 本地兜底文件（密钥已泄露，仅兜底；兼容直挂与嵌套目录两种布局）
+    const candidates = [
+        path.join(__dirname, '.agnes-keys.json'),
+        path.join(__dirname, '..', '..', 'media-cli', 'media-core', '.agnes-keys.json'),
+        path.join(__dirname, '..', '..', '..', 'media-cli', 'media-core', '.agnes-keys.json'),
+    ];
+    for (const filePath of candidates) {
+        try {
+            const arr = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            if (Array.isArray(arr)) {
+                const keys = arr.map(s => String(s).trim()).filter(Boolean);
+                if (keys.length) return keys;
+            }
+        } catch (e) { /* 忽略 */ }
+    }
+    return [];
+}
+
+const KEYS = loadAgnesApiKeys();
 
 const BASE_URL = 'https://apihub.agnes-ai.com';
 const LOCAL_PORT = 18790;

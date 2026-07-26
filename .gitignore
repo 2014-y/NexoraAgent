@@ -16,11 +16,13 @@ Thumbs.db
 __pycache__/
 
 /dist/
+/dist2/
 /build-resources/
 
 # Scratch and runtime version files
 /scratch/
 .tmp*
+_tmp_*
 .runtime-version
 
 # Voice models (runtime downloads / local caches)
@@ -40,3 +42,9 @@ release-assets/voice-packs/*.tar.bz2
 !release-assets/voice-packs/*.mp3
 !release-assets/voice-packs/*.txt
 !release-assets/voice-packs/*.md
+
+# 已泄露的 agnes key 兜底文件，勿提交
+media-cli/media-core/.agnes-keys.json
+.agnes-keys.json
+.gateway-token
+extensions/media-core/.agnes-keys.json

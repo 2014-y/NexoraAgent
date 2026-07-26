@@ -187,8 +187,23 @@ export default function createPlugin(runtime) {
     console.log(`[${PLUGIN_NAME}] 已加载身份快照 (${snapshot.conversationCount} 次压缩)`);
   }
 
-  let lastTokenCount = 0;
+  // 每会话独立记录上次 token 数：原先用单一变量跨所有会话比较，多联系人/会话交替进线时会拿 A 的 token 和 B 的比，导致漏判/误判
+  const lastTokenCountBySession = new Map();
+  let conversationCount = (snapshot && snapshot.conversationCount) || 0; // 运行期累加，快照只作初值
   let compactCounter = 0;
+  const lastSummaryAtBySession = new Map(); // 每会话上次落摘要时间，用于节流
+  const SUMMARY_MIN_INTERVAL_MS = 10 * 60 * 1000;
+  const SESSION_MAP_MAX = 500; // 防止历史会话文件累积导致 Map 无界增长
+  const pruneSessionMaps = () => {
+    for (const m of [lastTokenCountBySession, lastSummaryAtBySession]) {
+      if (m.size > SESSION_MAP_MAX) {
+        // Map 迭代按插入序，删最早的一批
+        const drop = m.size - SESSION_MAP_MAX;
+        let i = 0;
+        for (const k of m.keys()) { if (i++ >= drop) break; m.delete(k); }
+      }
+    }
+  };
 
   return {
     name: PLUGIN_NAME,
@@ -201,20 +216,29 @@ export default function createPlugin(runtime) {
 
         const lines = readSession(sessionFile);
         const tokenCount = estimateTokens(lines);
-        
-        // Token 数没有变化，跳过
+
+        // Token 数没有变化，跳过（按会话各自比较，避免不同会话 token 数互相干扰）
+        const lastTokenCount = lastTokenCountBySession.get(sessionFile) || 0;
         if (Math.abs(tokenCount - lastTokenCount) < 500) return;
-        lastTokenCount = tokenCount;
+        lastTokenCountBySession.set(sessionFile, tokenCount);
+        pruneSessionMaps();
 
         // 超过阈值，触发压缩
         if (tokenCount > TOKEN_THRESHOLD) {
+          // 节流：会话一旦超过阈值就会一直超过（本插件不再缩减会话），若不节流会每轮都写一个摘要文件
+          // → workspace/compact-history 无限增长。每会话最多每 10 分钟落一次摘要。
+          const now = Date.now();
+          const lastAt = lastSummaryAtBySession.get(sessionFile) || 0;
+          if (now - lastAt < SUMMARY_MIN_INTERVAL_MS) return;
+          lastSummaryAtBySession.set(sessionFile, now);
           console.log(`[${PLUGIN_NAME}] ⚠️ 上下文过大 (${tokenCount} tokens)，触发磁盘压缩...`);
           
           // 1. 提取身份信息
           const identity = extractIdentity(lines);
+          conversationCount += 1; // 运行期真实累加，而非永远停在快照初值+1
           saveIdentitySnapshot({
             ...identity,
-            conversationCount: (snapshot?.conversationCount || 0) + 1,
+            conversationCount,
             lastCompactAt: new Date().toISOString()
           });
 
