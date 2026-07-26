@@ -1098,11 +1098,17 @@ function updateTopologyUI() {
         if (nodeId === 'node-wechat' || nodeId === 'node-qq' || nodeId === 'node-feishu') {
             const key = nodeId === 'node-wechat' ? 'wechat' : (nodeId === 'node-qq' ? 'qq' : 'feishu');
             const bound = !!channelBound[key];
+            // 活动流绿点已上线 = 渠道已接通，优先显示「已就绪」（避免日志成功后拓扑仍停在连接中）
+            const tileId = key === 'wechat' ? 'tile-weixin' : (key === 'qq' ? 'tile-qqbot' : 'tile-feishu');
+            const tileOnline = !!(document.getElementById(tileId)?.classList.contains('online'));
             if (!bound) {
                 state = 'pending';
                 topoNodeStates[nodeId] = 'pending';
+            } else if (tileOnline || state === 'completed') {
+                state = 'completed';
+                topoNodeStates[nodeId] = 'completed';
             } else if (topoNodeStates['node-core'] === 'completed' && state !== 'completed') {
-                // 已绑定且网关就绪 → 直接就绪
+                // 已绑定且网关就绪，等待渠道长连确认 → 「连接中」
                 state = 'active';
                 topoNodeStates[nodeId] = 'active';
             }
@@ -1362,13 +1368,17 @@ function startGatewayReadyProbe(reason) {
             stopGatewayReadyProbe();
             return;
         }
-        // 首装初始化较久：只更新文案，绝不假解锁
+        // 首装初始化较久：只更新文案 / 微抬进度，绝不假解锁，也绝不回退
         if (tries === 40 || tries === 80 || tries === 120) {
             try {
-                updateProgressUI(
-                    Math.min(95, Math.max(currentProgress || 0, 85)),
-                    '首次安装初始化中，请再等片刻…'
-                );
+                const tip = '首次安装初始化中，请再等片刻…';
+                if (currentProgress < 95) {
+                    updateProgressUI(Math.max(currentProgress || 0, 88), tip);
+                } else {
+                    // 已 ≥95%：只改文案，不动百分比
+                    const progressText = document.getElementById('terminal-progress-bar-text');
+                    if (progressText) progressText.innerText = tip;
+                }
             } catch (e) {}
         }
         probeControlUiReady(port).then((ok) => {
@@ -2555,6 +2565,26 @@ function setChannelStatusTile(channelId, online, options = {}) {
     if (options.persist !== false) {
         try { persistChannelStatusTiles(); } catch (_) {}
     }
+    // 与拓扑渠道卡同步：活动流已判定上线时，勿再停在「连接中 / 加载中」
+    if (options.syncTopology !== false) {
+        try { syncTopologyChannelFromTile(channelId, online, options); } catch (_) {}
+    }
+}
+
+/** 通道绿点 → 拓扑图 node-wechat / node-qq / node-feishu */
+function syncTopologyChannelFromTile(channelId, online, options = {}) {
+    const nodeId = channelId === 'weixin'
+        ? 'node-wechat'
+        : (channelId === 'qqbot' ? 'node-qq' : (channelId === 'feishu' ? 'node-feishu' : null));
+    if (!nodeId || typeof topoNodeStates !== 'object') return;
+    const next = online ? 'completed' : 'pending';
+    if (topoNodeStates[nodeId] === next) return;
+    // 下线时不要把「未绑定」之外的中间态反复刷 pending；仅从已接通/连接中降级
+    if (!online && topoNodeStates[nodeId] !== 'completed' && topoNodeStates[nodeId] !== 'active') return;
+    topoNodeStates[nodeId] = next;
+    if (options.refreshTopology !== false && typeof updateTopologyUI === 'function') {
+        updateTopologyUI();
+    }
 }
 
 const CHANNEL_STATUS_STORAGE_KEY = 'nexora_console_channel_status_v1';
@@ -3319,29 +3349,54 @@ function setupIpcListeners() {
                 topoNodeStates['node-llm'] = 'completed';
                 stateChanged = true;
             }
-            // WeChat Gateway
+            // WeChat Gateway（与 beautify 成功文案同源关键词，避免 monitor started 只亮「连接中」）
             if (lowerText.includes('weixin') || lowerText.includes('wechat') || lowerText.includes('wx-bot') || lowerText.includes('ilink')) {
-                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('bound') || lowerText.includes('webhook listening') || lowerText.includes('server listening')) {
+                if (
+                    lowerText.includes('ready')
+                    || lowerText.includes('success')
+                    || lowerText.includes('bound')
+                    || lowerText.includes('already connected')
+                    || lowerText.includes('monitor started')
+                    || lowerText.includes('webhook listening')
+                    || lowerText.includes('server listening')
+                    || lowerText.includes('消息接收通道已成功连接')
+                ) {
                     topoNodeStates['node-wechat'] = 'completed';
-                } else {
+                } else if (topoNodeStates['node-wechat'] !== 'completed') {
                     topoNodeStates['node-wechat'] = 'active';
                 }
                 stateChanged = true;
             }
             // QQ Gateway
             if (lowerText.includes('qqbot') || lowerText.includes('qq-bot') || lowerText.includes('qq_bot')) {
-                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('connected') || lowerText.includes('listening')) {
+                if (
+                    lowerText.includes('ready')
+                    || lowerText.includes('success')
+                    || lowerText.includes('connected')
+                    || lowerText.includes('listening')
+                    || lowerText.includes('gateway resumed')
+                    || lowerText.includes('消息通道已成功上线')
+                    || lowerText.includes('消息接收通道已成功连接')
+                ) {
                     topoNodeStates['node-qq'] = 'completed';
-                } else {
+                } else if (topoNodeStates['node-qq'] !== 'completed') {
                     topoNodeStates['node-qq'] = 'active';
                 }
                 stateChanged = true;
             }
-            // Feishu Gateway
+            // Feishu Gateway（websocket client started 等原先只会落到 active）
             if (lowerText.includes('feishu') || lowerText.includes('lark')) {
-                if (lowerText.includes('ready') || lowerText.includes('success') || lowerText.includes('connected') || lowerText.includes('listening')) {
+                if (
+                    lowerText.includes('ready')
+                    || lowerText.includes('success')
+                    || lowerText.includes('connected')
+                    || lowerText.includes('listening')
+                    || lowerText.includes('websocket client started')
+                    || lowerText.includes('starting webhook server')
+                    || lowerText.includes('消息通道已成功上线')
+                ) {
                     topoNodeStates['node-feishu'] = 'completed';
-                } else {
+                } else if (topoNodeStates['node-feishu'] !== 'completed') {
                     topoNodeStates['node-feishu'] = 'active';
                 }
                 stateChanged = true;
@@ -3451,8 +3506,9 @@ function setupIpcListeners() {
             || text.includes('agent model:')
         ) {
             startGatewayReadyProbe('http-near');
-            if (currentProgress < 90) {
-                updateProgressUI(Math.max(currentProgress, 85), '正在绑定端口并装载渠道插件…');
+            // 只抬升、不回退：晚阶段统一到 88，避免先到更高后再被 85/78 拽回去
+            if (currentProgress < 96) {
+                updateProgressUI(Math.max(currentProgress, 88), '正在绑定端口并装载渠道插件…');
             }
         }
         // 仅在Nexora Agent真正运行中，且越过Nexora Agent刚启动时的 5 秒历史控制台日志喷吐垃圾冷区，才对全新实时流量记账
@@ -3522,7 +3578,8 @@ function setupIpcListeners() {
                 targetText = t('console.progress.ready') || '本地 AI Nexora Agent服务就绪！';
                 updated = true;
             } else if (text.includes('starting HTTP server') || text.includes('force: no listeners') || text.includes('started (interval:')) {
-                targetProgress = 78;
+                // 与上方 http-near 里程碑对齐（88），禁止再用 78 造成「88%→85%/回退」观感
+                targetProgress = 88;
                 targetText = t('console.progress.binding_port') || '正在绑定端口并装载渠道插件…';
                 updated = true;
                 startGatewayReadyProbe('http-starting');
@@ -7077,12 +7134,16 @@ function updateProgressUI(val, textLabel = '') {
     let nextProgress = Number(val);
     if (!Number.isFinite(nextProgress)) nextProgress = 0;
     nextProgress = Math.max(0, Math.min(100, nextProgress));
-    // 已判定就绪时，禁止再被「starting HTTP / agent model」类日志压回 85%
+    // 已判定就绪时，禁止再被「starting HTTP / agent model」类日志压回 85%/88%
     if (gatewayFullyReady && gatewayStatus !== 'stopped' && gatewayStatus !== 'upgrading' && nextProgress < 100) {
         nextProgress = 100;
     }
-    const canRegressProgress = gatewayStatus === 'stopped' || gatewayStatus === 'upgrading' || nextProgress === 100;
-    if (!canRegressProgress && currentProgress > 0 && currentProgress < 100 && nextProgress < currentProgress) {
+    // 启动过程中进度只允许前进（停止/升级到 0、或冲到 100 除外）
+    const allowRegress = gatewayStatus === 'stopped'
+        || gatewayStatus === 'upgrading'
+        || nextProgress === 0
+        || nextProgress === 100;
+    if (!allowRegress && currentProgress > 0 && currentProgress < 100 && nextProgress < currentProgress) {
         nextProgress = currentProgress;
     }
     if (gatewayStatus === 'running' && currentProgress === 100 && nextProgress < 100) {
@@ -7271,7 +7332,7 @@ function updateStepperUI(progressVal) {
         topoNodeStates['node-core'] = 'completed';
         topoNodeStates['node-llm'] = 'completed';
 
-        // Check which channels are actually bound
+        // Check which channels are actually bound；绿点已亮则视为已就绪
         if (configData && configData.channels) {
             const hasWechat = !!(document.getElementById('node-wechat')?.dataset?.liveBound === '1')
                 || configData.channels['openclaw-weixin']?.enabled === true;
@@ -7279,10 +7340,19 @@ function updateStepperUI(progressVal) {
                 || !!(configData.channels.qqbot?.appId && configData.channels.qqbot?.clientSecret);
             const hasFeishu = !!(configData.channels.feishu?.appId && configData.channels.feishu?.appSecret)
                 || !!(configData.channels.feishu?.accounts && Object.values(configData.channels.feishu.accounts).some((a) => a && a.appId && a.appSecret));
+            const weixinOnline = !!document.getElementById('tile-weixin')?.classList.contains('online');
+            const qqOnline = !!document.getElementById('tile-qqbot')?.classList.contains('online');
+            const feishuOnline = !!document.getElementById('tile-feishu')?.classList.contains('online');
 
-            topoNodeStates['node-wechat'] = hasWechat ? (topoNodeStates['node-wechat'] === 'completed' ? 'completed' : 'active') : 'pending';
-            topoNodeStates['node-qq'] = hasQq ? (topoNodeStates['node-qq'] === 'completed' ? 'completed' : 'active') : 'pending';
-            topoNodeStates['node-feishu'] = hasFeishu ? (topoNodeStates['node-feishu'] === 'completed' ? 'completed' : 'active') : 'pending';
+            topoNodeStates['node-wechat'] = hasWechat
+                ? ((topoNodeStates['node-wechat'] === 'completed' || weixinOnline) ? 'completed' : 'active')
+                : 'pending';
+            topoNodeStates['node-qq'] = hasQq
+                ? ((topoNodeStates['node-qq'] === 'completed' || qqOnline) ? 'completed' : 'active')
+                : 'pending';
+            topoNodeStates['node-feishu'] = hasFeishu
+                ? ((topoNodeStates['node-feishu'] === 'completed' || feishuOnline) ? 'completed' : 'active')
+                : 'pending';
         } else {
             topoNodeStates['node-wechat'] = 'pending';
             topoNodeStates['node-qq'] = 'pending';
