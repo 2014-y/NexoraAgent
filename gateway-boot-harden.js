@@ -112,7 +112,8 @@ function ensureSandboxNpmPresent(runtimeRoot, projectRoot) {
   pushNm(path.join(runtimeRoot, '.node-sandbox', 'node_modules'));
   try {
     const { execSync } = require('child_process');
-    const whereNode = execSync('where node', { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
+    const whichCmd = process.platform === 'win32' ? 'where node' : 'command -v node';
+    const whereNode = execSync(whichCmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\r?\n/)[0];
     if (whereNode) {
       const nodeDir = path.dirname(whereNode);
       pushNm(path.join(nodeDir, 'node_modules'));
