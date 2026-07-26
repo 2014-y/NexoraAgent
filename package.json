@@ -32,7 +32,7 @@
     "probe": "openclaw mcp probe",
     "logs": "node -e \"const fs=require('fs'),p=require('path');const d='logs';const f=fs.existsSync(d)?fs.readdirSync(d).filter(x=>x.startsWith('openclaw-')).sort():[];process.stdout.write(f.length?fs.readFileSync(p.join(d,f[f.length-1]),'utf8'):'no logs found');\"",
     "app:start": "electron .",
-    "preapp:dist": "node scripts/ensure-asr-release-asset.js && node scripts/ensure-voice-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
+    "preapp:dist": "node scripts/ensure-asr-release-asset.js && node scripts/ensure-builtin-asr.js && node scripts/ensure-voice-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "app:dist": "electron-builder --windows nsis",
     "postapp:dist": "node scripts/copy-asr-to-dist.js && node scripts/copy-voice-to-dist.js",
     "asr:ensure": "node scripts/ensure-asr-release-asset.js",
@@ -148,6 +148,14 @@
       {
         "from": "build-resources/gateway-runtime.tar",
         "to": "gateway-runtime.tar"
+      },
+      {
+        "from": "builtin-asr",
+        "to": "builtin-asr"
+      },
+      {
+        "from": "release-assets/voice-packs",
+        "to": "voice-packs"
       }
     ],
     "files": [

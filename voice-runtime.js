@@ -254,8 +254,15 @@ class VoiceRuntime extends EventEmitter {
     }
 
     _findAsrModelFiles() {
+        // 1) 用户运行时目录（用户自行下载/导入的优先）
         let files = this._findAsrModelFilesInDir(this.asrModelDir);
         if (files) return files;
+        // 2) 打包内置模型：随安装包 extraResources 落到 resources/builtin-asr（真实磁盘路径，native 可读，离线开箱可用）
+        if (process.resourcesPath) {
+            files = this._findAsrModelFilesInDir(path.join(process.resourcesPath, 'builtin-asr'));
+            if (files) return files;
+        }
+        // 3) 开发态兜底：源码目录下的 builtin-asr
         return this._findAsrModelFilesInDir(path.join(__dirname, 'builtin-asr'));
     }
 
