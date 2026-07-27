@@ -161,6 +161,7 @@
     ],
     "files": [
       "main.js",
+      "google-login.js",
       "acceleration.js",
       "gateway-runtime.js",
       "home-resolve.js",
