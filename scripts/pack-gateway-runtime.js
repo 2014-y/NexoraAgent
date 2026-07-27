@@ -177,7 +177,7 @@ function zipAppendPaths(rels) {
   if (!list.length) return 0;
   let added = 0;
   for (const rel of list) {
-    const r = spawnSync('tar', ['--force-local', '-rf', TAR_PATH, '-C', ROOT, rel], {
+    const r = spawnSync('tar', ['-rf', TAR_PATH, '-C', ROOT, rel], {
       cwd: ROOT,
       encoding: 'utf8',
       windowsHide: true
@@ -232,7 +232,7 @@ function appendOpenClawTemplates() {
   console.log(`  + forced template md files: ${added}`);
 
   // 校验 zip 内真有 AGENTS.md
-  const check = spawnSync('tar', ['--force-local', '-tf', TAR_PATH], {
+  const check = spawnSync('tar', ['-tf', TAR_PATH], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -257,7 +257,7 @@ function appendSandboxNpm() {
       'pack-gateway-runtime: sandbox npm incomplete — need both npm-cli.js and npm-prefix.js under .node-sandbox'
     );
   }
-  const check = spawnSync('tar', ['--force-local', '-tf', TAR_PATH], {
+  const check = spawnSync('tar', ['-tf', TAR_PATH], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -277,7 +277,7 @@ function appendSandboxNpm() {
 
 /** 打包结束强制校验：渠道包 / npm / AGENTS.md 缺一不可 */
 function assertZipComplete() {
-  const check = spawnSync('tar', ['--force-local', '-tf', TAR_PATH], {
+  const check = spawnSync('tar', ['-tf', TAR_PATH], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -389,7 +389,7 @@ function main() {
   console.log('[pack-gateway-runtime] compressing (direct tar, no staging)…');
   rmrf(TAR_PATH);
   try {
-    const args = ['--force-local', '-cf', TAR_PATH, ...buildExcludeArgs(), '-C', ROOT, ...inputs];
+    const args = ['-cf', TAR_PATH, ...buildExcludeArgs(), '-C', ROOT, ...inputs];
     const r = spawnSync('tar', args, {
       cwd: ROOT,
       encoding: 'utf8',
