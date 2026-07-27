@@ -51,6 +51,7 @@ const {
 const acceleration = require('./acceleration');
 const roleConfig = require('./role-config');
 const { voiceRuntime } = require('./voice-runtime');
+const { startGoogleLogin, cancelGoogleLogin, uploadConfigToDrive, downloadConfigFromDrive, refreshAccessToken } = require('./google-login');
 const { createSkillCenter } = require('./skill-center');
 
 /** 技能中心（延迟绑定 CONFIG_DIR，避免启动期 TDZ） */
@@ -5405,6 +5406,24 @@ function ensureOpenClawConfigInitialized() {
             config = recoverCorruptOpenClawConfig(parseErr);
             needsSave = true;
         }
+        // 绝不能将自定义根节点 google 写入 openclaw.json（OpenClaw 强 Schema 检查会导致网关无法启动）
+        if (config.google) {
+            try {
+                if (config.google.account && config.google.tokens) {
+                    writeGoogleAuthData({
+                        loggedIn: true,
+                        account: config.google.account,
+                        tokens: config.google.tokens
+                    });
+                }
+            } catch (e) {
+                console.warn('[System] Failed to migrate legacy google auth data:', e);
+            }
+            delete config.google;
+            needsSave = true;
+            console.log('[System] Stripped root "google" key from openclaw.json for Gateway compatibility');
+        }
+
         // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
         if (!config.ui) { config.ui = {}; needsSave = true; }
         if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
@@ -7801,6 +7820,9 @@ function sleepMs(ms) {
 
 function writeOpenClawConfigObject(config) {
     const cleanConfig = JSON.parse(JSON.stringify(config));
+    if (cleanConfig.google) {
+        delete cleanConfig.google;
+    }
     const originalBytes = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).size : 39500;
     let newJson = JSON.stringify(cleanConfig, null, 2);
     const newBytes = Buffer.byteLength(newJson, 'utf8');
@@ -8066,6 +8088,218 @@ ipcMain.handle('feishu-qr-login', async (_event, opts = {}) => {
         return { success: false, error: e.message || String(e) };
     }
 });
+
+// ========== Google Auth 隔离存储 ==========
+function getGoogleAuthPath() {
+    return path.join(CONFIG_DIR, 'google-auth.json');
+}
+
+function readGoogleAuthData() {
+    try {
+        const p = getGoogleAuthPath();
+        if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch (_) {}
+    return { loggedIn: false };
+}
+
+function writeGoogleAuthData(data) {
+    try {
+        if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+        fs.writeFileSync(getGoogleAuthPath(), JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Failed to write google-auth.json:', e);
+    }
+}
+
+// ========== Google OAuth 登录与云同步 ==========
+ipcMain.handle('google-login', async () => {
+    try {
+        const result = await startGoogleLogin();
+        if (result.success && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('google-login-success', result.user);
+            writeGoogleAuthData({
+                loggedIn: true,
+                account: result.user,
+                tokens: result.tokens
+            });
+        } else if (!result.success && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('google-login-failed', { error: result.error });
+        }
+        return result;
+    } catch (e) {
+        console.error('Google login failed:', e);
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
+ipcMain.handle('google-logout', async () => {
+    try {
+        cancelGoogleLogin();
+        writeGoogleAuthData({ loggedIn: false });
+        return { success: true };
+    } catch (e) {
+        console.error('Google logout failed:', e);
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
+ipcMain.handle('google-get-status', async () => {
+    const authData = readGoogleAuthData();
+    if (authData && authData.loggedIn && authData.account) {
+        return { loggedIn: true, account: authData.account };
+    }
+    return { loggedIn: false };
+});
+
+/** 获取并自动刷新 Google Access Token */
+async function getValidGoogleAccessToken() {
+    const authData = readGoogleAuthData();
+    if (!authData || !authData.loggedIn || !authData.tokens) {
+        throw new Error('未登录 Google 账号');
+    }
+    const { access_token, refresh_token } = authData.tokens;
+    if (access_token) return access_token;
+    if (refresh_token) {
+        const newTokens = await refreshAccessToken(refresh_token);
+        authData.tokens.access_token = newTokens.access_token;
+        if (newTokens.refresh_token) authData.tokens.refresh_token = newTokens.refresh_token;
+        writeGoogleAuthData(authData);
+        return newTokens.access_token;
+    }
+    throw new Error('Google Token 已失效，请重新登录');
+}
+
+ipcMain.handle('google-sync-upload', async () => {
+    try {
+        const accessToken = await getValidGoogleAccessToken();
+        if (!fs.existsSync(CONFIG_PATH)) throw new Error('本地配置文件不存在');
+        let configObj = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, ''));
+        // 确保清除可能存在的非法根节点 google 键
+        delete configObj.google;
+
+        // 打包会话归档与历史数据 (agents/main/sessions)
+        const sessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
+        let sessionHistoryBundle = null;
+        if (fs.existsSync(sessionsDir)) {
+            sessionHistoryBundle = { files: {} };
+            const indexPath = path.join(sessionsDir, 'sessions.json');
+            if (fs.existsSync(indexPath)) {
+                try {
+                    sessionHistoryBundle['sessions.json'] = fs.readFileSync(indexPath, 'utf8');
+                } catch (_) {}
+            }
+            try {
+                const jsonlFiles = fs.readdirSync(sessionsDir).filter((n) => /\.jsonl$/i.test(n) && !/\.trajectory\.jsonl$/i.test(n));
+                for (const f of jsonlFiles.slice(0, 50)) {
+                    try {
+                        const fp = path.join(sessionsDir, f);
+                        const stat = fs.statSync(fp);
+                        if (stat.size < 2 * 1024 * 1024) { // 单个文件 2MB 以内纳入备份
+                            sessionHistoryBundle.files[f] = fs.readFileSync(fp, 'utf8');
+                        }
+                    } catch (_) {}
+                }
+            } catch (_) {}
+        }
+
+        // 打包完整备份（包含 OpenClaw 核心配置、系统偏好设置及会话归档历史）
+        const backupBundle = {
+            _backupType: 'nexora-full-backup',
+            version: '2.0',
+            updatedAt: new Date().toISOString(),
+            config: configObj,
+            systemPrefs: {
+                autostart: isAutoStartEnabled(),
+                silentStart: isSilentStartEnabled(),
+                autoLaunchGateway: isAutoLaunchGatewayEnabled()
+            },
+            sessionHistory: sessionHistoryBundle
+        };
+
+        const configStr = JSON.stringify(backupBundle, null, 2);
+        await uploadConfigToDrive(accessToken, configStr);
+        return { success: true };
+    } catch (e) {
+        console.error('Google Drive Upload Failed:', e);
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
+ipcMain.handle('google-sync-download', async () => {
+    try {
+        const accessToken = await getValidGoogleAccessToken();
+        const result = await downloadConfigFromDrive(accessToken);
+        if (!result || !result.content) {
+            return { success: false, error: 'Google 云盘中暂无配置备份' };
+        }
+        // 校验 JSON 格式
+        const remoteData = JSON.parse(result.content);
+        let remoteConfig = remoteData;
+
+        // 如果是包含系统偏好与会话归档的整合备份包
+        if (remoteData && remoteData._backupType === 'nexora-full-backup' && remoteData.config) {
+            remoteConfig = remoteData.config;
+
+            // 恢复系统偏好设置
+            if (remoteData.systemPrefs) {
+                try {
+                    if (typeof remoteData.systemPrefs.autostart === 'boolean') {
+                        setAutoStartEnabled(remoteData.systemPrefs.autostart);
+                    }
+                    if (typeof remoteData.systemPrefs.silentStart === 'boolean') {
+                        setSilentStartEnabled(remoteData.systemPrefs.silentStart);
+                    }
+                    if (typeof remoteData.systemPrefs.autoLaunchGateway === 'boolean') {
+                        setAutoLaunchGatewayEnabled(remoteData.systemPrefs.autoLaunchGateway);
+                    }
+                } catch (err) {
+                    console.warn('[GoogleSync] Restoring systemPrefs failed:', err);
+                }
+            }
+
+            // 恢复会话归档历史 (agents/main/sessions)
+            if (remoteData.sessionHistory) {
+                try {
+                    const targetSessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
+                    if (!fs.existsSync(targetSessionsDir)) fs.mkdirSync(targetSessionsDir, { recursive: true });
+
+                    if (remoteData.sessionHistory['sessions.json']) {
+                        fs.writeFileSync(path.join(targetSessionsDir, 'sessions.json'), remoteData.sessionHistory['sessions.json'], 'utf8');
+                    }
+                    if (remoteData.sessionHistory.files && typeof remoteData.sessionHistory.files === 'object') {
+                        Object.entries(remoteData.sessionHistory.files).forEach(([fileName, fileContent]) => {
+                            try {
+                                fs.writeFileSync(path.join(targetSessionsDir, fileName), fileContent, 'utf8');
+                            } catch (_) {}
+                        });
+                    }
+                    console.log('[GoogleSync] Restored session history successfully');
+                } catch (err) {
+                    console.warn('[GoogleSync] Restoring sessionHistory failed:', err);
+                }
+            }
+        }
+
+        // 如果云端配置包含非法的根节点 google，自动迁移存入 google-auth.json 并从 openclaw.json 移除
+        if (remoteConfig.google) {
+            if (remoteConfig.google.account && remoteConfig.google.tokens) {
+                writeGoogleAuthData({
+                    loggedIn: true,
+                    account: remoteConfig.google.account,
+                    tokens: remoteConfig.google.tokens
+                });
+            }
+            delete remoteConfig.google;
+        }
+        // 保存规范化后的云端配置到 openclaw.json
+        writeOpenClawConfigObject(remoteConfig);
+        return { success: true, config: remoteConfig };
+    } catch (e) {
+        console.error('Google Drive Download Failed:', e);
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
 
 // 开机自启的设置与获取
 // 开机自启：Windows 上 get/set 必须使用相同的 path + args，否则会读成 false

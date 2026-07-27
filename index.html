@@ -1593,9 +1593,23 @@
               </button>
             </div>
           </div>
-        </section>
 
-        <!-- Tab: 网络中转 -->
+          <!-- 4. Google 账号登录 -->
+          <div class="form-group-section" style="width: 100%; margin-bottom: 24px;">
+            <h3 style="border-left: 3px solid var(--accent-color); padding-left: 10px;">🔐 Google 账号登录</h3>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; margin-top: -6px;">通过 Google OAuth 登录绑定您的 Google 账号，用于身份认证与个性化服务。</p>
+
+            <div id="google-account-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; width: 100%;">
+              <!-- 动态渲染的 Google 账号卡片 -->
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" class="btn-primary" id="google-login-btn" style="width: auto; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; margin-top: 0; background: linear-gradient(135deg, var(--accent-color), #4f46e5); border: none; font-weight: 600; cursor: pointer; color: white;">
+                🔑 Google 登录
+              </button>
+            </div>
+          </div>
+        </section>
         <section class="tab-pane" id="acceleration-view">
           <div class="view-header acc-header">
             <div>

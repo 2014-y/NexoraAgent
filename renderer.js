@@ -2043,6 +2043,140 @@ async function init() {
         });
     }
 
+    // ========== Google 账号登录 ==========
+    const googleLoginBtn = document.getElementById('google-login-btn');
+    const googleAccountContainer = document.getElementById('google-account-container');
+
+    async function renderGoogleAccount() {
+        if (!googleAccountContainer) return;
+        try {
+            const status = await window.api.googleGetStatus();
+            if (status.loggedIn && status.account) {
+                window.currentUserGoogleAccount = status.account;
+                const acct = status.account;
+                const avatarHtml = acct.picture
+                    ? `<img src="${escapeHtml(acct.picture)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<div style=\\'width:36px;height:36px;border-radius:50%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:16px;\\'>${escapeHtml((acct.name || acct.email || 'G')[0].toUpperCase())}</div>'">`
+                    : `<div style="width:36px;height:36px;border-radius:50%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:16px;">${escapeHtml((acct.name || acct.email || 'G')[0].toUpperCase())}</div>`;
+                googleAccountContainer.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:10px;flex-wrap:wrap;">
+                        ${avatarHtml}
+                        <div style="flex:1;min-width:140px;">
+                            <div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(acct.name || '未知用户')}</div>
+                            <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(acct.email || '')}</div>
+                        </div>
+                        <span style="font-size:11px;color:#22c55e;font-weight:600;padding:2px 8px;background:rgba(34,197,94,0.1);border-radius:4px;">已登录</span>
+                        <button type="button" id="google-upload-btn" style="padding:4px 10px;font-size:11px;border-radius:5px;border:1px solid var(--accent-color);background:rgba(192,132,252,0.1);color:var(--accent-color);cursor:pointer;font-weight:500;" title="备份当前应用配置到 Google 云盘">☁️ 备份配置</button>
+                        <button type="button" id="google-download-btn" style="padding:4px 10px;font-size:11px;border-radius:5px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-primary);cursor:pointer;font-weight:500;" title="从 Google 云盘拉取最新配置恢复">📥 恢复配置</button>
+                        <button type="button" id="google-logout-btn" style="padding:4px 10px;font-size:11px;border-radius:5px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);cursor:pointer;">退出</button>
+                    </div>`;
+
+                const uploadBtn = document.getElementById('google-upload-btn');
+                if (uploadBtn) {
+                    uploadBtn.addEventListener('click', async () => {
+                        uploadBtn.disabled = true;
+                        uploadBtn.innerText = '⏳ 上传中...';
+                        try {
+                            const res = await window.api.googleSyncUpload();
+                            if (res.success) {
+                                showToast('✅ 成功将应用配置备份至 Google 云盘！');
+                            } else {
+                                showToast('❌ 备份失败: ' + res.error);
+                            }
+                        } catch (e) {
+                            showToast('❌ 备份失败: ' + e.message);
+                        } finally {
+                            uploadBtn.disabled = false;
+                            uploadBtn.innerText = '☁️ 备份配置';
+                        }
+                    });
+                }
+
+                const downloadBtn = document.getElementById('google-download-btn');
+                if (downloadBtn) {
+                    downloadBtn.addEventListener('click', async () => {
+                        downloadBtn.disabled = true;
+                        downloadBtn.innerText = '⏳ 下载中...';
+                        try {
+                            const res = await window.api.googleSyncDownload();
+                            if (res.success) {
+                                showToast('✅ 已成功从 Google 云盘同步恢复配置！');
+                                setTimeout(() => window.location.reload(), 1500);
+                            } else {
+                                showToast('❌ 恢复失败: ' + res.error);
+                            }
+                        } catch (e) {
+                            showToast('❌ 恢复失败: ' + e.message);
+                        } finally {
+                            downloadBtn.disabled = false;
+                            downloadBtn.innerText = '📥 恢复配置';
+                        }
+                    });
+                }
+
+                const logoutBtn = document.getElementById('google-logout-btn');
+                if (logoutBtn) {
+                    logoutBtn.addEventListener('click', async () => {
+                        await window.api.googleLogout();
+                        window.currentUserGoogleAccount = null;
+                        showToast('已退出 Google 账号');
+                        renderGoogleAccount();
+                    });
+                }
+                if (googleLoginBtn) googleLoginBtn.style.display = 'none';
+            } else {
+                window.currentUserGoogleAccount = null;
+                googleAccountContainer.innerHTML = '';
+                if (googleLoginBtn) googleLoginBtn.style.display = '';
+            }
+        } catch (_) {
+            window.currentUserGoogleAccount = null;
+            googleAccountContainer.innerHTML = '';
+            if (googleLoginBtn) googleLoginBtn.style.display = '';
+        }
+    }
+
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', async () => {
+            if (googleLoginBtn.disabled) return;
+            const oldHtml = '🔑 Google 登录';
+            googleLoginBtn.disabled = true;
+            googleLoginBtn.style.opacity = '0.6';
+            googleLoginBtn.style.cursor = 'not-allowed';
+            googleLoginBtn.innerHTML = '⏳ 正在等待 Google 授权...';
+
+            const safetyTimer = setTimeout(() => {
+                googleLoginBtn.disabled = false;
+                googleLoginBtn.style.opacity = '1';
+                googleLoginBtn.style.cursor = 'pointer';
+                googleLoginBtn.innerHTML = oldHtml;
+            }, 45000);
+
+            try {
+                const result = await window.api.triggerGoogleLogin();
+                if (result.success) {
+                    showToast('Google 登录成功！欢迎 ' + (result.user?.name || result.user?.email || ''));
+                    renderGoogleAccount();
+                } else if (result.error && !result.error.includes('关闭了登录窗口')) {
+                    showToast('Google 登录失败: ' + result.error);
+                }
+            } catch (e) {
+                showToast('Google 登录失败: ' + (e.message || String(e)));
+            } finally {
+                clearTimeout(safetyTimer);
+                googleLoginBtn.disabled = false;
+                googleLoginBtn.style.opacity = '1';
+                googleLoginBtn.style.cursor = 'pointer';
+                googleLoginBtn.innerHTML = oldHtml;
+            }
+        });
+    }
+
+    if (window.api.onGoogleLoginSuccess) {
+        window.api.onGoogleLoginSuccess(() => renderGoogleAccount());
+    }
+
+    renderGoogleAccount();
+
     // 绑定控制台多渠道绑定状态切换小药丸
     const pills = document.querySelectorAll('.console-channel-pill');
     pills.forEach(pill => {
@@ -10883,11 +11017,35 @@ function createChatAvatarEl(sender) {
         box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     `;
     if (sender === 'user') {
-        avatar.style.background = 'linear-gradient(135deg, #00d2ff, #0055ff)';
-        avatar.style.fontSize = '13px';
-        avatar.style.fontWeight = '800';
-        avatar.style.color = 'white';
-        avatar.innerText = 'ME';
+        const googleUser = window.currentUserGoogleAccount;
+        if (googleUser && googleUser.picture) {
+            avatar.style.background = 'transparent';
+            const img = document.createElement('img');
+            img.src = googleUser.picture;
+            img.alt = googleUser.name || 'User';
+            img.draggable = false;
+            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; display: block;';
+            img.onerror = () => {
+                avatar.style.background = 'linear-gradient(135deg, #00d2ff, #0055ff)';
+                avatar.style.fontSize = '13px';
+                avatar.style.fontWeight = '800';
+                avatar.style.color = 'white';
+                avatar.innerText = (googleUser.name || googleUser.email || 'ME')[0].toUpperCase();
+            };
+            avatar.appendChild(img);
+        } else if (googleUser && (googleUser.name || googleUser.email)) {
+            avatar.style.background = 'linear-gradient(135deg, #00d2ff, #0055ff)';
+            avatar.style.fontSize = '13px';
+            avatar.style.fontWeight = '800';
+            avatar.style.color = 'white';
+            avatar.innerText = (googleUser.name || googleUser.email)[0].toUpperCase();
+        } else {
+            avatar.style.background = 'linear-gradient(135deg, #00d2ff, #0055ff)';
+            avatar.style.fontSize = '13px';
+            avatar.style.fontWeight = '800';
+            avatar.style.color = 'white';
+            avatar.innerText = 'ME';
+        }
     } else {
         avatar.style.background = 'transparent';
         const img = document.createElement('img');

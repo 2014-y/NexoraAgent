@@ -44,6 +44,9 @@ release-assets/voice-packs/*.tar.bz2
 !release-assets/voice-packs/*.txt
 !release-assets/voice-packs/*.md
 
+# OAuth Client Secret files
+client_secret_*.json
+
 # 已泄露的 agnes key 兜底文件，勿提交
 media-cli/media-core/.agnes-keys.json
 .agnes-keys.json
