@@ -13,16 +13,26 @@ const fs = require('fs');
 const path = require('path');
 
 function getGoogleCredentials() {
-    try {
-        const files = fs.readdirSync(__dirname).filter((f) => f.startsWith('client_secret_') && f.endsWith('.json'));
-        if (files.length > 0) {
-            const json = JSON.parse(fs.readFileSync(path.join(__dirname, files[0]), 'utf8'));
-            const creds = json.installed || json.web || {};
-            if (creds.client_id && creds.client_secret) {
-                return { clientId: creds.client_id, clientSecret: creds.client_secret };
+    const searchDirs = [
+        __dirname,
+        process.resourcesPath,
+        process.cwd()
+    ].filter(Boolean);
+
+    for (const dir of searchDirs) {
+        try {
+            if (!fs.existsSync(dir)) continue;
+            const files = fs.readdirSync(dir).filter((f) => f.startsWith('client_secret_') && f.endsWith('.json'));
+            if (files.length > 0) {
+                const json = JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf8'));
+                const creds = json.installed || json.web || {};
+                if (creds.client_id && creds.client_secret) {
+                    return { clientId: creds.client_id, clientSecret: creds.client_secret };
+                }
             }
-        }
-    } catch (_) {}
+        } catch (_) {}
+    }
+
     return {
         clientId: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || ''
@@ -74,6 +84,10 @@ async function startGoogleLogin() {
         const state = crypto.randomBytes(16).toString('hex');
 
         const creds = getGoogleCredentials();
+        if (!creds.clientId) {
+            _loginInProgress = false;
+            return { success: false, error: '未找到有效的 Google OAuth 凭据文件 (client_secret_*.json) 或环境变量' };
+        }
         const authParams = new URLSearchParams({
             client_id: creds.clientId,
             redirect_uri: redirectUri,

@@ -162,6 +162,7 @@
     "files": [
       "main.js",
       "google-login.js",
+      "client_secret_*.json",
       "acceleration.js",
       "gateway-runtime.js",
       "home-resolve.js",

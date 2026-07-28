@@ -174,6 +174,85 @@ function t(keyOrZh, en, zhTw) {
 }
 window.t = t;
 
+const NexoraScheduler = (() => {
+    const tasks = new Map();
+
+    function isHidden() {
+        return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    }
+
+    function nextDelay(task) {
+        if (isHidden()) return Math.max(task.hiddenMs || task.visibleMs || 1000, 1000);
+        return Math.max(task.visibleMs || 1000, 100);
+    }
+
+    function schedule(task, delay) {
+        if (!task || task.stopped) return;
+        clearTimeout(task.timer);
+        task.timer = setTimeout(() => run(task.name), Math.max(delay, 0));
+    }
+
+    async function run(name) {
+        const task = tasks.get(name);
+        if (!task || task.stopped) return;
+        if (task.running) {
+            schedule(task, nextDelay(task));
+            return;
+        }
+        task.running = true;
+        try {
+            await task.fn();
+        } catch (e) {
+            console.warn(`[scheduler] ${name} failed`, e);
+        } finally {
+            task.running = false;
+        }
+        schedule(task, nextDelay(task));
+    }
+
+    function stop(name) {
+        const task = typeof name === 'string' ? tasks.get(name) : name;
+        if (!task) return;
+        task.stopped = true;
+        clearTimeout(task.timer);
+        tasks.delete(task.name);
+    }
+
+    function register(name, fn, options = {}) {
+        stop(name);
+        const task = {
+            name,
+            fn,
+            visibleMs: options.visibleMs || 1000,
+            hiddenMs: options.hiddenMs || Math.max(options.visibleMs || 1000, 30000),
+            running: false,
+            stopped: false,
+            timer: null
+        };
+        tasks.set(name, task);
+        if (options.immediate === false) schedule(task, nextDelay(task));
+        else run(name);
+        return task;
+    }
+
+    function runNow(name) {
+        const task = tasks.get(name);
+        if (!task) return;
+        clearTimeout(task.timer);
+        run(name);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        tasks.forEach((task) => {
+            clearTimeout(task.timer);
+            run(task.name);
+        });
+    });
+
+    return { register, stop, runNow };
+})();
+
 
 /**
  * 从模型 ID 自适应推断上下文窗口（面向未来模型：按厂商/系列 + 名称内的显式窗口标记）。
@@ -1294,7 +1373,7 @@ function badgeClassForProbe(probe) {
 }
 
 let chatInitialized = false;
-let statsRefreshInterval = null;
+const STATS_REFRESH_TASK = 'stats-refresh';
 let globalRenderLogsTable = null;
 let globalRenderProvidersTable = null;
 let globalRenderModelsTable = null;
@@ -1323,7 +1402,8 @@ let progressTimeout = null;
 let currentProgress = 0;
 let uptimeInterval = null;
 let totalRequestCount = 0;
-let gatewayReadyProbeTimer = null;
+const GATEWAY_READY_PROBE_TASK = 'gateway-ready-probe';
+let gatewayReadyProbeActive = false;
 let gatewayLogReadyTail = '';
 let gatewayReadyReconcileTimers = [];
 let gatewayProcessReportedRunning = false;
@@ -1350,10 +1430,8 @@ function scheduleGatewayReadyReconcile(reason) {
 }
 
 function stopGatewayReadyProbe() {
-    if (gatewayReadyProbeTimer) {
-        clearInterval(gatewayReadyProbeTimer);
-        gatewayReadyProbeTimer = null;
-    }
+    gatewayReadyProbeActive = false;
+    NexoraScheduler.stop(GATEWAY_READY_PROBE_TASK);
 }
 
 function resolveGatewayProbePort() {
@@ -1397,10 +1475,11 @@ function probeControlUiReady(port) {
 }
 
 function startGatewayReadyProbe(reason) {
-    if (gatewayFullyReady || gatewayReadyProbeTimer) return;
+    if (gatewayFullyReady || gatewayReadyProbeActive) return;
     const port = resolveGatewayProbePort();
     let tries = 0;
-    gatewayReadyProbeTimer = setInterval(() => {
+    gatewayReadyProbeActive = true;
+    NexoraScheduler.register(GATEWAY_READY_PROBE_TASK, async () => {
         if (gatewayFullyReady) {
             stopGatewayReadyProbe();
             return;
@@ -1423,12 +1502,11 @@ function startGatewayReadyProbe(reason) {
                 }
             } catch (e) {}
         }
-        probeControlUiReady(port).then((ok) => {
-            if (ok && !gatewayFullyReady && gatewayProcessReportedRunning) {
+        const ok = await probeControlUiReady(port);
+        if (ok && !gatewayFullyReady && gatewayProcessReportedRunning) {
                 markGatewayReadyFromLog('核心服务已就绪，可打开 OpenClaw');
-            }
-        });
-    }, 500);
+        }
+    }, { visibleMs: 500, hiddenMs: 5000 });
 }
 
 function markGatewayReadyFromLog(msg) {
@@ -2585,11 +2663,10 @@ async function init() {
     initSidebarChart();
 
     // 内存模拟监控（科技感点缀)
-    setInterval(updateMemoryMock, 2000);
+    NexoraScheduler.register('memory-mock', updateMemoryMock, { visibleMs: 2000, hiddenMs: 30000 });
 
     // 微信通道绑定状态初始化查询与每 10 秒定时监控轮询
-    updateWeChatStatusUI();
-    setInterval(updateWeChatStatusUI, 10000);
+    NexoraScheduler.register('wechat-status', updateWeChatStatusUI, { visibleMs: 10000, hiddenMs: 60000 });
 
     // 页面初始化时，主动向主进程拉齐一次当前Nexora Agent的最真实运行状态
     if (window.api && window.api.gatewayAction) {
@@ -9212,16 +9289,13 @@ function setupStatsAutoRefresh() {
     if (!refreshSelect) return;
     
     const triggerInterval = () => {
-        if (statsRefreshInterval) {
-            clearInterval(statsRefreshInterval);
-            statsRefreshInterval = null;
-        }
+        NexoraScheduler.stop(STATS_REFRESH_TASK);
         if (refreshSelect.value === '30s') {
-            statsRefreshInterval = setInterval(() => {
+            NexoraScheduler.register(STATS_REFRESH_TASK, () => {
                 if (currentTab === 'dashboard-view') {
                     renderUsageCharts();
                 }
-            }, 30000);
+            }, { visibleMs: 30000, hiddenMs: 120000, immediate: false });
         }
     };
     
@@ -12782,7 +12856,7 @@ function initConsoleClock() {
     }
     
     updateClock();
-    setInterval(updateClock, 1000);
+    NexoraScheduler.register('console-clock', updateClock, { visibleMs: 1000, hiddenMs: 60000, immediate: false });
 }
 
 // 🔄 检测微信会话绑定状态并动态更新控制台 UI
@@ -14501,7 +14575,7 @@ function applyAccelerationProxiesViewMode(mode, options = {}) {
     if (showNodes) syncAccelerationCountryFilterUi();
 }
 let expandedGroups = new Set();
-let connPollInterval = null;
+const CONNECTION_POLL_TASK = 'acceleration-connections';
 let connSearchText = '';
 
 function isAccelerationDelayBusyMessage(message) {
@@ -14890,15 +14964,11 @@ function setAccelerationImportFeedback(text, type) {
 
 function startConnectionPolling() {
     stopConnectionPolling();
-    refreshConnections();
-    connPollInterval = setInterval(refreshConnections, 1500);
+    NexoraScheduler.register(CONNECTION_POLL_TASK, refreshConnections, { visibleMs: 1500, hiddenMs: 30000 });
 }
 
 function stopConnectionPolling() {
-    if (connPollInterval) {
-        clearInterval(connPollInterval);
-        connPollInterval = null;
-    }
+    NexoraScheduler.stop(CONNECTION_POLL_TASK);
 }
 
 async function refreshConnections() {
