@@ -3903,7 +3903,7 @@ function createWindow(existingSplash) {
         frame: false,
         resizable: true,
         maximizable: true,
-        show: false,
+        show: true,
         backgroundColor: WINDOW_BG,
         // 明确不透明，避免还原时透出系统白底
         transparent: false,
@@ -3961,7 +3961,10 @@ function createWindow(existingSplash) {
         mainWindow.setTitle(id > 1 ? `Nexora Agent #${id}` : 'Nexora Agent');
     } catch (e) {}
     // 当渲染进程首次绘制完成后，关闭 splash；静默启动则不弹主窗口（托盘后台）
-    mainWindow.once('ready-to-show', () => {
+    let windowRevealed = false;
+    const revealWindow = () => {
+        if (windowRevealed || !mainWindow || mainWindow.isDestroyed()) return;
+        windowRevealed = true;
         try { if (splash && !splash.isDestroyed()) splash.destroy(); } catch (e) {}
         try { mainWindow.setBackgroundColor(WINDOW_BG); } catch (e) {}
         const silent = isSilentStartEnabled() && process.argv.includes('--silent');
@@ -3969,8 +3972,16 @@ function createWindow(existingSplash) {
             // 只有系统开机带 --silent 参数时才隐式托盘启动
             try { mainWindow.hide(); } catch (e) {}
         } else {
-            mainWindow.show();
-            mainWindow.focus();
+            try {
+                mainWindow.center();
+                mainWindow.show();
+                mainWindow.restore();
+                mainWindow.setAlwaysOnTop(true);
+                mainWindow.focus();
+                setTimeout(() => {
+                    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); } catch (e) {}
+                }, 500);
+            } catch (e) {}
         }
         const id = (global.nexoraInstance && global.nexoraInstance.id) || 1;
         if (id > 1 && !silent) {
@@ -3978,7 +3989,9 @@ function createWindow(existingSplash) {
                 showNotification(`Nexora Agent 多开 #${id}`, '已使用独立数据目录与端口；系统代理请勿多实例同时开启。');
             } catch (e) {}
         }
-    });
+    };
+    mainWindow.once('ready-to-show', revealWindow);
+    setTimeout(revealWindow, 1200);
 
     // 最小化/托盘还原时再刷一次底色，压住 Windows 白闪
     const paintDarkBg = () => {

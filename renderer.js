@@ -8294,47 +8294,6 @@ function normalizeSidebarNavOrder(preferred) {
         }
         out.splice(insertAt, 0, tab);
     }
-    // 顶部固定：控制面板 → 网络中转 → 通讯管理 → 模型配置 → 模型角色
-    {
-        const topSeq = [
-            'console-view',
-            'acceleration-view',
-            'communication-view',
-            'config-view',
-            'roles-view'
-        ];
-        const picked = [];
-        for (const tab of topSeq) {
-            const idx = out.indexOf(tab);
-            if (idx >= 0) {
-                out.splice(idx, 1);
-                picked.push(tab);
-            }
-        }
-        for (let i = picked.length - 1; i >= 0; i--) {
-            out.unshift(picked[i]);
-        }
-    }
-    // 会话归档固定紧跟「语音服务」下方
-    {
-        const iVoice = out.indexOf('voice-view');
-        const iArch = out.indexOf('session-archive-view');
-        if (iVoice >= 0 && iArch >= 0 && iArch !== iVoice + 1) {
-            out.splice(iArch, 1);
-            const insertAt = out.indexOf('voice-view') + 1;
-            out.splice(insertAt, 0, 'session-archive-view');
-        }
-    }
-    // 数据总览固定紧贴「内置终端」上方
-    {
-        const iDc = out.indexOf('data-center-view');
-        const iTerm = out.indexOf('terminal-view');
-        if (iDc >= 0 && iTerm >= 0 && iDc !== iTerm - 1) {
-            out.splice(iDc, 1);
-            const insertAt = out.indexOf('terminal-view');
-            out.splice(insertAt, 0, 'data-center-view');
-        }
-    }
     return out;
 }
 
