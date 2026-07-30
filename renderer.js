@@ -74,6 +74,139 @@ const BUILTIN_ALLOWED_PROVIDERS = ['agnes-ai', 'ollama'];
 const BUILTIN_DEFAULT_PRIMARY = 'agnes-ai/agnes-2.0-flash';
 const BUILTIN_DEFAULT_FALLBACK = 'agnes-ai/agnes-1.5-flash';
 
+const MODEL_API_PROTOCOLS = [
+    { value: 'openai-completions', label: 'OpenAI Completions', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'openai-chat', label: 'OpenAI Chat', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'openai-legacy-completions', label: 'OpenAI Legacy Completions', family: 'completions', chatPath: '/completions', modelsPath: '/models' },
+    { value: 'openai-responses', label: 'OpenAI Responses', family: 'responses', chatPath: '/responses', modelsPath: '/models' },
+    { value: 'anthropic-messages', label: 'Anthropic Messages', family: 'anthropic', chatPath: '/messages', modelsPath: '/models' },
+    { value: 'gemini-generate-content', label: 'Gemini GenerateContent', family: 'gemini', modelsPath: '/models' },
+    { value: 'azure-openai', label: 'Azure OpenAI', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'mistral-chat', label: 'Mistral Chat', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'cohere-chat', label: 'Cohere Chat', family: 'cohere', chatPath: '/chat', modelsPath: '/models' },
+    { value: 'claude-code', label: 'Claude Code / OpenAI Compatible', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'lm-studio', label: 'LM Studio', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'vllm', label: 'vLLM', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'text-generation-webui', label: 'Text Generation WebUI', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'localai', label: 'LocalAI', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'ollama', label: 'Ollama', family: 'ollama', chatPath: '/api/chat', modelsPath: '/api/tags' }
+];
+
+function getModelApiProtocol(apiType) {
+    const normalized = String(apiType || 'openai-completions').trim();
+    return MODEL_API_PROTOCOLS.find(p => p.value === normalized) || MODEL_API_PROTOCOLS[0];
+}
+
+function renderModelApiProtocolOptions(selected) {
+    const current = String(selected || 'openai-completions');
+    return MODEL_API_PROTOCOLS.map(protocol => `<option value="${escapeHtml(protocol.value)}" ${current === protocol.value ? 'selected' : ''}>${escapeHtml(protocol.label)}</option>`).join('');
+}
+
+function joinApiUrl(baseUrl, path) {
+    return `${String(baseUrl || '').replace(/\/$/, '')}${path}`;
+}
+
+function normalizeOllamaBaseUrl(baseUrl) {
+    return String(baseUrl || '').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+}
+
+function buildGeminiModelPath(modelId, stream = false) {
+    const cleanModel = String(modelId || '').trim().replace(/^models\//, '');
+    return `/models/${encodeURIComponent(cleanModel)}:${stream ? 'streamGenerateContent' : 'generateContent'}`;
+}
+
+function buildModelApiHeaders(apiType, apiKey) {
+    const protocol = getModelApiProtocol(apiType);
+    const headers = { 'Content-Type': 'application/json' };
+    const key = String(apiKey || '').trim();
+    if (!key) return headers;
+    if (protocol.family === 'anthropic') {
+        headers['x-api-key'] = key;
+        headers['anthropic-version'] = '2023-06-01';
+    } else if (protocol.family === 'gemini') {
+        headers['x-goog-api-key'] = key;
+    } else {
+        headers['Authorization'] = `Bearer ${key}`;
+    }
+    return headers;
+}
+
+function buildModelListUrl(baseUrl, apiType) {
+    const protocol = getModelApiProtocol(apiType);
+    if (protocol.family === 'ollama') return joinApiUrl(normalizeOllamaBaseUrl(baseUrl), protocol.modelsPath);
+    return joinApiUrl(baseUrl, protocol.modelsPath || '/models');
+}
+
+function mapOllamaMessages(messages) {
+    return messages.map(msg => {
+        if (!Array.isArray(msg.content)) return msg;
+        const textItem = msg.content.find(item => item.type === 'text');
+        const imgItem = msg.content.find(item => item.type === 'image_url');
+        const mappedMsg = { role: msg.role, content: textItem ? textItem.text : '' };
+        if (imgItem && imgItem.image_url && imgItem.image_url.url) {
+            let b64 = imgItem.image_url.url;
+            if (b64.startsWith('data:')) {
+                const parts = b64.split(',');
+                if (parts.length === 2) b64 = parts[1];
+            }
+            mappedMsg.images = [b64];
+        }
+        return mappedMsg;
+    });
+}
+
+function buildChatRequest(baseUrl, apiType, modelId, messages, options = {}) {
+    const protocol = getModelApiProtocol(apiType);
+    const maxTokens = options.maxTokens || options.max_tokens || 1024;
+    const temperature = options.temperature ?? 0.7;
+    const headers = buildModelApiHeaders(apiType, options.apiKey || '');
+
+    if (protocol.family === 'ollama') {
+        return { url: joinApiUrl(normalizeOllamaBaseUrl(baseUrl), protocol.chatPath), headers, body: { model: modelId, messages: mapOllamaMessages(messages), stream: false, options: { temperature } } };
+    }
+    if (protocol.family === 'anthropic') {
+        const system = messages.find(m => m.role === 'system');
+        const chatMessages = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content || '') }));
+        const body = { model: modelId, messages: chatMessages, max_tokens: maxTokens, temperature };
+        if (system && system.content) body.system = system.content;
+        return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body };
+    }
+    if (protocol.family === 'gemini') {
+        const contents = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content || '') }] }));
+        const system = messages.find(m => m.role === 'system');
+        const body = { contents, generationConfig: { temperature, maxOutputTokens: maxTokens } };
+        if (system && system.content) body.systemInstruction = { parts: [{ text: system.content }] };
+        return { url: joinApiUrl(baseUrl, buildGeminiModelPath(modelId)), headers, body };
+    }
+    if (protocol.family === 'responses') {
+        const input = messages.map(m => `${m.role}: ${Array.isArray(m.content) ? JSON.stringify(m.content) : m.content}`).join('\n');
+        return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body: { model: modelId, input, max_output_tokens: maxTokens, temperature } };
+    }
+    if (protocol.family === 'completions') {
+        const prompt = messages.map(m => `${m.role}: ${Array.isArray(m.content) ? JSON.stringify(m.content) : m.content}`).join('\n') + '\nassistant:';
+        return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body: { model: modelId, prompt, max_tokens: maxTokens, temperature } };
+    }
+    if (protocol.family === 'cohere') {
+        const lastUser = [...messages].reverse().find(m => m.role === 'user');
+        return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body: { model: modelId, message: lastUser ? String(lastUser.content || '') : 'ping', temperature, max_tokens: maxTokens } };
+    }
+    return { url: joinApiUrl(baseUrl, protocol.chatPath || '/chat/completions'), headers, body: { model: modelId, messages, temperature, max_tokens: maxTokens } };
+}
+
+function extractChatReply(result) {
+    if (!result || typeof result !== 'object') return String(result || '');
+    if (result.message && result.message.content) return result.message.content;
+    if (result.choices && result.choices[0] && result.choices[0].message) return result.choices[0].message.content;
+    if (result.choices && result.choices[0] && typeof result.choices[0].text === 'string') return result.choices[0].text;
+    if (Array.isArray(result.content)) return result.content.map(part => part.text || '').join('');
+    if (result.output_text) return result.output_text;
+    if (Array.isArray(result.output)) return result.output.flatMap(item => item.content || []).map(part => part.text || '').join('');
+    if (Array.isArray(result.candidates) && result.candidates[0] && result.candidates[0].content) return (result.candidates[0].content.parts || []).map(part => part.text || '').join('');
+    if (result.text) return result.text;
+    return JSON.stringify(result);
+}
+
+
 function isBuiltinAllowedProvider(providerKey) {
     return BUILTIN_ALLOWED_PROVIDERS.includes(String(providerKey || '').trim());
 }
@@ -4935,9 +5068,7 @@ function renderProvidersList() {
                     <div class="form-field half">
                         <label>${t('API 协议类型', 'API Protocol', 'API 協定類型')}</label>
                         <select class="provider-api-select" data-provider="${key}">
-                            <option value="openai-completions" ${provider.api === 'openai-completions' ? 'selected' : ''}>OpenAI Completions</option>
-                            <option value="openai-chat" ${provider.api === 'openai-chat' ? 'selected' : ''}>OpenAI Chat</option>
-                            <option value="ollama" ${provider.api === 'ollama' ? 'selected' : ''}>Ollama</option>
+                            ${renderModelApiProtocolOptions(provider.api)}
                         </select>
                     </div>
                 </div>
@@ -5605,19 +5736,9 @@ function bindProviderEvents() {
             btn.disabled = true;
 
             try {
-                let testUrl = `${baseUrl.replace(/\/$/, '')}/models`;
-                if (apiType === 'ollama') {
-                    if (baseUrl.includes('11434')) {
-                        testUrl = baseUrl.replace('/v1', '').replace(/\/$/, '') + '/api/tags';
-                    }
-                }
+                let testUrl = buildModelListUrl(baseUrl, apiType);
 
-                const headers = {
-                    'Content-Type': 'application/json'
-                };
-                if (apiKey) {
-                    headers['Authorization'] = `Bearer ${apiKey}`;
-                }
+                const headers = buildModelApiHeaders(apiType, apiKey);
 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -5796,12 +5917,8 @@ function bindProviderEvents() {
             btn.disabled = true;
 
             // 必须声明在 try 外：catch 里会用到，否则超时后二次 ReferenceError，状态卡在「正在检验…」
-            let testUrl = `${baseUrl.replace(/\/$/, '')}/models`;
-            if (apiType === 'ollama' && baseUrl.includes('11434')) {
-                testUrl = baseUrl.replace('/v1', '').replace(/\/$/, '') + '/api/tags';
-            }
-            const headers = { 'Content-Type': 'application/json' };
-            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+            let testUrl = buildModelListUrl(baseUrl, apiType);
+            const headers = buildModelApiHeaders(apiType, apiKey);
             let timeoutId = null;
 
             try {
@@ -5980,17 +6097,13 @@ function bindProviderEvents() {
             }
 
             // 必须声明在 try 外：catch 里会用到，否则超时后二次 ReferenceError，状态卡在「正在验证…」
-            const testUrl = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-            const headers = { 'Content-Type': 'application/json' };
-            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+            const chatProbe = buildChatRequest(baseUrl, apiType, testModel, [{ role: 'user', content: 'ping' }], { apiKey, maxTokens: 1, temperature: 0 });
+            const testUrl = chatProbe.url;
+            const headers = chatProbe.headers;
             let timeoutId = null;
 
             try {
-                const body = {
-                    model: testModel,
-                    messages: [{ role: 'user', content: 'ping' }],
-                    max_tokens: 1
-                };
+                const body = chatProbe.body;
 
                 const controller = new AbortController();
                 timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -11889,53 +12002,10 @@ async function handleSendMessage() {
         messages.push(currentUserMsg);
         chatSessionHistory.push(currentUserMsg); // 存入历史记录
 
-        // 直连上游接口
-        let chatUrl = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-        
-        // 特殊兼容 ollama 本地接口
-        if (providerConfig.api === 'ollama' && baseUrl.includes('11434')) {
-            chatUrl = baseUrl.replace('/v1', '').replace(/\/$/, '') + '/api/chat';
-        }
-
-        const headers = {
-            'Content-Type': 'application/json'
-        };
-        if (apiKey) {
-            headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-
-        // 发送直连请求
-        const reqBody = {
-            model: modelId,
-            messages: messages,
-            temperature: 0.7
-        };
-        // 兼容 ollama 原生 /api/chat 的参数格式
-        if (providerConfig.api === 'ollama' && chatUrl.endsWith('/api/chat')) {
-            reqBody.stream = false;
-            // 映射 OpenAI 格式的多模态数组内容 到 Ollama 原生格式
-            reqBody.messages = reqBody.messages.map(msg => {
-                if (Array.isArray(msg.content)) {
-                    const textItem = msg.content.find(item => item.type === 'text');
-                    const imgItem = msg.content.find(item => item.type === 'image_url');
-                    const mappedMsg = {
-                        role: msg.role,
-                        content: textItem ? textItem.text : ''
-                    };
-                    if (imgItem && imgItem.image_url && imgItem.image_url.url) {
-                        let b64 = imgItem.image_url.url;
-                        // Ollama 需要去除 `data:image/xxx;base64,` 前缀
-                        if (b64.startsWith('data:')) {
-                            const parts = b64.split(',');
-                            if (parts.length === 2) b64 = parts[1];
-                        }
-                        mappedMsg.images = [b64];
-                    }
-                    return mappedMsg;
-                }
-                return msg;
-            });
-        }
+        const chatRequest = buildChatRequest(baseUrl, providerConfig.api, modelId, messages, { apiKey, temperature: 0.7 });
+        const chatUrl = chatRequest.url;
+        const headers = chatRequest.headers;
+        const reqBody = chatRequest.body;
 
         // 增加 120 秒超时机制，防范上游 API 挂死导致界面无限卡顿
         const controller = new AbortController();
@@ -11951,16 +12021,7 @@ async function handleSendMessage() {
 
         if (response.ok) {
             const result = await response.json();
-            let reply = '';
-            
-            // 兼容 Ollama /api/chat 的返回值
-            if (result.message && result.message.content) {
-                reply = result.message.content;
-            } else if (result.choices && result.choices[0] && result.choices[0].message) {
-                reply = result.choices[0].message.content;
-            } else {
-                reply = JSON.stringify(result);
-            }
+            let reply = extractChatReply(result);
             
             if (typeof reply === 'string' && (/MEDIA\s*:/i.test(reply) || reply.includes('[[image]]') || reply.includes('[image]'))) {
                 const rendered = renderChatMediaHtml(reply);
