@@ -58,7 +58,6 @@ for (const m of [
 const ov = read(loc.repo('session-overflow-rollover'));
 for (const m of [
   'skip rollover entirely (already delivered, no reset)',
-  'skip silent-retry (disabled',
   'unwrapUserQuestion',
   'sessionRecentlyDelivered',
   'event.success !== false',
@@ -74,9 +73,16 @@ const iDel = ov.indexOf('skip rollover entirely (already delivered, no reset)');
 const iReset = ov.indexOf("await gatewayRequest(api, 'sessions.reset'");
 add('delivered-check BEFORE reset', iDel > 0 && iReset > iDel, `del@${iDel} reset@${iReset}`);
 
-const iSilent = ov.indexOf('async function performSilentRetry');
-const silentBody = iSilent >= 0 ? ov.slice(iSilent, iSilent + 500) : '';
-add('silent-retry does not chat.send', silentBody.includes('disabled to prevent') && !silentBody.includes("chat.send"));
+add(
+  'silent-retry path removed',
+  !/performSilentRetry|scheduleSilentRetry/.test(ov),
+  'rollover must not launch a second invisible chat turn'
+);
+add(
+  'rollover retry is delivery-aware',
+  ov.includes('isOriginatingRouteValidationError') && ov.includes('delivery outcome uncertain; skipped duplicate retry notice'),
+  'only route-validation errors may be retried without risking duplicate billing'
+);
 
 const sel = path.join(
   local,

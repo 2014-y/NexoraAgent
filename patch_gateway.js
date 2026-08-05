@@ -1186,12 +1186,7 @@ function scrubLocalModelRequestBody(parsedBody, hostOrUrl) {
 // ─── 全局 API Key 轮询负载均衡器 ───
 // ⚠️ 安全：以下内联 key 已泄露（进过源码/公网快照），仅作全新安装的最后兜底。
 // 请轮换后用环境变量 AGNES_API_KEYS(逗号分隔) 或 ~/.openclaw/.agnes-keys.json 覆盖，无需改源码。
-const _COMPROMISED_FALLBACK_KEYS = [
-    'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY',
-    'sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh',
-    'sk-Y6ORz4nnuXHUpwjdXv2WlmLMwCfPBMtmh69iuXxZkQtZazyV',
-    'sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F'
-];
+const _COMPROMISED_FALLBACK_KEYS = [];
 
 function loadRotationKeys() {
     // 1) 环境变量优先
@@ -1236,7 +1231,7 @@ function patchHeadersInArguments(args) {
                     const rawKey = authVal.substring(7).trim();
                     let keys = [];
                     // 1. 如果使用的是内置核心密钥，自动扩展为 4 个内置高速 Key 组成的轮询池
-                    if (rawKey === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+                    if (BUILT_IN_KEYS.includes(rawKey)) {
                         keys = [...BUILT_IN_KEYS];
                     } else if (rawKey.includes(',')) {
                         // 2. 自定义输入框填入了逗号分隔的多 Key 格式，支持去重合并
@@ -1258,7 +1253,7 @@ function patchHeadersInArguments(args) {
                 const apiVal = arg.headers[apiKeyName];
                 if (typeof apiVal === 'string') {
                     let keys = [];
-                    if (apiVal === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+                    if (BUILT_IN_KEYS.includes(apiVal)) {
                         keys = [...BUILT_IN_KEYS];
                     } else if (apiVal.includes(',')) {
                         keys = Array.from(new Set(apiVal.split(',').map(k => k.trim()).filter(Boolean)));
@@ -1282,7 +1277,7 @@ function patchFetchHeaders(headersObj) {
         if (typeof authVal === 'string' && authVal.startsWith('Bearer ')) {
             const rawKey = authVal.substring(7).trim();
             let keys = [];
-            if (rawKey === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+            if (BUILT_IN_KEYS.includes(rawKey)) {
                 keys = [...BUILT_IN_KEYS];
             } else if (rawKey.includes(',')) {
                 keys = Array.from(new Set(rawKey.split(',').map(k => k.trim()).filter(Boolean)));
@@ -1296,7 +1291,7 @@ function patchFetchHeaders(headersObj) {
         let apiKeyVal = headersObj.get('api-key') || headersObj.get('x-api-key');
         if (typeof apiKeyVal === 'string') {
             let keys = [];
-            if (apiKeyVal === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+            if (BUILT_IN_KEYS.includes(apiKeyVal)) {
                 keys = [...BUILT_IN_KEYS];
             } else if (apiKeyVal.includes(',')) {
                 keys = Array.from(new Set(apiKeyVal.split(',').map(k => k.trim()).filter(Boolean)));
@@ -1315,7 +1310,7 @@ function patchFetchHeaders(headersObj) {
             if (typeof authVal === 'string' && authVal.startsWith('Bearer ')) {
                 const rawKey = authVal.substring(7).trim();
                 let keys = [];
-                if (rawKey === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+                if (BUILT_IN_KEYS.includes(rawKey)) {
                     keys = [...BUILT_IN_KEYS];
                 } else if (rawKey.includes(',')) {
                     keys = Array.from(new Set(rawKey.split(',').map(k => k.trim()).filter(Boolean)));
@@ -1332,7 +1327,7 @@ function patchFetchHeaders(headersObj) {
             const apiVal = headersObj[apiKeyName];
             if (typeof apiVal === 'string') {
                 let keys = [];
-                if (apiVal === 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY') {
+                if (BUILT_IN_KEYS.includes(apiVal)) {
                     keys = [...BUILT_IN_KEYS];
                 } else if (apiVal.includes(',')) {
                     keys = Array.from(new Set(apiVal.split(',').map(k => k.trim()).filter(Boolean)));
@@ -2210,15 +2205,27 @@ function wrapRequest(originalRequest, defaultProto) {
 
             // ─── B. 响应体无损旁路监听 (统计 Token) ───
             clientRequest.on('response', (res) => {
-                let chunks = [];
+                const contentType = String((res.headers && res.headers['content-type']) || '').toLowerCase();
+                const transferEncoding = String((res.headers && res.headers['transfer-encoding']) || '').toLowerCase();
+                const isStream = contentType.includes('text/event-stream') || contentType.includes('stream') || contentType.includes('ndjson')
+                    || transferEncoding.includes('chunked');
+                // Keep streaming responses back-pressure driven; only buffer bounded non-streams.
+                let chunks = isStream ? null : [];
+                let bufferedBytes = 0;
                 const originalEmit = res.emit;
                 res.emit = function(event, ...args) {
-                    if (event === 'data') {
+                    if (event === 'data' && chunks) {
                         const chunk = args[0];
                         if (chunk) {
-                            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                            if (bufferedBytes + buf.length <= 4 * 1024 * 1024) {
+                                chunks.push(buf);
+                                bufferedBytes += buf.length;
+                            } else {
+                                chunks = null;
+                            }
                         }
-                    } else if (event === 'end' || event === 'close') {
+                    } else if ((event === 'end' || event === 'close') && chunks) {
                         if (!res.__COMPLETIONS_PARSED__) {
                             res.__COMPLETIONS_PARSED__ = true;
                             const elapsed = Date.now() - startMs;
@@ -2320,10 +2327,37 @@ async function drainFetchResponseBody(response) {
     } catch (_) {}
 }
 
-async function fetchLlmWithTransientRetry(originalFetch, args, urlHint) {
+function hasHeader(headers, wanted) {
+    if (!headers) return false;
+    const target = String(wanted).toLowerCase();
+    try {
+        if (typeof headers.get === 'function') return Boolean(headers.get(wanted));
+        for (const key of Object.keys(headers)) {
+            if (String(key).toLowerCase() === target && headers[key]) return true;
+        }
+    } catch (_) {}
+    return false;
+}
+
+function isRetrySafeFetchArgs(args) {
+    try {
+        const input = args && args[0];
+        const init = args && args[1];
+        const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+        const headers = (init && init.headers) || (input && input.headers);
+        // Non-idempotent model POSTs must not be replayed unless the upstream
+        // explicitly supports request de-duplication.
+        return hasHeader(headers, 'idempotency-key');
+    } catch (_) {
+        return false;
+    }
+}
+
+async function fetchLlmWithTransientRetry(originalFetch, args, urlHint, allowRetry = false) {
     let lastResponse = null;
     let lastStartMs = Date.now();
-    const maxAttempts = LLM_TRANSIENT_MAX_ATTEMPTS;
+    const maxAttempts = allowRetry ? LLM_TRANSIENT_MAX_ATTEMPTS : 1;
     const retryDeadline = Date.now() + LLM_TRANSIENT_TOTAL_BUDGET_MS;
     let attempt = 0;
     for (attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -2357,7 +2391,8 @@ async function fetchLlmWithTransientRetry(originalFetch, args, urlHint) {
     try {
         console.log(
             '[TokenGuard] LLM still failing after ' + attempt +
-            ' attempt(s) (status=' + (lastResponse && lastResponse.status) + '); hand off to failover'
+            ' attempt(s) (status=' + (lastResponse && lastResponse.status) + '); hand off to failover' +
+            (allowRetry ? '' : ' (non-idempotent request was not replayed)')
         );
     } catch (_) {}
     return { response: lastResponse, startMs: lastStartMs, attempts: attempt };
@@ -2383,6 +2418,7 @@ function wrapFetch(originalFetch) {
         }
         
         const isCompletions = isLlmProxyPath(url);
+        const retrySafe = isRetrySafeFetchArgs(arguments);
         
         // 自动干预大模型请求，剔除本地模型的 tools 并清洗上下文脏数据
         if (isCompletions && init && init.body) {
@@ -2414,17 +2450,20 @@ function wrapFetch(originalFetch) {
                     this,
                     originalFetch,
                     arguments,
-                    url
+                    url,
+                    retrySafe
                 );
                 const elapsed = Date.now() - startMs;
                 const ct = String((response.headers && response.headers.get && response.headers.get('content-type')) || '').toLowerCase();
                 const isStream = ct.includes('text/event-stream') || ct.includes('stream') || ct.includes('ndjson');
 
                 if (isStream) {
-                    const cloneRes = response.clone();
-                    cloneRes.text().then((bodyText) => {
-                        parseAndSaveCompletionsLog(bodyText, url, elapsed);
-                    }).catch(() => {});
+                    // Never clone and fully read a live model stream here. A clone tees the
+                    // response and the logging branch buffers the complete answer in memory,
+                    // which can stall the event loop and starve the active chat stream.
+                    try {
+                        console.log('[TokenGuard] Passing through streaming LLM response without buffering');
+                    } catch (_) {}
                     return response;
                 }
 
@@ -2457,6 +2496,7 @@ function wrapFetch(originalFetch) {
         } catch (e) {
             // 网络层瞬时失败：再重试最多 3 次（含首次共 4 次）后再交给 failover
             if (isCompletions) {
+                if (!retrySafe) throw e;
                 const delays = LLM_NETWORK_RETRY_DELAYS_MS;
                 let lastErr = e;
                 for (let i = 0; i < delays.length; i++) {
@@ -2571,23 +2611,11 @@ Module._load = function(request, parent, isMain) {
 
                         const startMs = Date.now();
                         const res = await origReq.apply(this, arguments);
-                        // undici.request 过去只 scrub 请求、不记账；补上响应旁路
+                        // Do not consume undici streams in the interception layer. Reading the
+                        // body into chunks before rebuilding it adds unbounded buffering and
+                        // delays delivery to the model client.
                         if (isLlmProxyPath(urlStr) && res && res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
-                            try {
-                                const chunks = [];
-                                for await (const chunk of res.body) {
-                                    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-                                }
-                                const buf = Buffer.concat(chunks);
-                                const elapsed = Date.now() - startMs;
-                                try {
-                                    parseAndSaveCompletionsLog(buf.toString('utf8'), urlStr, elapsed);
-                                } catch (e) {}
-                                const { Readable } = require('stream');
-                                return Object.assign({}, res, { body: Readable.from([buf]) });
-                            } catch (e) {
-                                return res;
-                            }
+                            return res;
                         }
                         return res;
                     };

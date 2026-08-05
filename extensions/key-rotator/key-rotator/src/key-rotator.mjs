@@ -11,6 +11,9 @@ import { EventEmitter } from 'events';
 export class KeyRotator {
     constructor(config) {
         this.strategy = config?.strategy || 'channel-aware';
+        this.apiKeys = (Array.isArray(config?.apiKeys) ? config.apiKeys : String(process.env.AGNES_API_KEYS || '').split(','))
+            .map((key) => String(key || '').trim())
+            .filter(Boolean);
         
         // 渠道分类
         this.messageChannels = ['openclaw-weixin', 'browser'];
@@ -133,14 +136,20 @@ export class KeyRotator {
      * 健康检查 (仅任务类，消息类固定用 key-1 不检查)
      */
     startHealthCheck() {
+        let running = false;
         setInterval(async () => {
+            if (running) return;
+            running = true;
+            try {
             for (const p of this.taskProviders) {
                 if (this.health[p] !== 'healthy') continue;
                 try {
+                    const key = this._getKey(p);
+                    if (!key) continue;
                     const ctrl = new AbortController();
                     const tid = setTimeout(() => ctrl.abort(), 5000);
                     const resp = await fetch('https://apihub.agnes-ai.com/v1/models', {
-                        headers: { 'Authorization': `Bearer ${this._getKey(p)}` },
+                        headers: { 'Authorization': `Bearer ${key}` },
                         signal: ctrl.signal
                     });
                     clearTimeout(tid);
@@ -149,20 +158,16 @@ export class KeyRotator {
                     this.recordResult(p, false);
                 }
             }
+            } finally {
+                running = false;
+            }
         }, 30000);
     }
     
     _getKey(provider) {
-        const map = {
-            'agnes-ai-1': 'sk-z2NHJlR99oODMYvS9C5u8qLMNf6hmc9vRm5JenvHHStTfxZn',
-            'agnes-ai-2': 'sk-ct7MSvbC8LqL1gGqJuoVCKgjtecXwbjIUZhXQ0gITEaksCS0',
-            'agnes-ai-3': 'sk-nZtkk9AAyZl3sbkv8Gw4R1R99NnkgUWhRGL4Cp0Dl7LSPsUu',
-            'agnes-ai-4': 'sk-Y6ORz4nnuXHUpwjdXv2WlmLMwCfPBMtmh69iuXxZkQtZazyV',
-            'agnes-ai-5': 'sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F',
-            'agnes-ai-6': 'sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh',
-            'agnes-ai-7': 'sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY'
-        };
-        return map[provider] || '';
+        const match = String(provider || '').match(/-(\d+)$/);
+        const index = match ? Number(match[1]) - 1 : -1;
+        return index >= 0 ? (this.apiKeys[index] || '') : '';
     }
     
     getStats() {

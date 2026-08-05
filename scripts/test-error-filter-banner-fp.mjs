@@ -32,6 +32,8 @@ const cases = [
   { name: 'real-双剑合璧-advice', text: realBlocked, expect: false },
   { name: 'short-rate-limit-banner', text: '⚠️ All models are temporarily rate-limited. Please try again in a few minutes.', expect: true },
   { name: 'llm-failed', text: 'LLM request failed', expect: true },
+  { name: 'assistant-turn-empty-failure', text: '[assistant turn failed before producing content]', expect: true },
+  { name: 'idle-timeout', text: 'LLM idle timeout (60s): no response from model', expect: true },
   { name: 'compaction-diag', text: 'Auto-compaction could not recover this turn. Context overflow: prompt too large. Please use /new to start. compaction-diag diagId=ovf-123', expect: true },
   { name: '所有模型推荐-conversational', text: '回主子！所有模型里小的更推荐这两个当主用和备用。', expect: false },
   { name: 'message-colon-normal', text: '回主子，刚才那条 Message: hello 只是举例，不是报错。', expect: false },
@@ -65,6 +67,8 @@ for (const c of cases) {
 
 const rewriteCases = [
   { name: 'rewrite-llm-failed', text: 'LLM request failed', expect: t.NETWORK_FAILURE_USER_NOTICE },
+  { name: 'rewrite-empty-turn-failure', text: '[assistant turn failed before producing content]', expect: t.NETWORK_FAILURE_USER_NOTICE },
+  { name: 'rewrite-idle-timeout', text: 'LLM idle timeout (60s): no response from model', expect: t.NETWORK_FAILURE_USER_NOTICE },
   { name: 'rewrite-all-models-failed', text: 'All models failed (2): gemini/x: Connection error. (timeout)', expect: t.NETWORK_FAILURE_USER_NOTICE },
   { name: 'rewrite-already-zh', text: t.NETWORK_FAILURE_USER_NOTICE, expect: null },
   { name: 'rewrite-rate-limit', text: '⚠️ All models are temporarily rate-limited. Please try again in a few minutes.', expect: t.RATE_LIMIT_USER_NOTICE },

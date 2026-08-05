@@ -34,9 +34,9 @@ const PROACTIVE_MIN_COMPACTIONS = Number(process.env.NEXORA_PROACTIVE_ROLLOVER_C
 const PROACTIVE_DELAY_MS = 8_000;
 const ARCHIVE_NOTE_DIR_REL = path.join('workspace', 'compact-history');
 const ACTIVE_CONTEXT_HEADING = '## Active session context';
-const CONTINUITY_SUMMARY_MAX = 900;
-const CONTINUITY_PROMPT_MAX = 700;
-const RECENT_TURN_PAIRS = 6;
+const CONTINUITY_SUMMARY_MAX = 1500;
+const CONTINUITY_PROMPT_MAX = 1400;
+const RECENT_TURN_PAIRS = 8;
 const ARCHIVE_TURN_PAIRS = 24;
 const ARCHIVE_FILE_MAX_CHARS = 48_000;
 const LAST_ARCHIVE_REL = path.join('workspace', 'memory', 'last-session-archive.md');
@@ -45,7 +45,7 @@ const LAST_ARCHIVE_REL = path.join('workspace', 'memory', 'last-session-archive.
  *  这保证群聊等不注入 MEMORY.md 的会话换新后也不失忆。 */
 const PENDING_CONTINUITY_DIR_REL = 'overflow-rollover.pending';
 const PENDING_CONTINUITY_TTL_MS = 48 * 60 * 60 * 1000;
-const PENDING_INJECT_MAX_CHARS = 1200;
+const PENDING_INJECT_MAX_CHARS = 1800;
 
 /** @type {Map<string, { text: string, at: number }>} */
 const lastUserBySession = new Map();
@@ -60,6 +60,8 @@ const lastRolloverAt = new Map();
 const inFlight = new Map();
 /** @type {Map<string, ReturnType<typeof setTimeout>>} */
 const pendingScheduleTimers = new Map();
+/** before_prompt_build 已注入、等待 agent_end 成功确认的延续记忆。 */
+const pendingContinuityInjectedAt = new Map();
 /** 主进程触发轮询定时器句柄；plugin shutdown 时 clearInterval，避免定时器泄漏 */
 let pollTimer = null;
 /** 上次清理过期 Map 条目的时间戳（节流：最多每 60s 清一次） */
@@ -375,6 +377,75 @@ function unwrapUserQuestion(lastUserText) {
   return t;
 }
 
+function clipContinuityText(value, maxChars) {
+  const max = Math.max(40, Number(maxChars) || 0);
+  let text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  // 渠道可能把图片 OCR/视觉描述拼进用户消息。优先保留真正的 User text，
+  // 避免一大段 Description 把后续问题和任务状态挤出摘要。
+  const imageUserText = text.match(/\bUser text:\s*([\s\S]*?)(?:\s+Description:|$)/i);
+  if (imageUserText && String(imageUserText[1] || '').trim()) {
+    text = String(imageUserText[1]).trim();
+  }
+  text = text
+    .replace(/\[media attached:[^\]]+\]/gi, '[图片]')
+    .replace(/(?:^|\s)-\s*Images?:\s*\S+/gi, ' [图片] ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1).trimEnd() + '…';
+}
+
+function readPreviousActiveContext(maxChars = 520) {
+  try {
+    const file = workspaceMemoryPath();
+    if (!fs.existsSync(file)) return '';
+    const raw = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+    const match = raw.match(/^## Active session context\s*\n([\s\S]*?)(?=^##\s+|(?![\s\S]))/im);
+    if (!match) return '';
+    let body = String(match[1] || '')
+      .split('\n')
+      .filter((line) => !/^-\s*(更新|说明|完整归档):/.test(line.trim()))
+      .join('\n')
+      .trim();
+    if (!body) return '';
+    if (body.length <= maxChars) return body;
+
+    // 同时保留摘要开头和结尾：开头通常是当前任务，结尾通常是最新进展。
+    const head = Math.floor(maxChars * 0.55);
+    const tail = Math.max(80, maxChars - head - 3);
+    body = body.slice(0, head).trimEnd() + '\n…\n' + body.slice(-tail).trimStart();
+    return body;
+  } catch (_) {
+    return '';
+  }
+}
+
+function formatRecentTurnsForContinuity(turns, maxChars) {
+  const selected = [];
+  let used = 0;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i] || {};
+    const q = clipContinuityText(turn.q, 260);
+    const a = clipContinuityText(turn.a, 360);
+    if (!q && !a) continue;
+    const block = `用户: ${q || '(无)'}\n助手: ${a || '(无)'}`;
+    const cost = block.length + (selected.length ? 4 : 0);
+    if (selected.length && used + cost > maxChars) break;
+    if (!selected.length && cost > maxChars) {
+      selected.unshift(clipContinuityText(block, maxChars));
+      break;
+    }
+    selected.unshift(block);
+    used += cost;
+  }
+  return selected
+    .map((block, index) => `${index + 1}. ${block}`)
+    .join('\n');
+}
+
 /**
  * 从即将归档的 transcript 抽一段短摘要（不调大模型，溢出时 LLM 已不可用）。
  * 用于写入 MEMORY.md / 续问上下文，避免换新会话后完全失忆。
@@ -385,27 +456,42 @@ function buildContinuitySummary(sessionFile, lastUserText, opts = {}) {
   const { facts, turns } = extractTranscriptTurns(sessionFile);
   const recent = turns.slice(-maxPairs);
   const parts = [];
+  let remaining = maxChars;
+  const addPart = (text) => {
+    const value = String(text || '').trim();
+    if (!value || remaining <= 0) return;
+    const separatorCost = parts.length ? 2 : 0;
+    if (remaining <= separatorCost) return;
+    const clipped = clipContinuityText(value, remaining - separatorCost);
+    if (!clipped) return;
+    parts.push(clipped);
+    remaining -= clipped.length + separatorCost;
+  };
+
+  const last = clipContinuityText(unwrapUserQuestion(lastUserText), 360);
+  if (last && !isNoiseUserText(last)) {
+    addPart('当前待续问题: ' + last);
+  }
   if (facts.length) {
     const uniq = [...new Set(facts)].slice(-5);
-    parts.push('关键约定/身份: ' + uniq.join('；'));
-  }
-  if (recent.length) {
-    parts.push(
-      '近期对话:\n' +
-        recent
-          .map((t, i) => `${i + 1}. 用户: ${t.q}\n   助手: ${t.a}`)
-          .join('\n')
-    );
-  }
-  const last = String(lastUserText || '').trim();
-  if (last && !isNoiseUserText(last)) {
-    parts.push('待续问: ' + last.slice(0, 200));
+    addPart('关键约定/身份: ' + uniq.join('；'));
   }
 
-  let out = parts.join('\n').trim();
-  if (!out) return '';
-  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
-  return out;
+  if (recent.length && remaining > 120) {
+    // 给上一轮摘要预留一块预算，既保最新对话，也不断掉更早的上下文链。
+    const reserveForPrevious = Math.min(420, Math.floor(remaining * 0.34));
+    const recentText = formatRecentTurnsForContinuity(
+      recent,
+      Math.max(80, remaining - reserveForPrevious - 6)
+    );
+    if (recentText) addPart('近期对话:\n' + recentText);
+  }
+
+  // 把上一轮 Active context 继续带下去，避免多次 rollover 后记忆逐层衰减。
+  const previous = readPreviousActiveContext(Math.min(420, Math.max(100, remaining - 4)));
+  if (previous) addPart('此前延续要点:\n' + previous);
+
+  return parts.join('\n\n').trim();
 }
 
 function extractTranscriptTurns(sessionFile) {
@@ -424,14 +510,14 @@ function extractTranscriptTurns(sessionFile) {
         }
         const msg = obj && obj.message;
         if (!msg || !msg.role) continue;
-        const text = msgText(msg);
+        const text = clipContinuityText(msgText(msg), msg.role === 'user' ? 420 : 560);
         if (!text || text.length < 2) continue;
         if (msg.role === 'user') {
           if (isNoiseUserText(text)) continue;
           if (/^(我叫|我的名字|我是|你是谁|你叫什么|记住|偏好|不要|禁止|喜欢|不喜欢|以后请|请你记住)/.test(text)) {
             facts.push(text.slice(0, 120));
           }
-          pendingUser = text.slice(0, 800);
+          pendingUser = text;
         } else if (msg.role === 'assistant' && pendingUser) {
           if (isOverflowRecoveryText(text) || isRateLimitBannerText(text)) {
             pendingUser = null;
@@ -439,7 +525,7 @@ function extractTranscriptTurns(sessionFile) {
           }
           turns.push({
             q: pendingUser,
-            a: text.slice(0, 1200),
+            a: text,
           });
           pendingUser = null;
         }
@@ -551,23 +637,47 @@ function writePendingContinuity(sessionKey, continuity, lastUserText) {
   }
 }
 
-/** 取出并清除挂起的延续上下文（一次性；注入后即随转录成为会话历史） */
-function consumePendingContinuity(sessionKey) {
+/** 读取挂起的延续上下文。这里只读不删：模型本轮成功后再确认删除。 */
+function readPendingContinuity(sessionKey) {
   try {
     if (!sessionKey) return null;
     const file = pendingContinuityFile(sessionKey);
     if (!fs.existsSync(file)) return null;
     const raw = fs.readFileSync(file, 'utf8');
-    try {
-      fs.unlinkSync(file);
-    } catch (_) {}
     const obj = JSON.parse(raw);
     if (!obj || typeof obj !== 'object') return null;
-    if (obj.at && Date.now() - Number(obj.at) > PENDING_CONTINUITY_TTL_MS) return null;
+    if (obj.at && Date.now() - Number(obj.at) > PENDING_CONTINUITY_TTL_MS) {
+      try {
+        fs.unlinkSync(file);
+      } catch (_) {}
+      return null;
+    }
     return obj;
   } catch (_) {
     return null;
   }
+}
+
+function acknowledgePendingContinuity(sessionKey) {
+  try {
+    if (!sessionKey || !pendingContinuityInjectedAt.has(sessionKey)) return false;
+    const file = pendingContinuityFile(sessionKey);
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch (_) {
+      return false;
+    }
+    pendingContinuityInjectedAt.delete(sessionKey);
+    console.log(`[${PLUGIN_ID}] pending continuity acknowledged key=${sessionKey}`);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function releasePendingContinuityInjection(sessionKey) {
+  if (!sessionKey) return;
+  pendingContinuityInjectedAt.delete(sessionKey);
 }
 
 function buildPendingInjectionBlock(pending) {
@@ -650,7 +760,9 @@ function upsertActiveSessionContext(summary, archivePath) {
       .map((s) => [s.heading, ...s.lines].join('\n').replace(/\n+$/, '') + '\n')
       .join('\n');
 
-    const MAX_MEMORY = 2400; // 对齐 bootstrapMaxChars≈2500，避免 Active 段被截到中间丢失
+    // memory-rotate 的保护上限是 4500；这里也保持同一量级，避免新摘要变长后把
+    // 核心身份/偏好直接截掉。Active context 仍位于文件最前，bootstrap 会优先读到它。
+    const MAX_MEMORY = 4500;
     if (next.length > MAX_MEMORY) {
       let head = (title.join('\n').trim() || '# MEMORY.md') + '\n\n';
       head += [active.heading, ...active.lines].join('\n').replace(/\n+$/, '') + '\n\n';
@@ -983,6 +1095,14 @@ async function gatewayRequest(api, method, params) {
   return gw.request(method, params);
 }
 
+function isOriginatingRouteValidationError(error) {
+  const text = String((error && (error.message || error.code)) || error || '');
+  return (
+    /(?:invalid|unknown|unexpected|unsupported|unrecognized|additional propert|schema|validation)[\s\S]{0,120}originating/i.test(text) ||
+    /originating[\s\S]{0,120}(?:invalid|unknown|unexpected|unsupported|unrecognized|additional propert|schema|validation)/i.test(text)
+  );
+}
+
 async function performRollover(api, sessionKey, lastUserText, via, opts = {}) {
   if (!sessionKey) return false;
   if (inFlight.has(sessionKey)) return false;
@@ -1086,16 +1206,23 @@ async function performRollover(api, sessionKey, lastUserText, via, opts = {}) {
       );
     }
 
-    // deliver:true + 显式 originating*：覆盖微信 dmScope=main（仅 deliver 会掉进内部通道）
-    // 失败重试一次（不带 originating*，路由字段异常时仍能走默认投递）；仍失败则抛给外层兜底
+    // deliver:true + 显式 originating*：覆盖微信 dmScope=main（仅 deliver 会掉进内部通道）。
+    // 只有网关明确拒绝 originating* 字段时才去掉路由重试；网络断开/超时的投递结果未知，
+    // 盲目重发会导致同一问题被回答两次并重复计费。
     try {
       await gatewayRequest(api, 'chat.send', buildChatSendParams(sessionKey, continueText, deliveryRoute));
     } catch (eSend) {
-      console.warn(
-        `[${PLUGIN_ID}] chat.send failed, retrying without originating route:`,
-        eSend && eSend.message
-      );
-      await gatewayRequest(api, 'chat.send', buildChatSendParams(sessionKey, continueText, null));
+      if (deliveryRoute && isOriginatingRouteValidationError(eSend)) {
+        console.warn(
+          `[${PLUGIN_ID}] chat.send rejected originating route, retrying without route:`,
+          eSend && eSend.message
+        );
+        await gatewayRequest(api, 'chat.send', buildChatSendParams(sessionKey, continueText, null));
+      } else {
+        const uncertainError = eSend instanceof Error ? eSend : new Error(String(eSend || 'chat.send failed'));
+        uncertainError.nexoraDeliveryUncertain = true;
+        throw uncertainError;
+      }
     }
 
     lastRolloverAt.set(sessionKey, Date.now());
@@ -1123,15 +1250,19 @@ async function performRollover(api, sessionKey, lastUserText, via, opts = {}) {
       try {
         writePendingContinuity(sessionKey, continuity, lastUserText);
       } catch (_) {}
-      try {
-        await gatewayRequest(
-          api,
-          'chat.send',
-          buildChatSendParams(sessionKey, OVERFLOW_RETRY_USER_NOTICE, deliveryRoute)
-        );
-        console.log(`[${PLUGIN_ID}] sent retry notice after resume failure key=${sessionKey}`);
-      } catch (eNotice) {
-        console.error(`[${PLUGIN_ID}] retry notice send failed:`, eNotice && eNotice.message);
+      if (!(e && e.nexoraDeliveryUncertain)) {
+        try {
+          await gatewayRequest(
+            api,
+            'chat.send',
+            buildChatSendParams(sessionKey, OVERFLOW_RETRY_USER_NOTICE, deliveryRoute)
+          );
+          console.log(`[${PLUGIN_ID}] sent retry notice after resume failure key=${sessionKey}`);
+        } catch (eNotice) {
+          console.error(`[${PLUGIN_ID}] retry notice send failed:`, eNotice && eNotice.message);
+        }
+      } else {
+        console.warn(`[${PLUGIN_ID}] delivery outcome uncertain; skipped duplicate retry notice key=${sessionKey}`);
       }
     }
     return false;
@@ -1342,6 +1473,9 @@ function pruneStaleState(now = Date.now()) {
     for (const [k, at] of recentUserFacingDeliveryAt) {
       if (now - (Number(at) || 0) > STATE_MAX_AGE_MS) recentUserFacingDeliveryAt.delete(k);
     }
+    for (const [k, at] of pendingContinuityInjectedAt) {
+      if (now - (Number(at) || 0) > STATE_MAX_AGE_MS) pendingContinuityInjectedAt.delete(k);
+    }
   } catch (_) {}
 }
 
@@ -1384,6 +1518,7 @@ function shutdownPlugin() {
       pendingScheduleTimers.delete(k);
     }
   } catch (_) {}
+  pendingContinuityInjectedAt.clear();
 }
 
 function register(api) {
@@ -1400,13 +1535,9 @@ function register(api) {
     if (pollTimer && typeof pollTimer.unref === 'function') pollTimer.unref();
   } catch (_) {}
 
-  // shutdown 钩子：清掉轮询定时器与所有挂起的调度定时器
-  try {
-    api.on('shutdown', () => shutdownPlugin());
-  } catch (_) {}
-  try {
-    api.on('plugin_unload', () => shutdownPlugin());
-  } catch (_) {}
+  // Cleanup is exposed through pluginEntry.onShutdown/shutdown below. Registering
+  // these names through api.on creates "unknown typed hook" warnings on current
+  // OpenClaw builds and does not provide any additional lifecycle coverage.
 
   // 换会话后的第一轮：把挂起的延续上下文注入 prompt（随转录永久留在新会话历史里）
   try {
@@ -1417,8 +1548,11 @@ function register(api) {
         // 心跳/定时任务回合不消费：延续上下文要留给用户的下一条真实消息
         const trig = String((ctx && ctx.trigger) || (event && event.trigger) || '');
         if (/heartbeat|cron/i.test(trig)) return;
-        const pending = consumePendingContinuity(key);
+        // 同一模型回合可能多次构建 prompt，只注入一次；文件保留到 agent_end 成功。
+        if (pendingContinuityInjectedAt.has(key)) return;
+        const pending = readPendingContinuity(key);
         if (!pending) return;
+        pendingContinuityInjectedAt.set(key, Date.now());
         console.log(`[${PLUGIN_ID}] inject pending continuity into new session key=${key}`);
         return { prependContext: buildPendingInjectionBlock(pending) };
       } catch (e) {
@@ -1451,15 +1585,19 @@ function register(api) {
 
   api.on('agent_end', async (event, ctx) => {
     try {
+      const key = resolveSessionKey(event, ctx);
       // 成功回合绝不因历史残留文案触发换新；失败且像溢出/角色冲突才 rollover
       if (event && event.success !== false) {
+        // 只有模型成功完成本轮后，才确认删除本轮注入的挂起记忆。
+        acknowledgePendingContinuity(key);
         // 成功回合只做预算体检：吃紧就预防式换会话，绝不让用户撞上真溢出
         maybeScheduleProactiveRollover(api, event, ctx);
         return;
       }
+      // 请求失败/断流时保留文件，并允许下一轮重新注入。
+      releasePendingContinuityInjection(key);
       if (!looksLikeOverflowFailure(event, ctx)) return;
       // reset 路径：只认真实 sessionKey，禁止「最近会话」兜底以免清错人（defect 1a）
-      const key = resolveSessionKey(event, ctx);
       if (!key) {
         console.warn(`[${PLUGIN_ID}] agent_end overflow without sessionKey — skip rollover (no fallback)`);
         return;
@@ -1637,6 +1775,8 @@ export {
   buildContinuitySummary,
   buildContinuePrompt,
   upsertActiveSessionContext,
+  writePendingContinuity,
+  pendingContinuityFile,
   readSessionDeliveryRoute,
   buildChatSendParams,
   writeReadableSessionArchive,

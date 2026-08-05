@@ -251,6 +251,10 @@ function isNetworkFailureBanner(text) {
   // 长对话里偶尔提到 connection 不改写
   if (looksLikeConversationalReply(raw) && raw.length >= 160) return false;
   if (/^LLM request failed\.?$/i.test(raw)) return true;
+  if (/^\[assistant turn failed before producing content\]$/i.test(raw)) return true;
+  if (/^Connection error\.?$/i.test(raw)) return true;
+  if (/LLM idle timeout/i.test(raw) && raw.length <= 320) return true;
+  if (/User location is not supported for the API use/i.test(raw) && raw.length <= 600) return true;
   if (/Connection failed.*network or proxy/i.test(raw)) return true;
   if (/LLM request failed:\s*network connection error/i.test(raw)) return true;
   if (/network connection error/i.test(raw) && raw.length <= 280) return true;

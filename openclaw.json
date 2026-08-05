@@ -10,7 +10,7 @@
     "providers": {
       "agnes-ai": {
         "baseUrl": "https://apihub.agnes-ai.com/v1",
-        "apiKey": "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh",
+        "apiKey": "",
         "api": "openai-completions",
         "models": [
           {

@@ -201,6 +201,40 @@ function ensureLatencySafeConfig(config, opts = {}) {
   if (!cfg.models.providers) cfg.models.providers = {};
   const providers = cfg.models.providers;
 
+  // Chat turns must not fail just because the optional semantic-memory
+  // embedding backend has no credentials. When the user has not explicitly
+  // selected a memory provider and no OpenAI embedding key is available,
+  // choose OpenClaw's deterministic FTS-only mode. This keeps memory_search
+  // usable for keyword recall instead of returning "unavailable" and aborting
+  // the assistant turn. An explicit user provider is always respected.
+  const memorySearch = isObject(ad.memorySearch) ? ad.memorySearch : null;
+  const hasOpenAiEmbeddingKey = Boolean(
+    String(process.env.OPENAI_API_KEY || '').trim() ||
+    (isObject(providers.openai) && String(providers.openai.apiKey || '').trim())
+  );
+  if (!memorySearch && !hasOpenAiEmbeddingKey) {
+    ad.memorySearch = { provider: 'none' };
+    changes.push('agents.defaults.memorySearch.provider: unset -> none (FTS fallback)');
+  }
+
+  // A fallback identical to the primary is not failover: it repeats the same
+  // failing request, increases latency, and can double-charge on ambiguous
+  // upstream failures. Keep only distinct, explicitly configured fallbacks.
+  if (isObject(ad.model) && typeof ad.model.primary === 'string' && Array.isArray(ad.model.fallbacks)) {
+    const primary = ad.model.primary.trim();
+    const seenFallbacks = new Set();
+    const nextFallbacks = ad.model.fallbacks.filter((value) => {
+      const ref = String(value || '').trim();
+      if (!ref || ref === primary || seenFallbacks.has(ref)) return false;
+      seenFallbacks.add(ref);
+      return true;
+    });
+    if (JSON.stringify(nextFallbacks) !== JSON.stringify(ad.model.fallbacks)) {
+      ad.model.fallbacks = nextFallbacks;
+      changes.push('agents.defaults.model.fallbacks: removed duplicate/primary entries');
+    }
+  }
+
   if (isObject(providers.ollama) && Array.isArray(providers.ollama.models)) {
     for (const model of providers.ollama.models) {
       if (!isObject(model)) continue;
@@ -529,17 +563,6 @@ function ensureLatencySafeConfig(config, opts = {}) {
     if (!Number.isFinite(pt) || pt < 300) {
       prov.timeoutSeconds = 600;
       changes.push('models.providers.ten.timeoutSeconds: -> 600');
-    }
-  }
-
-  // 未绑定渠道插件默认关掉，减少工具 schema 体积（用户启用通讯时再开）
-  if (!cfg.plugins) cfg.plugins = {};
-  if (!cfg.plugins.entries) cfg.plugins.entries = {};
-  for (const idle of ['slack', 'whatsapp', 'matrix', 'voice-call']) {
-    if (!isObject(cfg.plugins.entries[idle])) continue;
-    if (cfg.plugins.entries[idle].enabled !== false) {
-      cfg.plugins.entries[idle].enabled = false;
-      changes.push(`plugins.entries.${idle}.enabled: -> false`);
     }
   }
 

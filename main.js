@@ -1,5 +1,5 @@
 // main.js - Electron 主进程入口
-const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session, dialog, clipboard, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session, dialog, clipboard, protocol, crashReporter } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -109,6 +109,48 @@ function safeMainErrorLogPath() {
     return path.join(resolveOpenClawStateDir(), 'main_error.log');
 }
 
+function appendMainDiagnostic(kind, error, details = {}) {
+    try {
+        const logPath = safeMainErrorLogPath();
+        fs.mkdirSync(path.dirname(logPath), { recursive: true });
+        try {
+            const stat = fs.statSync(logPath);
+            if (stat.size > 4 * 1024 * 1024) {
+                const previous = `${logPath}.previous`;
+                try { if (fs.existsSync(previous)) fs.unlinkSync(previous); } catch (_) {}
+                try { fs.renameSync(logPath, previous); } catch (_) {
+                    try { fs.writeFileSync(logPath, '', 'utf8'); } catch (__) {}
+                }
+            }
+        } catch (_) {}
+        const memory = (() => {
+            try { return process.memoryUsage(); } catch (_) { return null; }
+        })();
+        const record = {
+            time: new Date().toISOString(),
+            kind,
+            pid: process.pid,
+            memory,
+            details,
+            error: error
+                ? String(error.stack || error.message || error)
+                : null
+        };
+        fs.appendFileSync(logPath, JSON.stringify(record) + '\n', 'utf8');
+    } catch (_) {}
+}
+
+try {
+    crashReporter.start({
+        productName: 'Nexora Agent',
+        companyName: 'Nexora Agent',
+        submitURL: 'https://localhost.invalid/nexora-crash',
+        uploadToServer: false,
+        compress: false,
+        ignoreSystemCrashHandler: false
+    });
+} catch (_) {}
+
 /**
  * 同步应急网络清理：崩溃/硬退出时(绕过 will-quit)必须做的两件事——
  * 1) 若开过系统代理，清掉注册表代理开关，否则浏览器等全部走向已死端口 = 整机网络黑洞；
@@ -135,19 +177,21 @@ function emergencyNetworkCleanupSync() {
 process.on('exit', () => { emergencyNetworkCleanupSync(); });
 
 process.on('uncaughtException', (err) => {
-    try {
-        const logPath = safeMainErrorLogPath();
-        fs.mkdirSync(path.dirname(logPath), { recursive: true });
-        fs.writeFileSync(logPath, err.stack || err.message, 'utf8');
-    } catch(e) {}
+    appendMainDiagnostic('uncaughtException', err);
     emergencyNetworkCleanupSync();
 });
 process.on('unhandledRejection', (reason) => {
-    try {
-        const logPath = safeMainErrorLogPath();
-        fs.mkdirSync(path.dirname(logPath), { recursive: true });
-        fs.writeFileSync(logPath, String(reason), 'utf8');
-    } catch(e) {}
+    appendMainDiagnostic('unhandledRejection', reason);
+});
+
+app.on('render-process-gone', (event, webContents, details) => {
+    appendMainDiagnostic('render-process-gone', null, details || {});
+});
+app.on('child-process-gone', (event, details) => {
+    appendMainDiagnostic('child-process-gone', null, details || {});
+});
+app.on('gpu-process-crashed', (event, killed) => {
+    appendMainDiagnostic('gpu-process-crashed', null, { killed: !!killed });
 });
 
 // 打包后网关运行时在用户目录解压；开发态则是工程根目录。
@@ -467,6 +511,20 @@ async function checkAndHealSandboxNode() {
     }
     const sandboxDir = resolveAppFsPath('.node-sandbox');
     const nodeExePath = path.join(sandboxDir, 'node.exe');
+
+    // A compliant bundled Node does not change during one app lifetime. Avoid
+    // spawning a child process on every manual/channel restart while still
+    // invalidating the cache when the executable is replaced.
+    let nodeProbeKey = 'missing';
+    try {
+        if (fs.existsSync(nodeExePath)) {
+            const st = fs.statSync(nodeExePath);
+            nodeProbeKey = `${st.size}:${st.mtimeMs}`;
+        }
+    } catch (_) {}
+    if (global.__nexoraSandboxNodeHealthyKey === nodeProbeKey && nodeProbeKey !== 'missing') {
+        return;
+    }
     
     let isOk = false;
     let currentVersion = 'none';
@@ -511,6 +569,7 @@ async function checkAndHealSandboxNode() {
     }
     
     if (isOk) {
+        global.__nexoraSandboxNodeHealthyKey = nodeProbeKey;
         console.log(`[SandboxCheck] Sandbox Node version ${currentVersion} and SQLite ${currentSqlite} are compliant. No upgrade needed.`);
         return;
     }
@@ -687,6 +746,7 @@ let mainWindow = null;
 let tray = null;
 let gatewayProcess = null;
 let gatewayStartInFlight = null;
+let gatewayLastStartSource = '';
 // 用户在「启动进行中」（gatewayProcess 尚未 fork、gatewayStartInFlight 挂起）时点停止的取消标记：
 // 启动流程会在关键节点（尤其 fork 前）检查它，若已请求取消则中止启动，避免停止被静默吞掉。
 let gatewayStartCancelRequested = false;
@@ -704,7 +764,7 @@ function getOverflowRolloverTriggerHelper() {
     }
     return overflowRolloverTriggerHelper;
 }
-/** 意外退出自动拉起：5 分钟内最多 3 次，避免微信发图等硬崩变成连环重启 */
+/** 意外退出自动拉起：5 分钟内最多 3 次，避免启动失败后只能靠用户重开应用。 */
 let gatewayCrashRestartTimer = null;
 let gatewayCrashRestartAt = [];
 const GATEWAY_CRASH_RESTART_WINDOW_MS = 5 * 60 * 1000;
@@ -734,26 +794,62 @@ function resetGatewayCrashRestartBudget() {
     gatewayCrashRestartAt = [];
 }
 
-/**
- * 网关子进程意外退出：不再自动拉起（仅允许手动 / 设置自启启用）。
- */
-function scheduleGatewayCrashRestart(exitCode) {
+function scheduleGatewayCrashRestart(exitCode, options = {}) {
     if (isQuitting) return false;
     clearGatewayCrashRestartSchedule();
+    const now = Date.now();
+    gatewayCrashRestartAt = gatewayCrashRestartAt.filter((at) => now - at < GATEWAY_CRASH_RESTART_WINDOW_MS);
+    if (gatewayCrashRestartAt.length >= GATEWAY_CRASH_RESTART_MAX) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(
+                'gateway-log',
+                `\n[System] 核心进程连续异常退出（码 ${exitCode}），已暂停自动重试，请点击左上角手动启动。\n`
+            );
+            mainWindow.webContents.send('gateway-status', 'stopped');
+            try { showNotification('Nexora Agent 启动失败', '核心进程连续异常退出，请检查日志后重试。'); } catch (_) {}
+        }
+        return false;
+    }
+    gatewayCrashRestartAt.push(now);
+    const attempt = gatewayCrashRestartAt.length;
+    const delayMs = Math.min(8000, 1200 * attempt);
+    appendMainDiagnostic('gateway-auto-restart-scheduled', null, {
+        exitCode,
+        attempt,
+        delayMs,
+        source: gatewayLastStartSource,
+    });
     if (mainWindow) {
         mainWindow.webContents.send(
             'gateway-log',
-            `\n[System] 核心进程意外退出（码 ${exitCode}）。已禁止自动重启，请点击左上角手动启动 Nexora Agent。\n`
+            `\n[System] 核心进程意外退出（码 ${exitCode}），将在 ${Math.ceil(delayMs / 1000)} 秒后自动重试（${attempt}/${GATEWAY_CRASH_RESTART_MAX}）。\n`
         );
-        mainWindow.webContents.send('gateway-status', 'stopped');
+        mainWindow.webContents.send('gateway-status', 'starting');
         try {
             showNotification(
-                'Nexora Agent 已停止',
-                '核心异常退出，已禁止自动拉起，请手动点击左上角启动。'
+                'Nexora Agent 正在恢复',
+                `核心进程异常退出，正在自动重试（${attempt}/${GATEWAY_CRASH_RESTART_MAX}）。`
             );
         } catch (e) {}
     }
-    return false;
+    gatewayCrashRestartTimer = setTimeout(async () => {
+        gatewayCrashRestartTimer = null;
+        if (isQuitting || gatewayStartInFlight) return;
+        try {
+            if (gatewayProcess && options.force) {
+                const restartHistory = gatewayCrashRestartAt.slice();
+                await stopGatewayProcess({ preserveClash: true });
+                // stopGatewayProcess normally resets the retry budget for a user stop;
+                // recovery-triggered recycling must keep the bounded crash history.
+                gatewayCrashRestartAt = restartHistory;
+            }
+            if (gatewayProcess) return;
+            await withGatewayRestartPermit(() => startGatewayProcess({ source: 'reload' }));
+        } catch (e) {
+            console.error('[Gateway] automatic crash recovery failed:', e && e.message ? e.message : e);
+        }
+    }, delayMs);
+    return true;
 }
 
 function probeGatewayPort(port, timeoutMs = 500) {
@@ -997,6 +1093,17 @@ function startGatewayHttpReadyWatch(port) {
         tries += 1;
         if (tries > 180) {
             stopGatewayHttpReadyWatch();
+            appendMainDiagnostic('gateway-http-ready-timeout', null, {
+                port: targetPort,
+                tries,
+            });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send(
+                    'gateway-log',
+                    `\n[System] Gateway 进程已启动，但 ${Math.ceil(tries / 2)} 秒内 HTTP 接口未就绪，正在自动回收并重试。\n`
+                );
+            }
+            scheduleGatewayCrashRestart(-2, { force: true });
             return;
         }
         let settled = false;
@@ -1274,7 +1381,14 @@ function deployRuntimeArtifacts() {
         }) || srcCandidates.find((p) => fs.existsSync(p));
         if (!src) continue;
         try {
-            fs.copyFileSync(src, path.join(dir, name));
+            const dest = path.join(dir, name);
+            let copyNeeded = !fs.existsSync(dest);
+            if (!copyNeeded) {
+                const srcStat = fs.statSync(src);
+                const destStat = fs.statSync(dest);
+                copyNeeded = srcStat.size !== destStat.size || srcStat.mtimeMs > destStat.mtimeMs + 1;
+            }
+            if (copyNeeded) fs.copyFileSync(src, dest);
         } catch (e) {
             console.warn(`[TokenGuard] copy ${name} failed:`, e.message);
         }
@@ -1341,9 +1455,16 @@ function pruneStalePluginConfigEntries(config) {
         return false;
     };
 
+    const staleIds = new Set([
+        'key-rotator-proxy',
+        'system-control',
+        'channel-router',
+        LONG_TERM_MEMORY_UI_ID,
+    ]);
+
     for (const id of Object.keys(entries)) {
         // 安装残留 / 明显无效 id
-        if (id.startsWith('.') || id === 'key-rotator-proxy' || id === 'system-control' || id === 'channel-router') {
+        if (id.startsWith('.') || staleIds.has(id)) {
             delete entries[id];
             changed = true;
             continue;
@@ -1360,19 +1481,12 @@ function pruneStalePluginConfigEntries(config) {
                 'voice-call', 'openclaw-weixin'
             ]);
             if (channelIds.has(id)) {
-                delete entries[id];
-                if (installs[id]) {
-                    delete installs[id];
-                    changed = true;
-                }
-                if (Array.isArray(config.plugins.allow)) {
-                    const next = config.plugins.allow.filter((x) => x !== id);
-                    if (next.length !== config.plugins.allow.length) {
-                        config.plugins.allow = next;
-                        changed = true;
-                    }
-                }
-                changed = true;
+                // Never silently disable a user-configured communication
+                // channel during startup. A package can be temporarily
+                // unavailable while runtime extraction is finishing; keeping
+                // entries/allow/install metadata lets the channel recover on
+                // the next probe instead of appearing "closed" to the user.
+                console.warn(`[PluginSeed] Preserve configured communication channel: ${id}`);
                 continue;
             }
             delete entries[id];
@@ -1382,7 +1496,7 @@ function pruneStalePluginConfigEntries(config) {
 
     if (Array.isArray(config.plugins.allow)) {
         const nextAllow = config.plugins.allow.filter((id) => {
-            if (id === LONG_TERM_MEMORY_UI_ID) return false;
+            if (staleIds.has(id)) return false;
             if (id && id.startsWith('.')) return false;
             if (!entries[id]) return false;
             return true;
@@ -1391,6 +1505,75 @@ function pruneStalePluginConfigEntries(config) {
             config.plugins.allow = nextAllow;
             changed = true;
         }
+    }
+
+    // Remove install metadata for plugins that no longer exist. Leaving these
+    // records behind makes OpenClaw attempt npm repair on every cold start.
+    for (const id of Object.keys(installs)) {
+        if (staleIds.has(id) || id.startsWith('.')) {
+            delete installs[id];
+            changed = true;
+        }
+    }
+
+    // Explicit load paths are authoritative in Nexora. A stale staging folder
+    // or an old extension path can otherwise be auto-discovered as a second
+    // copy of the same plugin, producing duplicate-id warnings and extra boot
+    // work. Keep user extensions and bundled communication paths intact.
+    if (Array.isArray(loadPaths) && config.plugins.load) {
+        const nextPaths = loadPaths.filter((raw) => {
+            if (typeof raw !== 'string' || !raw.trim()) return false;
+            const normalized = raw.replace(/\\/g, '/').toLowerCase();
+            if (normalized.includes('/.openclaw-install-stage-')) return false;
+            for (const id of staleIds) {
+                if (normalized.endsWith('/' + id) || normalized.includes('/' + id + '/')) return false;
+            }
+            return true;
+        });
+        if (JSON.stringify(nextPaths) !== JSON.stringify(loadPaths)) {
+            config.plugins.load.paths = nextPaths;
+            changed = true;
+        }
+    }
+
+    // Preserve bundled capabilities that are selected outside plugins.entries.
+    // They were previously pulled in by compat discovery, so switching to an
+    // allow list without copying these references would silently disable web
+    // search, browser automation, or the bundled Ollama provider.
+    if (Array.isArray(config.plugins.allow)) {
+        const requiredBundledIds = new Set();
+        if (config.browser && config.browser.enabled !== false) requiredBundledIds.add('browser');
+        const webSearchProvider = config.tools && config.tools.web && config.tools.web.search
+            && config.tools.web.search.provider;
+        const webFetchProvider = config.tools && config.tools.web && config.tools.web.fetch
+            && config.tools.web.fetch.provider;
+        if (typeof webSearchProvider === 'string' && webSearchProvider.trim()) {
+            requiredBundledIds.add(webSearchProvider.trim());
+        }
+        if (typeof webFetchProvider === 'string' && webFetchProvider.trim()) {
+            requiredBundledIds.add(webFetchProvider.trim());
+        }
+        if (config.models && config.models.providers && config.models.providers.ollama) {
+            requiredBundledIds.add('ollama');
+        }
+        for (const id of requiredBundledIds) {
+            if (!config.plugins.allow.includes(id)) {
+                config.plugins.allow.push(id);
+                changed = true;
+            }
+        }
+    }
+
+    // With an explicit allow list, disable legacy compatibility discovery so
+    // ~/.openclaw/npm/projects cannot shadow the bundled channel packages.
+    // A wildcard allow list intentionally keeps legacy behavior for advanced
+    // user setups.
+    if (Array.isArray(config.plugins.allow)
+        && config.plugins.allow.length > 0
+        && !config.plugins.allow.includes('*')
+        && config.plugins.bundledDiscovery !== 'allowlist') {
+        config.plugins.bundledDiscovery = 'allowlist';
+        changed = true;
     }
 
     // load.paths 微信已指向 runtime 时，删掉 installs 里的第二份，避免 duplicate 警告
@@ -1447,15 +1630,10 @@ const PROVIDER_UI_META_FILE = 'provider-ui-meta.json';
 const PROVIDER_UI_ONLY_KEYS = ['label', 'displayName', 'remark'];
 // ⚠️ 安全：以下内联 key 已泄露（进过源码/公网快照），仅作全新安装的最后兜底。
 // 轮换后用环境变量 AGNES_API_KEYS(逗号分隔) 或 ~/.openclaw/.agnes-keys.json 覆盖，无需改源码。
-const _COMPROMISED_AGNES_KEYS = [
-    "sk-95sX8HnNOhh8FFfAm3ccOgGFg6MA8yf7zU5PEEQdGxSuKhQY",
-    "sk-z2NHJlR99oODMYvS9C5u8qLMNf6hmc9vRm5JenvHHStTfxZn",
-    "sk-ct7MSvbC8LqL1gGqJuoVCKgjtecXwbjIUZhXQ0gITEaksCS0",
-    "sk-nZtkk9AAyZl3sbkv8Gw4R1R99NnkgUWhRGL4Cp0Dl7LSPsUu",
-    "sk-Y6ORz4nnuXHUpwjdXv2WlmLMwCfPBMtmh69iuXxZkQtZazyV",
-    "sk-GhS6TUB6W8LibJT5whDhbUvmYW3csM0HdGDdjotpgadQbd2F",
-    "sk-HV5HINAfAhMJOnYxYp83ZXDLqeudt8ofLtdm9Bj5p9SUOUGh"
-];
+// Never ship API credentials in source or packaged resources. Built-in access
+// may be supplied explicitly through AGNES_API_KEYS/AGNES_API_KEY or the
+// per-user .agnes-keys.json file; otherwise the provider remains unconfigured.
+const _COMPROMISED_AGNES_KEYS = [];
 function loadAgnesApiKeys() {
     const envRaw = process.env.AGNES_API_KEYS || process.env.AGNES_API_KEY || '';
     const envKeys = String(envRaw).split(',').map(s => s.trim()).filter(Boolean);
@@ -1470,7 +1648,7 @@ function loadAgnesApiKeys() {
         const fileKeys = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean);
         if (fileKeys.length) return fileKeys;
     } catch (_) {}
-    return _COMPROMISED_AGNES_KEYS;
+    return [];
 }
 const BUILTIN_AGNES_API_KEYS = loadAgnesApiKeys();
 const _AGNES_PRIMARY_KEY = BUILTIN_AGNES_API_KEYS[0] || _COMPROMISED_AGNES_KEYS[0];
@@ -3344,12 +3522,30 @@ function seedBundledPlugins(options = {}) {
 
         let appVersion = '0.0.0';
         try { appVersion = app.getVersion(); } catch (e) {}
+        if (options.fast === true && global.__nexoraBundledSeedVersion === appVersion) {
+            return;
+        }
         const seedStampPath = path.join(CONFIG_DIR, '.nexora-bundled-seed-stamp');
         if (options.fast === true) {
             try {
                 if (fs.existsSync(seedStampPath) && fs.readFileSync(seedStampPath, 'utf8').trim() === appVersion) {
+                    // 快路径跳过全量目录扫描，但关键运行时插件仍要同步；否则源码修复在
+                    // 版本号不变时不会落到用户目录，下一次启动仍会加载旧插件。
+                    for (const name of [
+                        'session-overflow-rollover',
+                        'compaction-memory-guard',
+                        'memory-rotate',
+                        'auto-summary',
+                        'error-filter',
+                        'session-tool-heal',
+                        'disk-compact',
+                        'voice-bridge'
+                    ]) {
+                        try { syncBundledPluginFiles(name); } catch (_) {}
+                    }
                     // 快路径也必须清掉误种的 media-core，并确保 media-runtime 可用
                     try { syncMediaCoreBundle(); } catch (e) {}
+                    global.__nexoraBundledSeedVersion = appVersion;
                     return;
                 }
             } catch (e) {}
@@ -3436,6 +3632,7 @@ function seedBundledPlugins(options = {}) {
         }
         seedMediaRuntimeArtifacts(appVersion);
         try { fs.writeFileSync(seedStampPath, appVersion, 'utf8'); } catch (e) {}
+        global.__nexoraBundledSeedVersion = appVersion;
     } catch (e) {
         console.error('[PluginSeed] seedBundledPlugins failed:', e.message);
     }
@@ -3548,10 +3745,8 @@ function prepareChannelPluginsBeforeGateway() {
         const abs = resolveBundledNpmPluginPath(entry);
         if (!abs) {
             console.warn(`[PluginSeed] Pre-gateway missing bundled: ${entry.id}`);
-            if (config.plugins.entries[entry.id] && config.plugins.entries[entry.id].enabled !== false) {
-                config.plugins.entries[entry.id].enabled = false;
-                needsSave = true;
-            }
+            // Preserve the user's channel state. Runtime extraction or repair may
+            // make the package available on the next probe.
             continue;
         }
         // 即便 bundled 在 Program Files，也优先种到本机 installs 再用；load.paths 仅保留本机可用路径
@@ -3773,9 +3968,34 @@ function prepareChannelPluginsBeforeGateway() {
 }
 
 // 忽略证书错误以兼容 Clash 等代理软件的 HTTPS 劫持/解密校验
-app.commandLine.appendSwitch('ignore-certificate-errors');
+if (/^(1|true|yes)$/i.test(String(process.env.NEXORA_INSECURE_TLS || ''))) {
+    app.commandLine.appendSwitch('ignore-certificate-errors');
+}
 
-/** 多开：每个实例独占 userData 槽位（-i2/-i3…），Clash/网关端口各自避让；卡不卡由用户决定 */
+// 默认单实例：启动期间重复点击只唤醒已有窗口，不再创建一个尚未初始化的隔离实例。
+// 需要调试多开时可显式设置 NEXORA_ALLOW_MULTI_INSTANCE=1。
+const nexoraSingleInstanceLock = /^(1|true|yes)$/i.test(String(process.env.NEXORA_ALLOW_MULTI_INSTANCE || ''))
+    ? true
+    : app.requestSingleInstanceLock();
+let focusPrimaryWindowWhenReady = false;
+if (!nexoraSingleInstanceLock) {
+    console.warn('[Instance] another Nexora Agent process is already running; exiting duplicate launch');
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            try {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.show();
+                mainWindow.focus();
+            } catch (_) {}
+        } else {
+            focusPrimaryWindowWhenReady = true;
+        }
+    });
+}
+
+/** 调试多开：每个实例独占 userData 槽位（-i2/-i3…），默认不会启用。 */
 function isPidAlive(pid) {
     const n = Number(pid);
     if (!Number.isFinite(n) || n <= 0) return false;
@@ -3849,7 +4069,7 @@ function acquireNexoraInstanceSlot() {
     return null;
 }
 
-const nexoraInstance = acquireNexoraInstanceSlot();
+const nexoraInstance = nexoraSingleInstanceLock ? acquireNexoraInstanceSlot() : null;
 if (!nexoraInstance) {
     console.error('[Instance] 已达到最大多开数量（8），退出');
     app.quit();
@@ -3875,7 +4095,10 @@ function createSplashWindow() {
         show: true,
         backgroundColor: '#00000000'
     });
-    splash.loadFile('splash.html');
+    splash.loadFile('splash.html').catch((err) => {
+        appendMainDiagnostic('splash-load-error', err, { file: 'splash.html' });
+        try { if (!splash.isDestroyed()) splash.destroy(); } catch (_) {}
+    });
     return splash;
 }
 
@@ -3955,7 +4178,27 @@ function createWindow(existingSplash) {
         });
     } catch (e) {}
 
-    mainWindow.loadFile('index.html');
+    let mainDocumentLoadFailures = 0;
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrame) return;
+        mainDocumentLoadFailures += 1;
+        appendMainDiagnostic('main-window-load-failed', null, {
+            errorCode,
+            errorDescription,
+            validatedURL,
+            attempt: mainDocumentLoadFailures,
+        });
+        if (mainDocumentLoadFailures <= 2 && !mainWindow.isDestroyed()) {
+            setTimeout(() => {
+                try {
+                    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadFile('index.html').catch(() => {});
+                } catch (_) {}
+            }, 500 * mainDocumentLoadFailures);
+        }
+    });
+    mainWindow.loadFile('index.html').catch((err) => {
+        appendMainDiagnostic('main-window-load-error', err, { file: 'index.html' });
+    });
     try {
         const id = (global.nexoraInstance && global.nexoraInstance.id) || 1;
         mainWindow.setTitle(id > 1 ? `Nexora Agent #${id}` : 'Nexora Agent');
@@ -3978,6 +4221,7 @@ function createWindow(existingSplash) {
                 mainWindow.restore();
                 mainWindow.setAlwaysOnTop(true);
                 mainWindow.focus();
+                focusPrimaryWindowWhenReady = false;
                 setTimeout(() => {
                     try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); } catch (e) {}
                 }, 500);
@@ -4021,6 +4265,50 @@ function createWindow(existingSplash) {
                 mainWindow.webContents.send('gateway-status', 'running');
             }
         } catch (e) {}
+    });
+
+    let rendererResponsive = true;
+    let rendererRecoveryTimer = null;
+    let lastRendererRecoveryAt = 0;
+    const recoverRenderer = (reason) => {
+        if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+        const now = Date.now();
+        if (now - lastRendererRecoveryAt < 10000) return;
+        lastRendererRecoveryAt = now;
+        appendMainDiagnostic('renderer-auto-recovery', null, { reason });
+        try { mainWindow.webContents.reload(); } catch (_) {}
+    };
+    mainWindow.webContents.on('unresponsive', () => {
+        rendererResponsive = false;
+        appendMainDiagnostic('renderer-unresponsive', null, { url: mainWindow.webContents.getURL() });
+        try { showNotification('Nexora Agent 界面正在恢复', '检测到界面长时间无响应，服务会保持运行。'); } catch (_) {}
+        if (rendererRecoveryTimer) clearTimeout(rendererRecoveryTimer);
+        rendererRecoveryTimer = setTimeout(() => {
+            rendererRecoveryTimer = null;
+            if (!rendererResponsive) recoverRenderer('unresponsive-timeout');
+        }, 15000);
+    });
+    mainWindow.webContents.on('responsive', () => {
+        rendererResponsive = true;
+        if (rendererRecoveryTimer) {
+            clearTimeout(rendererRecoveryTimer);
+            rendererRecoveryTimer = null;
+        }
+        appendMainDiagnostic('renderer-responsive');
+    });
+    mainWindow.webContents.on('did-finish-load', () => {
+        rendererResponsive = true;
+        if (rendererRecoveryTimer) {
+            clearTimeout(rendererRecoveryTimer);
+            rendererRecoveryTimer = null;
+        }
+    });
+    mainWindow.webContents.on('render-process-gone', (event, details) => {
+        rendererResponsive = false;
+        appendMainDiagnostic('main-window-render-process-gone', null, details || {});
+        if (!isQuitting && (!details || details.reason !== 'clean-exit')) {
+            setTimeout(() => recoverRenderer((details && details.reason) || 'render-process-gone'), 800);
+        }
     });
 
     // 仅对「本地控制台(127.0.0.1/localhost)」响应移除 X-Frame-Options / CSP，让内置 iframe 能嵌入；
@@ -4305,7 +4593,13 @@ function scheduleGatewayReloadAfterChannelChange(reason, opts = {}) {
         }
         gatewayChannelReloadInFlight = true;
         try {
-            await stopGatewayProcess();
+            // 热重载不是“真正停止”：保留 Clash/系统代理，也不要抹掉崩溃恢复预算。
+            // 若此时仍在启动阶段，必须取消 in-flight 启动，否则旧流程可能在本轮重载后继续 fork。
+            await stopGatewayProcess({
+                preserveClash: true,
+                preserveCrashBudget: true,
+                cancelInFlightStart: !gatewayProcess && !!gatewayStartInFlight
+            });
             // Windows 杀进程/释放 18789 需要一点余量
             await new Promise((r) => setTimeout(r, 1000));
             await withGatewayRestartPermit(() => startGatewayProcess({ source: 'reload' }));
@@ -4342,12 +4636,20 @@ function clearGatewayRuntimeLogsForFreshStart() {
         'gateway_stderr.log',
         'gateway-output.log',
         'gateway-error.log',
-        'main_error.log',
     ];
     for (const name of names) {
         try {
             const target = path.join(CONFIG_DIR, name);
             fs.mkdirSync(path.dirname(target), { recursive: true });
+            try {
+                const stat = fs.statSync(target);
+                if (stat.size > 0) {
+                    const previous = `${target}.previous`;
+                    try { if (fs.existsSync(previous)) fs.unlinkSync(previous); } catch (_) {}
+                    const buf = fs.readFileSync(target);
+                    fs.writeFileSync(previous, buf.slice(Math.max(0, buf.length - 2 * 1024 * 1024)));
+                }
+            } catch (_) {}
             fs.writeFileSync(target, '', 'utf8');
         } catch (e) {}
     }
@@ -4355,7 +4657,9 @@ function clearGatewayRuntimeLogsForFreshStart() {
 
 async function stopGatewayProcess(opts = {}) {
     const preserveClash = opts.preserveClash === true;
-    resetGatewayCrashRestartBudget();
+    if (opts.preserveCrashBudget !== true) {
+        resetGatewayCrashRestartBudget();
+    }
     // 清掉待触发的渠道 crash-breaker override 定时器，否则它可能在网关已停/新实例上误触发
     if (channelBreakerOverrideTimer) {
         clearTimeout(channelBreakerOverrideTimer);
@@ -4453,7 +4757,7 @@ async function terminateOldGatewayBeforeStart(port) {
         );
     }
     try {
-        await stopGatewayProcess({ preserveClash: true });
+        await stopGatewayProcess({ preserveClash: true, preserveCrashBudget: true });
     } catch (e) {
         console.warn('[Gateway] terminate old child failed:', e && e.message);
     }
@@ -4558,6 +4862,16 @@ function notifyGatewayStartBlocked(source, detail) {
 async function startGatewayProcess(opts = {}) {
         const source = String((opts && opts.source) || 'unknown');
         if (gatewayStartInFlight) return gatewayStartInFlight;
+        // 幂等护栏：任何重复的 start 请求（包括旧版渲染层/托盘/自动启动竞态）
+        // 在已有健康子进程时直接复用，绝不再次 terminate + fork 导致会话断流。
+        if (
+            gatewayProcess
+            && !gatewayProcess.killed
+            && gatewayProcess.exitCode == null
+            && gatewayProcess.signalCode == null
+        ) {
+            return Promise.resolve(gatewayProcess);
+        }
 
         const ipcOk = IPC_GATEWAY_START_SOURCES.has(source);
         const internalOk = INTERNAL_GATEWAY_RESTART_SOURCES.has(source) && gatewayInternalRestartPermit > 0;
@@ -4570,12 +4884,26 @@ async function startGatewayProcess(opts = {}) {
             return;
         }
 
-        // 取消尚未触发的崩溃自动重启，避免与手动/回收启动叠车
-        clearGatewayCrashRestartSchedule();
+        // 手动/设置自启代表用户明确开启新一轮生命周期，应清掉旧的崩溃预算；
+        // reload/update（尤其是崩溃自动恢复）必须保留预算，避免无限重启环。
+        if (source === 'manual' || source === 'autostart') {
+            resetGatewayCrashRestartBudget();
+        } else {
+            clearGatewayCrashRestartSchedule();
+        }
         gatewayStartCancelRequested = false;
+        gatewayLastStartSource = source;
         gatewayStartInFlight = (async () => {
         try {
         const preferredGatewayPort = resolveConfiguredGatewayPort();
+        const startupStartedAt = Date.now();
+        const markStartupPhase = (phase) => {
+            const elapsedMs = Date.now() - startupStartedAt;
+            console.log(`[GatewayStartup] ${phase} +${elapsedMs}ms`);
+            // Keep timing useful without adding synchronous disk I/O to the
+            // critical startup path.
+            setImmediate(() => appendMainDiagnostic('gateway-start-phase', null, { phase, elapsedMs, source }));
+        };
         // 先把 UI 打到 starting，避免清理端口时界面长时间假“空闲/运行中”
         if (mainWindow) {
             mainWindow.webContents.send('gateway-status', 'starting');
@@ -4583,18 +4911,30 @@ async function startGatewayProcess(opts = {}) {
         }
 
         // 启用前必须先终止旧程序（本进程子进程 + 端口孤儿），禁止叠在旧实例上启用
-        await terminateOldGatewayBeforeStart(preferredGatewayPort);
+        await withStartupTimeout(
+            terminateOldGatewayBeforeStart(preferredGatewayPort),
+            20_000,
+            '清理旧 Gateway'
+        );
 
         try {
-            await waitForGatewayRuntimeReady();
-            await checkAndHealSandboxNode();
+            // Runtime extraction and the bundled Node health probe touch
+            // independent paths; run them together so a cold packaged start
+            // does not pay both latencies back-to-back.
+            await Promise.all([
+                withStartupTimeout(waitForGatewayRuntimeReady(), 120_000, '准备 Gateway 运行时'),
+                withStartupTimeout(checkAndHealSandboxNode(), 90_000, '检查内置 Node 环境')
+            ]);
+            markStartupPhase('runtime-preflight-ready');
         } catch (err) {
             console.error('[SandboxCheck] Error during check and heal:', err);
+            appendMainDiagnostic('gateway-start-preflight-failed', err, { source });
             if (mainWindow) {
                 mainWindow.webContents.send('gateway-status', 'stopped');
                 mainWindow.webContents.send('gateway-log', `[System] 环境自愈升级出错: ${err.message}\n`);
             }
             showNotification('环境自愈失败', err.message);
+            if (!gatewayStartCancelRequested && !isQuitting) scheduleGatewayCrashRestart(-3);
             return;
         }
 
@@ -4661,6 +5001,7 @@ async function startGatewayProcess(opts = {}) {
 
             // 部署补丁到可写目录（Doctor 迁移 / harden 依赖最新脚本）
             try { deployRuntimeArtifacts(); } catch (e) {}
+            markStartupPhase('runtime-artifacts-ready');
 
             // 确保在网关启动前，openclaw.json 已经初始化了必需的插件 allow 列表
             ensureOpenClawConfigInitialized();
@@ -4700,13 +5041,7 @@ async function startGatewayProcess(opts = {}) {
 
             // 部署内置自定义插件到用户状态目录
             seedBundledPlugins({ fast: true });
-            // fork 前最后一次：确保 media-core 不在 extensions，并同步到 media-runtime
-            try {
-                syncMediaCoreBundle();
-            } catch (e) {
-                console.warn('[PluginSeed] pre-fork media-core sync:', e && e.message);
-            }
-
+            markStartupPhase('bundled-plugins-ready');
             // 启动Nexora Agent前再跑一次延迟收紧，确保磁盘上的配置已是“快配置”
             try {
                 if (fs.existsSync(CONFIG_PATH)) {
@@ -4880,6 +5215,7 @@ async function startGatewayProcess(opts = {}) {
             const child = fork(openclawEntry, ['gateway', 'run', '--force', '--allow-unconfigured'], forkOptions);
             gatewayProcess = child;
             global.__gatewayReclaimAttempts = 0;
+            markStartupPhase('gateway-forked');
 
             // fork 失败会触发 'error' 而非 'exit'；无此处理时 gatewayProcess 仍为真、UI 卡在「running」。
             child.once('error', (err) => {
@@ -4892,6 +5228,7 @@ async function startGatewayProcess(opts = {}) {
                     }
                 } catch (_) {}
                 try { showNotification('Nexora Agent 启动失败', `内核进程无法启动：${err && err.message || err}`); } catch (_) {}
+                scheduleGatewayCrashRestart(-1);
             });
 
             // 窗口可能在异步启动过程中被关闭（托盘退出）→ 解引用 null 会崩溃
@@ -4908,6 +5245,26 @@ async function startGatewayProcess(opts = {}) {
 
             // 提取日志及匹配登录二维码的公共处理函数
             let gatewayLogTail = '';
+            let pendingGatewayUiLog = '';
+            let gatewayUiLogTimer = null;
+            const flushGatewayUiLog = () => {
+                gatewayUiLogTimer = null;
+                if (!pendingGatewayUiLog) return;
+                const batch = pendingGatewayUiLog;
+                pendingGatewayUiLog = '';
+                try {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('gateway-log', batch);
+                    }
+                } catch (_) {}
+            };
+            const queueGatewayUiLog = (text) => {
+                pendingGatewayUiLog += text;
+                if (pendingGatewayUiLog.length > 160000) {
+                    pendingGatewayUiLog = pendingGatewayUiLog.slice(-120000);
+                }
+                if (!gatewayUiLogTimer) gatewayUiLogTimer = setTimeout(flushGatewayUiLog, 60);
+            };
             const handleLogData = (data) => {
                 let text = data.toString();
                 if (text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
@@ -4966,7 +5323,7 @@ async function startGatewayProcess(opts = {}) {
                 } catch (e) {}
 
                 if (mainWindow) {
-                    mainWindow.webContents.send('gateway-log', text);
+                    queueGatewayUiLog(text);
 
                     // 日志就绪信号：立刻通知 UI（不依赖 TCP 探测时机）
                     if (/http server listening/i.test(text) || text.includes('[gateway] ready')) {
@@ -5030,6 +5387,8 @@ async function startGatewayProcess(opts = {}) {
 
             // 监听退出（必须绑定本代 child，忽略停启叠车时的旧进程 exit）
             child.on('exit', async (code) => {
+                if (gatewayUiLogTimer) clearTimeout(gatewayUiLogTimer);
+                flushGatewayUiLog();
                 console.log(`Gateway exited with code ${code}`);
                 const wasIntentionallyStopped = !!child.isIntentionallyStopped;
                 const exitedPort = watchPort;
@@ -5070,10 +5429,12 @@ async function startGatewayProcess(opts = {}) {
             });
 
         } catch (e) {
+            appendMainDiagnostic('gateway-start-failed', e, { source });
             if (mainWindow) {
                 mainWindow.webContents.send('gateway-status', 'stopped');
                 mainWindow.webContents.send('gateway-log', `[System] [ERROR] 无法找到内置Nexora Agent模块: ${e.message}\n`);
             }
+            if (!gatewayStartCancelRequested && !isQuitting) scheduleGatewayCrashRestart(-4);
         }
         } finally {
             gatewayStartInFlight = null;
@@ -5703,10 +6064,6 @@ function ensureOpenClawConfigInitialized() {
                 if (broken) {
                     fs.rmSync(localMatrix, { recursive: true, force: true });
                     console.log('[PluginSeed] Removed broken local matrix extension copy');
-                    if (config.plugins.entries.matrix) {
-                        config.plugins.entries.matrix.enabled = false;
-                        needsSave = true;
-                    }
                 }
             }
         } catch (e) {}
@@ -5872,10 +6229,7 @@ function ensureOpenClawConfigInitialized() {
             const abs = resolveBundledNpmPluginPath(entry);
             if (!abs || !pluginPathUsableOnThisMachine(abs)) {
                 console.warn(`[PluginSeed] Bundled npm plugin missing/unusable: ${entry.id}`);
-                if (config.plugins.entries[entry.id] && config.plugins.entries[entry.id].enabled !== false) {
-                    config.plugins.entries[entry.id].enabled = false;
-                    needsSave = true;
-                }
+                // Do not silently close configured communication channels.
                 continue;
             }
             const resolvedPath = path.resolve(abs);
@@ -5919,13 +6273,8 @@ function ensureOpenClawConfigInitialized() {
                 });
                 if (!seed.seeded) {
                     console.warn(`[PluginSeed] ${entry.id} official seed skipped:`, seed.reason);
-                    if (!config.plugins.entries[entry.id]) {
-                        config.plugins.entries[entry.id] = { enabled: false };
-                        needsSave = true;
-                    } else if (config.plugins.entries[entry.id].enabled !== false) {
-                        config.plugins.entries[entry.id].enabled = false;
-                        needsSave = true;
-                    }
+                    // Preserve any existing enabled/disabled choice. A transient
+                    // seed failure must not mutate the user's channel settings.
                     continue;
                 }
                 const ver = seed.version || '0.0.0';
@@ -10131,6 +10480,19 @@ async function waitForGatewayRuntimeReady() {
     return await gatewayRuntimePreparePromise;
 }
 
+function withStartupTimeout(promise, timeoutMs, label) {
+    const ms = Math.max(1000, Number(timeoutMs) || 1000);
+    let timer = null;
+    return Promise.race([
+        Promise.resolve(promise).finally(() => {
+            if (timer) clearTimeout(timer);
+        }),
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label || '启动步骤'}超时（${ms}ms）`)), ms);
+        })
+    ]);
+}
+
 app.whenReady().then(async () => {
     if (!global.nexoraInstance) return;
 
@@ -10337,15 +10699,29 @@ app.whenReady().then(async () => {
         console.warn('[VoiceRuntime] re-init failed:', e.message);
     }
 
-    createWindow(bootSplash);
-    createTray();
+    try {
+        createWindow(bootSplash);
+    } catch (err) {
+        appendMainDiagnostic('startup-create-window-failed', err);
+        try {
+            dialog.showErrorBox('Nexora Agent 启动失败', `主窗口创建失败：${err && err.message ? err.message : err}`);
+        } catch (_) {}
+        app.quit();
+        return;
+    }
+    try {
+        createTray();
+    } catch (err) {
+        // 托盘不是主功能，托盘初始化失败不应让整个应用退出。
+        appendMainDiagnostic('startup-tray-failed', err);
+        tray = null;
+    }
     setImmediate(() => {
         try {
             prepareGatewayRuntimeInBackground(bootSplash)
                 .then(() => console.log('[GatewayRuntime] background prepare completed'))
                 .catch(e => console.warn('[GatewayRuntime] background prepare failed:', e.message));
         } catch (e) {}
-        try { seedBundledPlugins(); } catch (e) {}
         try { watchRoleConfigFile(); } catch (e) {}
     });
 
@@ -10354,6 +10730,13 @@ app.whenReady().then(async () => {
             createWindow();
         }
     });
+}).catch((err) => {
+    appendMainDiagnostic('startup-unhandled', err);
+    console.error('[Startup] app.whenReady failed:', err && err.stack ? err.stack : err);
+    try {
+        dialog.showErrorBox('Nexora Agent 启动失败', String(err && (err.stack || err.message) || err));
+    } catch (_) {}
+    try { app.quit(); } catch (_) {}
 });
 
 app.on('window-all-closed', () => {

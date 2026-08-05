@@ -245,12 +245,17 @@ export default function createPlugin(runtime) {
     await loadPolicy();
     if (!policyUrl || refreshInterval <= 0) return;
 
+    let refreshInFlight = false;
     refreshTimer = setInterval(async () => {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
         console.log(`[${pluginName}] 定时刷新策略...`);
         await loadPolicy();
       } catch (err) {
         console.error(`[${pluginName}] 定时刷新失败: ${err.message}`);
+      } finally {
+        refreshInFlight = false;
       }
     }, refreshInterval);
   }

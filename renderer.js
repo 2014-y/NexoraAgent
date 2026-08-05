@@ -9,6 +9,17 @@ function escapeHtml(unsafe) {
          .replace(/'/g, '&#039;');
 }
 
+function safeDebugJson(value, limit = 4000) {
+    let text = '';
+    try {
+        text = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch (_) {
+        text = String(value || '');
+    }
+    text = String(text || '');
+    return text.length > limit ? `${text.slice(0, limit)}\n...` : text;
+}
+
 /**
  * 用于内联事件处理器（onclick="fn('${...}')" ）中的 JS 单引号字符串上下文。
  * 仅 escapeHtml 不够：HTML 属性解析会先把 &#039; 解码回 ' 再交给 JS，导致单引号闭合字符串注入。
@@ -81,7 +92,7 @@ const MODEL_API_PROTOCOLS = [
     { value: 'openai-responses', label: 'OpenAI Responses', family: 'responses', chatPath: '/responses', modelsPath: '/models' },
     { value: 'anthropic-messages', label: 'Anthropic Messages', family: 'anthropic', chatPath: '/messages', modelsPath: '/models' },
     { value: 'gemini-generate-content', label: 'Gemini GenerateContent', family: 'gemini', modelsPath: '/models' },
-    { value: 'azure-openai', label: 'Azure OpenAI', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
+    { value: 'azure-openai', label: 'Azure OpenAI', family: 'azure', chatPath: '/chat/completions', modelsPath: '/models' },
     { value: 'mistral-chat', label: 'Mistral Chat', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
     { value: 'cohere-chat', label: 'Cohere Chat', family: 'cohere', chatPath: '/chat', modelsPath: '/models' },
     { value: 'claude-code', label: 'Claude Code / OpenAI Compatible', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
@@ -103,7 +114,11 @@ function renderModelApiProtocolOptions(selected) {
 }
 
 function joinApiUrl(baseUrl, path) {
-    return `${String(baseUrl || '').replace(/\/$/, '')}${path}`;
+    const raw = String(baseUrl || '');
+    const q = raw.indexOf('?');
+    if (q < 0) return `${raw.replace(/\/$/, '')}${path}`;
+    const base = raw.slice(0, q).replace(/\/$/, '');
+    return `${base}${path}${raw.slice(q)}`;
 }
 
 function normalizeOllamaBaseUrl(baseUrl) {
@@ -118,11 +133,16 @@ function buildGeminiModelPath(modelId, stream = false) {
 function buildModelApiHeaders(apiType, apiKey) {
     const protocol = getModelApiProtocol(apiType);
     const headers = { 'Content-Type': 'application/json' };
-    const key = String(apiKey || '').trim();
+    const key = String(apiKey || '')
+        .split(/[,，\n]/)
+        .map((value) => value.trim())
+        .find(Boolean) || '';
     if (!key) return headers;
     if (protocol.family === 'anthropic') {
         headers['x-api-key'] = key;
         headers['anthropic-version'] = '2023-06-01';
+    } else if (protocol.family === 'azure') {
+        headers['api-key'] = key;
     } else if (protocol.family === 'gemini') {
         headers['x-goog-api-key'] = key;
     } else {
@@ -155,6 +175,57 @@ function mapOllamaMessages(messages) {
     });
 }
 
+function parseImageDataUrl(value) {
+    const raw = String(value || '');
+    const match = raw.match(/^data:([^;,]+)?(?:;[^,]*)?,(.*)$/s);
+    if (!match) return null;
+    return {
+        mediaType: match[1] || 'image/png',
+        data: match[2] || ''
+    };
+}
+
+function mapAnthropicContent(content) {
+    if (!Array.isArray(content)) return String(content || '');
+    return content.flatMap((item) => {
+        if (!item) return [];
+        if (item.type === 'text') return [{ type: 'text', text: String(item.text || '') }];
+        const url = item.image_url && item.image_url.url;
+        if (!url) return [];
+        const data = parseImageDataUrl(url);
+        return [{
+            type: 'image',
+            source: data
+                ? { type: 'base64', media_type: data.mediaType, data: data.data }
+                : { type: 'url', url: String(url) }
+        }];
+    });
+}
+
+function mapGeminiParts(content) {
+    if (!Array.isArray(content)) return [{ text: String(content || '') }];
+    return content.flatMap((item) => {
+        if (!item) return [];
+        if (item.type === 'text') return [{ text: String(item.text || '') }];
+        const url = item.image_url && item.image_url.url;
+        if (!url) return [];
+        const data = parseImageDataUrl(url);
+        return [data
+            ? { inlineData: { mimeType: data.mediaType, data: data.data } }
+            : { fileData: { mimeType: 'image/*', fileUri: String(url) } }];
+    });
+}
+
+function mapResponsesContent(content) {
+    if (!Array.isArray(content)) return [{ type: 'input_text', text: String(content || '') }];
+    return content.flatMap((item) => {
+        if (!item) return [];
+        if (item.type === 'text') return [{ type: 'input_text', text: String(item.text || '') }];
+        const url = item.image_url && item.image_url.url;
+        return url ? [{ type: 'input_image', image_url: String(url) }] : [];
+    });
+}
+
 function buildChatRequest(baseUrl, apiType, modelId, messages, options = {}) {
     const protocol = getModelApiProtocol(apiType);
     const maxTokens = options.maxTokens || options.max_tokens || 1024;
@@ -166,20 +237,20 @@ function buildChatRequest(baseUrl, apiType, modelId, messages, options = {}) {
     }
     if (protocol.family === 'anthropic') {
         const system = messages.find(m => m.role === 'system');
-        const chatMessages = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content || '') }));
+        const chatMessages = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: mapAnthropicContent(m.content) }));
         const body = { model: modelId, messages: chatMessages, max_tokens: maxTokens, temperature };
         if (system && system.content) body.system = system.content;
         return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body };
     }
     if (protocol.family === 'gemini') {
-        const contents = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content || '') }] }));
+        const contents = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: mapGeminiParts(m.content) }));
         const system = messages.find(m => m.role === 'system');
         const body = { contents, generationConfig: { temperature, maxOutputTokens: maxTokens } };
         if (system && system.content) body.systemInstruction = { parts: [{ text: system.content }] };
         return { url: joinApiUrl(baseUrl, buildGeminiModelPath(modelId)), headers, body };
     }
     if (protocol.family === 'responses') {
-        const input = messages.map(m => `${m.role}: ${Array.isArray(m.content) ? JSON.stringify(m.content) : m.content}`).join('\n');
+        const input = messages.map(m => ({ role: m.role, content: mapResponsesContent(m.content) }));
         return { url: joinApiUrl(baseUrl, protocol.chatPath), headers, body: { model: modelId, input, max_output_tokens: maxTokens, temperature } };
     }
     if (protocol.family === 'completions') {
@@ -194,14 +265,25 @@ function buildChatRequest(baseUrl, apiType, modelId, messages, options = {}) {
 }
 
 function extractChatReply(result) {
+    const textOf = (value) => {
+        if (value == null) return '';
+        if (typeof value === 'string') return value;
+        if (Array.isArray(value)) return value.map(textOf).join('');
+        if (typeof value === 'object') {
+            if (typeof value.text === 'string') return value.text;
+            if (typeof value.value === 'string') return value.value;
+            if (value.content != null) return textOf(value.content);
+        }
+        return '';
+    };
     if (!result || typeof result !== 'object') return String(result || '');
-    if (result.message && result.message.content) return result.message.content;
-    if (result.choices && result.choices[0] && result.choices[0].message) return result.choices[0].message.content;
+    if (result.message && result.message.content) return textOf(result.message.content);
+    if (result.choices && result.choices[0] && result.choices[0].message) return textOf(result.choices[0].message.content);
     if (result.choices && result.choices[0] && typeof result.choices[0].text === 'string') return result.choices[0].text;
-    if (Array.isArray(result.content)) return result.content.map(part => part.text || '').join('');
+    if (Array.isArray(result.content)) return textOf(result.content);
     if (result.output_text) return result.output_text;
-    if (Array.isArray(result.output)) return result.output.flatMap(item => item.content || []).map(part => part.text || '').join('');
-    if (Array.isArray(result.candidates) && result.candidates[0] && result.candidates[0].content) return (result.candidates[0].content.parts || []).map(part => part.text || '').join('');
+    if (Array.isArray(result.output)) return textOf(result.output);
+    if (Array.isArray(result.candidates) && result.candidates[0] && result.candidates[0].content) return textOf(result.candidates[0].content.parts || result.candidates[0].content);
     if (result.text) return result.text;
     return JSON.stringify(result);
 }
@@ -1682,6 +1764,9 @@ const btnLabelText = document.getElementById('btn-label-text');
 const logTerminal = document.getElementById('log-terminal-output');
 const statPort = document.getElementById('stat-port');
 const statMem = document.getElementById('stat-mem');
+let __gatewayTerminalCharCount = 0;
+let __pendingGatewayLogText = '';
+let __gatewayLogFlushTimer = null;
 
 const qrcodeOverlay = document.getElementById('qrcode-overlay');
 const qrcodeCanvas = document.getElementById('qrcode-canvas');
@@ -1804,8 +1889,12 @@ async function init() {
         console.error('Failed to get app version:', e);
     }
 
-    // 监听主进程的消息推送
-    setupIpcListeners();
+    // 监听主进程的消息推送。单个可选面板缺失时不能阻断后续系统设置控件绑定。
+    try {
+        setupIpcListeners();
+    } catch (err) {
+        console.error('[IPC] listener setup failed; continuing with local settings:', err);
+    }
     initAccelerationChannel();
     applyAppInstanceBadge();
 
@@ -1872,14 +1961,22 @@ async function init() {
             } catch (e) {}
             settingAutoGateway.checked = on;
         })();
-        settingAutoGateway.addEventListener('change', (e) => {
+        settingAutoGateway.addEventListener('change', async (e) => {
             const on = !!e.target.checked;
             localStorage.setItem('setting_auto_launch_gateway', on ? 'true' : 'false');
             try {
                 if (window.api && typeof window.api.setAutoLaunchGateway === 'function') {
-                    window.api.setAutoLaunchGateway(on);
+                    const applied = await window.api.setAutoLaunchGateway(on);
+                    e.target.checked = applied === true || applied === on ? on : !!applied;
+                    showToast(e.target.checked
+                        ? t('已开启自动启用 Nexora Agent', 'Automatic Gateway start enabled', '已開啟自動啟用 Nexora Agent')
+                        : t('已关闭自动启用 Nexora Agent', 'Automatic Gateway start disabled', '已關閉自動啟用 Nexora Agent'));
                 }
-            } catch (err) {}
+            } catch (err) {
+                e.target.checked = !on;
+                localStorage.setItem('setting_auto_launch_gateway', !on ? 'true' : 'false');
+                showToast(t('自动启用设置失败', 'Failed to update automatic Gateway start', '自動啟用設定失敗'));
+            }
         });
     }
 
@@ -1895,30 +1992,84 @@ async function init() {
     if (settingBuiltInModelsToggle) {
         settingBuiltInModelsToggle.checked = getUseBuiltIn();
         settingBuiltInModelsToggle.addEventListener('change', async (e) => {
-            localStorage.setItem('setting_use_built_in_models', e.target.checked ? 'true' : 'false');
+            const nextEnabled = !!e.target.checked;
+            const previousEnabled = !nextEnabled;
+            localStorage.setItem('setting_use_built_in_models', nextEnabled ? 'true' : 'false');
             // 内置开：厂家列表 / 主备下拉仅留 agnes-ai、ollama；关：全部放开
             renderProvidersList();
             updateModelsDatalist();
             loadChatModels();
 
             // 开启内置时立刻把默认模型写入沙箱 OpenClaw（否则只改了 UI，网关会话仍粘旧模型）
-            if (e.target.checked && configData && window.api && window.api.saveConfig) {
+            if (nextEnabled && configData && window.api && window.api.saveConfig) {
                 try {
-                    applyBuiltInModelPolicy(configData);
+                    const nextConfig = JSON.parse(JSON.stringify(configData));
+                    applyBuiltInModelPolicy(nextConfig);
+                    const result = await window.api.saveConfig(nextConfig);
+                    if (!result || result.success !== true) {
+                        throw new Error((result && result.error) || 'save_config_failed');
+                    }
+                    configData = result.config || nextConfig;
                     if (configData.models && configData.models.providers) {
                         localProviders = JSON.parse(JSON.stringify(configData.models.providers));
                     }
-                    const result = await window.api.saveConfig(configData);
-                    if (result && result.success) {
-                        updateConfigJsonPreview();
-                        showToast(t('已同步内置模型到 OpenClaw，请重启网关后生效', 'Built-in model synced to OpenClaw. Restart gateway to apply.', '已同步內置模型到 OpenClaw，請重啟網關後生效'));
-                    }
+                    updateConfigJsonPreview();
+                    showToast(t('已同步内置模型到 OpenClaw，请重启网关后生效', 'Built-in model synced to OpenClaw. Restart gateway to apply.', '已同步內置模型到 OpenClaw，請重啟網關後生效'));
                 } catch (err) {
                     console.warn('[BuiltIn] Failed to sync model to OpenClaw:', err);
+                    e.target.checked = previousEnabled;
+                    localStorage.setItem('setting_use_built_in_models', previousEnabled ? 'true' : 'false');
+                    renderProvidersList();
+                    updateModelsDatalist();
+                    loadChatModels();
+                    showToast(t('内置模型设置保存失败', 'Failed to save built-in model setting', '內置模型設定儲存失敗'));
                 }
-            } else if (!e.target.checked) {
-                // 关闭后恢复自定义表单，并刷新 JSON 预览与磁盘一致
-                try { updateConfigJsonPreview(); } catch (err) {}
+            } else if (!nextEnabled) {
+                // 关闭后不能只改 UI：若当前主模型仍是 Agnes 内置模型，
+                // 立即切回第一个可用的自定义供应商并落盘，否则用户会感觉开关“没有效果”。
+                try {
+                    const providers = (configData && configData.models && configData.models.providers) || localProviders || {};
+                    const customRefs = [];
+                    for (const [providerId, provider] of Object.entries(providers)) {
+                        if (BUILTIN_ALLOWED_PROVIDERS.includes(providerId)) continue;
+                        if (!provider || !Array.isArray(provider.models)) continue;
+                        for (const model of provider.models) {
+                            const modelId = String((model && (model.id || model.name)) || '').trim();
+                            const ref = modelId ? `${providerId}/${modelId}` : '';
+                            if (ref && !customRefs.includes(ref)) customRefs.push(ref);
+                        }
+                    }
+                    if (!customRefs.length || !configData || !window.api || !window.api.saveConfig) {
+                        throw new Error('no_custom_model_configured');
+                    }
+                    const nextConfig = JSON.parse(JSON.stringify(configData));
+                    nextConfig.agents = nextConfig.agents || {};
+                    nextConfig.agents.defaults = nextConfig.agents.defaults || {};
+                    nextConfig.agents.defaults.model = nextConfig.agents.defaults.model || {};
+                    nextConfig.agents.defaults.model.primary = customRefs[0];
+                    nextConfig.agents.defaults.model.fallbacks = customRefs.slice(1, 3);
+                    const result = await window.api.saveConfig(nextConfig);
+                    if (!result || result.success !== true) {
+                        throw new Error((result && result.error) || 'save_config_failed');
+                    }
+                    configData = result.config || nextConfig;
+                    localProviders = JSON.parse(JSON.stringify(providers));
+                    updateConfigJsonPreview();
+                    renderProvidersList();
+                    updateModelsDatalist();
+                    loadChatModels();
+                    showToast(t('已切换到自定义模型配置', 'Switched to custom model configuration', '已切換到自訂模型配置'));
+                } catch (err) {
+                    console.warn('[BuiltIn] Failed to restore custom model:', err);
+                    e.target.checked = true;
+                    localStorage.setItem('setting_use_built_in_models', 'true');
+                    renderProvidersList();
+                    updateModelsDatalist();
+                    loadChatModels();
+                    showToast(err && err.message === 'no_custom_model_configured'
+                        ? t('请先添加至少一个自定义模型供应商', 'Add at least one custom model provider first', '請先新增至少一個自訂模型供應商')
+                        : t('自定义模型设置保存失败', 'Failed to save custom model setting', '自訂模型設定儲存失敗'));
+                }
             }
         });
     }
@@ -2594,7 +2745,7 @@ async function init() {
     }
 
     // Nexora Agent开关按钮监听
-    gatewayToggleBtn.addEventListener('click', () => {
+    if (gatewayToggleBtn) gatewayToggleBtn.addEventListener('click', () => {
         if (window.isTogglingGateway) return;
         if (gatewayStatus === 'starting' || gatewayStatus === 'upgrading' || gatewayStatus === 'stopping') return;
 
@@ -2707,9 +2858,11 @@ async function init() {
     }
 
     // 微信 / 飞书二维码弹窗关闭 → 统一取消绑定闭环
-    qrcodeCloseBtn.addEventListener('click', () => {
-        endCommBinding({ cancelBackend: true, toast: '已关闭扫码窗口' });
-    });
+    if (qrcodeCloseBtn) {
+        qrcodeCloseBtn.addEventListener('click', () => {
+            endCommBinding({ cancelBackend: true, toast: '已关闭扫码窗口' });
+        });
+    }
 
     // 初始化主题切换
     setupThemeSwitching();
@@ -2761,33 +2914,8 @@ async function init() {
         });
     }
 
-    // 自动启用 Nexora Agent（尊重设置；未写入时默认关闭，仅左上角手动启用）
-    (async () => {
-        let autoOn = localStorage.getItem('setting_auto_launch_gateway') === 'true';
-        try {
-            if (window.api && typeof window.api.getAutoLaunchGateway === 'function') {
-                autoOn = await window.api.getAutoLaunchGateway();
-                localStorage.setItem('setting_auto_launch_gateway', autoOn ? 'true' : 'false');
-            }
-        } catch (e) {}
-        if (!autoOn) return;
-        setTimeout(() => {
-            if (gatewayStatus === 'stopped') {
-                logTerminal.innerText += '\n[System] 正在根据系统设置自动启用本地Nexora Agent...\n';
-                window.api.gatewayAction('start', { source: 'autostart' });
-            }
-        }, 1500);
-        // 自启场景下反复对齐按钮文案：running →「终止」，避免卡在「启动/启动中」
-        [2500, 5000, 8000].forEach((ms) => {
-            setTimeout(() => {
-                try {
-                    if (window.api && window.api.gatewayAction) {
-                        window.api.gatewayAction('query-status');
-                    }
-                } catch (e) {}
-            }, ms);
-        });
-    })();
+    // Gateway 自动启用由主进程统一负责。渲染进程不再重复 start，
+    // 避免主进程刚启动完成后又被第二次 stop/restart，造成启动抖动和会话断流。
 
     // 渲染图表
     renderUsageCharts();
@@ -3236,6 +3364,12 @@ function resetConsoleRuntimeLogs(options = {}) {
     else restorePersistedActivityLogs({ replace: true });
 
     if (logTerminal) logTerminal.innerHTML = '';
+    __gatewayTerminalCharCount = 0;
+    __pendingGatewayLogText = '';
+    if (__gatewayLogFlushTimer) {
+        clearTimeout(__gatewayLogFlushTimer);
+        __gatewayLogFlushTimer = null;
+    }
     const builtinLogs = document.getElementById('builtin-terminal-logs');
     if (builtinLogs) builtinLogs.innerHTML = '';
     if (clearSystemLogsArea) {
@@ -3842,12 +3976,11 @@ function setupIpcListeners() {
         if (systemLogsArea) {
             const trimmed = text.trim();
             if (trimmed && !isMediaApiNoiseLog(trimmed)) {
-                systemLogsArea.value += trimmed + '\n';
-                // 限制最大行数防止内存泄漏 (限制在 5000 行)
-                const lines = systemLogsArea.value.split('\n');
-                if (lines.length > 5000) {
-                    systemLogsArea.value = lines.slice(lines.length - 5000).join('\n');
-                }
+                const nextValue = systemLogsArea.value + trimmed + '\n';
+                // Bound by characters instead of splitting the full textarea on every chunk.
+                systemLogsArea.value = nextValue.length > 220000
+                    ? nextValue.slice(-180000)
+                    : nextValue;
                 systemLogsArea.scrollTop = systemLogsArea.scrollHeight;
             }
         }
@@ -4069,6 +4202,12 @@ function setupIpcListeners() {
                 timerSpan.style.color = '#ff9800';
                 if (logTerminal) {
                     logTerminal.appendChild(timerSpan);
+                    __gatewayTerminalCharCount += (timerSpan.textContent || '').length;
+                    while (logTerminal.firstChild && __gatewayTerminalCharCount > 20000) {
+                        const first = logTerminal.firstChild;
+                        __gatewayTerminalCharCount -= (first.textContent || '').length;
+                        logTerminal.removeChild(first);
+                    }
                     logTerminal.scrollTop = logTerminal.scrollHeight;
                 }
             }, 5000);
@@ -4109,7 +4248,10 @@ function setupIpcListeners() {
             // 写入隐藏的原大终端
             const span = document.createElement('span');
             span.innerHTML = lineHtml + '<br/>';
-            if (logTerminal) logTerminal.appendChild(span);
+            if (logTerminal) {
+                logTerminal.appendChild(span);
+                __gatewayTerminalCharCount += (span.textContent || '').length;
+            }
 
             // 写入新 Dashboard 活动监控流
             if (currentTab !== 'console-view' && currentTab !== null) {
@@ -4123,10 +4265,11 @@ function setupIpcListeners() {
             }
         });
 
-        if (logTerminal && logTerminal.innerText.length > 25000) {
-            // 按整段子节点从头删除，避免 innerHTML.substring 从标签中间切开导致标记错乱/显示损坏
-            while (logTerminal.firstChild && logTerminal.innerText.length > 20000) {
-                logTerminal.removeChild(logTerminal.firstChild);
+        if (logTerminal && __gatewayTerminalCharCount > 25000) {
+            while (logTerminal.firstChild && __gatewayTerminalCharCount > 20000) {
+                const first = logTerminal.firstChild;
+                __gatewayTerminalCharCount -= (first.textContent || '').length;
+                logTerminal.removeChild(first);
             }
         }
         if (logTerminal) {
@@ -4137,7 +4280,19 @@ function setupIpcListeners() {
     // 挂载至全局 window，专供 CDP 自动化脚本进行 100% 仿真日志注入质量自检
     window.__testTriggerLog = handleReceivedLog;
 
-    window.api.onLogReceived(handleReceivedLog);
+    window.api.onLogReceived((chunk) => {
+        __pendingGatewayLogText += String(chunk || '');
+        if (__pendingGatewayLogText.length > 160000) {
+            __pendingGatewayLogText = __pendingGatewayLogText.slice(-120000);
+        }
+        if (__gatewayLogFlushTimer) return;
+        __gatewayLogFlushTimer = setTimeout(() => {
+            __gatewayLogFlushTimer = null;
+            const batch = __pendingGatewayLogText;
+            __pendingGatewayLogText = '';
+            if (batch) handleReceivedLog(batch);
+        }, 80);
+    });
     window.api.onSandboxUpdateProgress((data) => {
         if (data && typeof data.progress === 'number') {
             updateProgressUI(data.progress, data.text || '正在升级内置环境...');
@@ -4169,11 +4324,17 @@ function setupIpcListeners() {
             clearTimeout(window.toggleLockTimeout);
             window.toggleLockTimeout = null;
         }
-        gatewayToggleBtn.style.pointerEvents = '';
-        gatewayToggleBtn.style.opacity = '';
-        gatewayToggleBtn.style.cursor = '';
+        if (gatewayToggleBtn) {
+            gatewayToggleBtn.style.pointerEvents = '';
+            gatewayToggleBtn.style.opacity = '';
+            gatewayToggleBtn.style.cursor = '';
+        }
 
         if (status === 'stopped') {
+            if (window.pluginDownloadTimer) {
+                clearInterval(window.pluginDownloadTimer);
+                window.pluginDownloadTimer = null;
+            }
             gatewayStatus = 'stopped';
             gatewayFullyReady = false;
             gatewayProcessReportedRunning = false;
@@ -5116,6 +5277,7 @@ function renderProvidersList() {
                     <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="${t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
                 <div style="display: flex; gap: 4px; align-items: center;">
+                    <input type="checkbox" class="model-vision-toggle" data-provider="${key}" data-index="${index}" ${model.supportsImages === true || (Array.isArray(model.input) && model.input.includes('image')) ? 'checked' : ''} title="This model supports image input" style="flex: none;">
                     <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow || inferContextWindow(model.id))}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                     <button type="button" class="btn-probe-context" data-provider="${key}" data-index="${index}" title="${t('实测真实上下文窗口（发送探测请求）', 'Probe real context window (sends a test request)', '實測真實上下文視窗（發送探測請求）')}" style="background: none; border: 1px solid var(--border-color); border-radius: 6px; color: #aaa; cursor: pointer; font-size: 13px; height: 30px; width: 30px; flex: none; line-height: 1; padding: 0;">📏</button>
                 </div>
@@ -5603,6 +5765,23 @@ function bindProviderEvents() {
         });
     });
 
+    document.querySelectorAll('.model-vision-toggle').forEach(input => {
+        input.addEventListener('change', (e) => {
+            const provider = e.target.getAttribute('data-provider');
+            const index = parseInt(e.target.getAttribute('data-index'), 10);
+            const model = localProviders[provider] && localProviders[provider].models[index];
+            if (!model) return;
+            if (e.target.checked) {
+                model.supportsImages = true;
+                model.input = Array.from(new Set([...(Array.isArray(model.input) ? model.input : ['text']), 'image']));
+            } else {
+                delete model.supportsImages;
+                if (Array.isArray(model.input)) model.input = model.input.filter((value) => String(value).toLowerCase() !== 'image');
+            }
+            markConfigDirty();
+        });
+    });
+
     // 监听模型上下文窗口实时修改
     document.querySelectorAll('.model-context-edit-input').forEach(input => {
         input.addEventListener('change', (e) => {
@@ -5758,7 +5937,11 @@ function bindProviderEvents() {
                     if (apiType === 'ollama' && data.models) {
                         fetchedModels = data.models.map(m => ({
                             id: m.name || m.model,
-                            contextWindow: 16384
+                            contextWindow: 16384,
+                            ...(m.input ? { input: m.input } : {}),
+                            ...(m.modalities ? { modalities: m.modalities } : {}),
+                            ...(m.capabilities ? { capabilities: m.capabilities } : {}),
+                            ...(m.supportsImages === true ? { supportsImages: true } : {})
                         }));
                     } else if (data.data && Array.isArray(data.data)) {
                         fetchedModels = data.data.map(m => {
@@ -5768,12 +5951,18 @@ function bindProviderEvents() {
                                 (m.meta && m.meta.context_length) ||
                                 (m.limits && (m.limits.max_context_tokens || m.limits.context_length))
                             );
-                            return {
+                            const model = {
                                 id: m.id,
                                 contextWindow: (Number.isFinite(upstream) && upstream > 0)
                                     ? upstream
                                     : (inferContextWindow(m.id) || 128000)
                             };
+                            // Keep provider-declared multimodal metadata. Dropping these fields
+                            // makes OpenClaw register a vision model as text-only.
+                            ['input', 'inputs', 'modalities', 'capabilities', 'supportsImages', 'supportsImage', 'vision', 'multimodal'].forEach((key) => {
+                                if (m[key] !== undefined) model[key] = m[key];
+                            });
+                            return model;
                         });
                     }
 
@@ -5794,7 +5983,10 @@ function bindProviderEvents() {
                                     id: fm.id,
                                     name: fm.id,
                                     contextWindow: fm.contextWindow,
-                                    maxTokens: 8192
+                                    maxTokens: 8192,
+                                    ...Object.fromEntries(['input', 'inputs', 'modalities', 'capabilities', 'supportsImages', 'supportsImage', 'vision', 'multimodal']
+                                        .filter((key) => fm[key] !== undefined)
+                                        .map((key) => [key, fm[key]]))
                                 });
                                 addCount++;
                             }
@@ -6928,19 +7120,12 @@ const handleSaveConfigAction = async () => {
         if (jsonErrorEl) jsonErrorEl.style.display = 'none';
         if (statPort) statPort.innerText = configData.gateway.port;
 
-        // 网关运行中：一次确认搞定「已保存 + 是否重启」，避免连弹两个窗
         if (gatewayStatus === 'running') {
-            const restart = await confirm(
-                t(
-                    '配置已保存成功。\n\nNexora Agent 正在运行，是否立即重启以使新配置生效？',
-                    'Configuration saved.\n\nNexora Agent is running. Restart now to apply changes?',
-                    '配置已保存成功。\n\nNexora Agent 正在運行，是否立即重啟以使新配置生效？'
-                ),
-                t('保存成功', 'Saved', '保存成功')
-            );
-            if (restart) {
-                reloadGatewayAfterChannelChange('config-save', { startIfStopped: false });
-            }
+            showToast(t(
+                '配置已保存。为保护当前会话，新的配置将在下次重启网关后生效。',
+                'Configuration saved. The current session stays connected; changes take effect after the next gateway restart.',
+                '配置已保存。為保護目前會話，新的配置將在下次重啟網關後生效。'
+            ));
         } else {
             showToast(t('配置已成功保存！', 'Configuration saved successfully!', '配置已成功保存！'));
         }
@@ -10244,6 +10429,142 @@ function showToast(message) {
 let chatAttachmentBase64 = ''; // 存储识图图片的 base64 编码
 let chatSessionHistory = []; // 存储当前会话的历史记录
 let activeChatArchiveMessages = []; // 当前桌面对话完整消息，用于一键归档
+let chatSendInFlight = false;
+let chatSendAbortController = null;
+let chatAttachmentLoadId = 0;
+let chatAttachmentLoading = false;
+const CHAT_HISTORY_STORAGE_KEY = 'nexora_chat_session_history_v2';
+let chatHistoryRestored = false;
+const CHAT_ROLE_CONFIG_TIMEOUT_MS = 4000;
+const CHAT_ROLE_COMMAND_TIMEOUT_MS = 12000;
+const CHAT_MODEL_LOAD_TIMEOUT_MS = 10000;
+const CHAT_RESPONSE_BODY_TIMEOUT_MS = 120000;
+const CHAT_RESPONSE_MAX_CHARS = 16 * 1024 * 1024;
+
+/** Prevent a renderer-side promise from holding the chat send lock forever. */
+function withChatTimeout(promise, timeoutMs, label, onTimeout) {
+    const ms = Math.max(1, Number(timeoutMs) || 1);
+    let timer = null;
+    let settled = false;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            if (settled) return;
+            const error = new Error(label || 'Chat operation timed out');
+            error.name = 'ChatTimeoutError';
+            error.code = 'CHAT_TIMEOUT';
+            try { if (typeof onTimeout === 'function') onTimeout(); } catch (_) {}
+            reject(error);
+        }, ms);
+    });
+    return Promise.race([
+        Promise.resolve(promise).finally(() => { settled = true; if (timer) clearTimeout(timer); }),
+        timeout
+    ]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+async function readChatResponseText(response, controller, timeoutMs = CHAT_RESPONSE_BODY_TIMEOUT_MS) {
+    const text = await withChatTimeout(
+        response.text(),
+        timeoutMs,
+        'Chat response body timed out',
+        () => { try { if (controller) controller.abort(); } catch (_) {} }
+    );
+    if (String(text || '').length > CHAT_RESPONSE_MAX_CHARS) {
+        const error = new Error('Chat response is too large');
+        error.name = 'ChatResponseTooLargeError';
+        throw error;
+    }
+    return String(text || '');
+}
+
+async function readChatResponseJson(response, controller, timeoutMs = CHAT_RESPONSE_BODY_TIMEOUT_MS) {
+    const text = await readChatResponseText(response, controller, timeoutMs);
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        const error = new Error('Chat response was not valid JSON');
+        error.name = 'ChatResponseParseError';
+        throw error;
+    }
+}
+
+function stripChatImagePayload(message) {
+    if (!message || !Array.isArray(message.content)) return message;
+    const hasImage = message.content.some((part) => part && part.type === 'image_url');
+    if (!hasImage) return message;
+    const text = message.content
+        .filter((part) => part && part.type === 'text' && part.text)
+        .map((part) => String(part.text))
+        .join('\n')
+        .trim();
+    return { ...message, content: text || '[Earlier image omitted after analysis]' };
+}
+
+function compactChatSessionHistory(history) {
+    const recent = (Array.isArray(history) ? history : []).slice(-20);
+    let keptRecentImage = false;
+    for (let i = recent.length - 1; i >= 0; i--) {
+        const content = recent[i] && recent[i].content;
+        const hasImage = Array.isArray(content) && content.some((part) => part && part.type === 'image_url');
+        if (!hasImage) continue;
+        if (!keptRecentImage) {
+            keptRecentImage = true;
+        } else {
+            recent[i] = stripChatImagePayload(recent[i]);
+        }
+    }
+    return recent;
+}
+
+function persistChatSessionHistory() {
+    try {
+        const safe = compactChatSessionHistory(chatSessionHistory)
+            .map((message) => {
+                const role = message && message.role === 'user' ? 'user' : 'assistant';
+                let content = message && message.content;
+                if (Array.isArray(content)) {
+                    content = content
+                        .filter((part) => part && part.type === 'text')
+                        .map((part) => String(part.text || ''))
+                        .join('\n')
+                        .trim();
+                    if (!content) content = '[Earlier image omitted after analysis]';
+                }
+                return { role, content: String(content || '').slice(0, 12000) };
+            })
+            .filter((message) => message.content.trim());
+        localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(safe.slice(-40)));
+    } catch (e) {
+        console.warn('[ChatHistory] persist failed:', e);
+    }
+}
+
+function restoreChatSessionHistory() {
+    if (chatHistoryRestored) return;
+    chatHistoryRestored = true;
+    try {
+        const raw = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+        const saved = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(saved) || !saved.length) return;
+        chatSessionHistory = saved
+            .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
+            .map((message) => ({ role: message.role, content: String(message.content || '') }))
+            .filter((message) => message.content.trim())
+            .slice(-40);
+        if (!chatSessionHistory.length) return;
+        const container = document.getElementById('chat-messages-container');
+        if (!container) return;
+        for (const message of chatSessionHistory) {
+            appendChatMessage(message.role === 'user' ? 'user' : 'ai', message.content);
+            recordActiveChatArchiveMessage({ role: message.role, content: message.content });
+        }
+        container.scrollTop = container.scrollHeight;
+    } catch (e) {
+        console.warn('[ChatHistory] restore failed:', e);
+        chatSessionHistory = [];
+    }
+}
+
 // 自动初始化对话面板事件
 function initChatView() {
     const btnSend = document.getElementById('btn-chat-send');
@@ -10254,6 +10575,8 @@ function initChatView() {
     const previewBar = document.getElementById('chat-attachment-preview-bar');
     const previewImg = document.getElementById('img-attachment-preview');
     const refreshModelsBtn = document.getElementById('btn-refresh-chat-models');
+
+    restoreChatSessionHistory();
     
     // 初始化快捷面板折叠状态
     const quickPanel = document.getElementById('chat-quick-panel');
@@ -10312,10 +10635,25 @@ function initChatView() {
     fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
+            const loadId = ++chatAttachmentLoadId;
+            chatAttachmentLoading = true;
+            if (!String(file.type || '').startsWith('image/')) {
+                showToast(t('请选择有效的图片文件。', 'Please select a valid image file.', '請選擇有效的圖片檔案。'));
+                fileInput.value = '';
+                chatAttachmentLoading = false;
+                return;
+            }
+            if (file.size > 20 * 1024 * 1024) {
+                showToast(t('图片过大，请选择 20MB 以内的图片。', 'The image is too large. Please choose one under 20 MB.', '圖片過大，請選擇 20MB 以內的圖片。'));
+                fileInput.value = '';
+                chatAttachmentLoading = false;
+                return;
+            }
             const reader = new FileReader();
             reader.onload = function(event) {
                 const img = new Image();
                 img.onload = function() {
+                    if (loadId !== chatAttachmentLoadId) return;
                     let width = img.width;
                     let height = img.height;
                     const maxDim = 1024;
@@ -10334,20 +10672,44 @@ function initChatView() {
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     
-                    chatAttachmentBase64 = canvas.toDataURL('image/png');
+                    // JPEG dramatically reduces long-session memory and request payload size.
+                    // A white background avoids transparent PNGs turning black after conversion.
+                    const outputCanvas = document.createElement('canvas');
+                    outputCanvas.width = width;
+                    outputCanvas.height = height;
+                    const outputCtx = outputCanvas.getContext('2d');
+                    outputCtx.fillStyle = '#fff';
+                    outputCtx.fillRect(0, 0, width, height);
+                    outputCtx.drawImage(canvas, 0, 0);
+                    chatAttachmentBase64 = outputCanvas.toDataURL('image/jpeg', 0.88);
+                    chatAttachmentLoading = false;
                     previewImg.src = chatAttachmentBase64;
                     previewBar.style.display = 'flex';
                     
                     const compressedSizeKB = (chatAttachmentBase64.length * 0.75 / 1024).toFixed(1);
                     document.getElementById('attachment-name-label').innerText = `已压缩加载: ${file.name} (大小: ${compressedSizeKB} KB)`;
                 };
+                img.onerror = function() {
+                    if (loadId !== chatAttachmentLoadId) return;
+                    chatAttachmentLoading = false;
+                    showToast(t('图片读取失败，请更换图片后重试。', 'Could not read the image. Please try another file.', '圖片讀取失敗，請更換圖片後重試。'));
+                    fileInput.value = '';
+                };
                 img.src = event.target.result;
+            };
+            reader.onerror = function() {
+                if (loadId !== chatAttachmentLoadId) return;
+                chatAttachmentLoading = false;
+                showToast(t('图片文件读取失败。', 'Failed to read the image file.', '圖片檔案讀取失敗。'));
+                fileInput.value = '';
             };
             reader.readAsDataURL(file);
         }
     });
 
     btnRemoveAttach.addEventListener('click', () => {
+        chatAttachmentLoadId += 1;
+        chatAttachmentLoading = false;
         chatAttachmentBase64 = '';
         fileInput.value = '';
         previewBar.style.display = 'none';
@@ -10497,6 +10859,7 @@ async function loadChatModels() {
 
     const pushModel = (providerKey, modelId, label, rank) => {
         if (!modelId || !providerKey) return;
+        if (isNonChatModelId(modelId)) return;
         if (useBuiltIn && !isBuiltinAllowedProvider(providerKey)) return;
         const key = `${providerKey}::${modelId}`;
         if (seen.has(key)) return;
@@ -11314,11 +11677,17 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
 
 // 清除会话缓存 (清空聊天记录并重置初始欢迎语)
 function clearChatHistory(options = {}) {
+    chatAttachmentLoadId += 1;
+    chatAttachmentLoading = false;
+    if (chatSendAbortController) {
+        try { chatSendAbortController.abort(); } catch (_) {}
+    }
     const shouldSkipArchive = !!(options && options.skipArchive);
     if (!shouldSkipArchive && activeChatArchiveMessages.length > 0) {
         archiveCurrentChatSession({ silent: true, clearAfter: false });
     }
     chatSessionHistory = []; // 清空历史记录数组
+    try { localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY); } catch (_) {}
     activeChatArchiveMessages = [];
     const container = document.getElementById('chat-messages-container');
     if (!container) return;
@@ -11401,7 +11770,17 @@ function safeParseSessionArchives() {
     try {
         const raw = localStorage.getItem(SESSION_ARCHIVE_STORAGE_KEY);
         const list = raw ? JSON.parse(raw) : [];
-        return Array.isArray(list) ? list.filter(Boolean) : [];
+        if (!Array.isArray(list)) return [];
+        let strippedLegacyImages = false;
+        const sanitized = list.filter(Boolean).map((item) => ({
+            ...item,
+            messages: Array.isArray(item.messages) ? item.messages.map((message) => {
+                if (message && message.attachment) strippedLegacyImages = true;
+                return message ? { ...message, attachment: '' } : message;
+            }).filter(Boolean) : [],
+        }));
+        if (strippedLegacyImages) saveSessionArchives(sanitized);
+        return sanitized;
     } catch (e) {
         console.warn('[SessionArchive] parse failed:', e);
         return [];
@@ -11409,7 +11788,24 @@ function safeParseSessionArchives() {
 }
 
 function saveSessionArchives(list) {
-    localStorage.setItem(SESSION_ARCHIVE_STORAGE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+    const sanitized = (Array.isArray(list) ? list : []).slice(0, 100).map((item) => ({
+        ...item,
+        messages: Array.isArray(item && item.messages)
+            ? item.messages.slice(-80).map((message) => ({
+                ...message,
+                // Base64 images can exhaust localStorage and freeze/crash Chromium. The
+                // archive UI restores text only, so persisting the raw payload has no value.
+                attachment: '',
+            }))
+            : [],
+    }));
+    try {
+        localStorage.setItem(SESSION_ARCHIVE_STORAGE_KEY, JSON.stringify(sanitized));
+        return true;
+    } catch (e) {
+        console.warn('[SessionArchive] save failed:', e);
+        return false;
+    }
 }
 
 function getAllSessionArchives() {
@@ -11476,7 +11872,7 @@ function recordActiveChatArchiveMessage(message) {
         id: `msg_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         role: message.role,
         content: text || t('session_archive.image_attachment'),
-        attachment: message.attachment || '',
+        attachment: '',
         createdAt: message.createdAt || new Date().toISOString()
     });
     if (activeChatArchiveMessages.length > 80) {
@@ -11517,7 +11913,10 @@ function archiveCurrentChatSession(options = {}) {
     };
     const list = safeParseSessionArchives();
     list.unshift(item);
-    saveSessionArchives(list);
+    if (!saveSessionArchives(list)) {
+        if (!options.silent) showToast(t('归档保存失败，本地存储空间不足。', 'Archive save failed: local storage is full.', '歸檔儲存失敗，本機儲存空間不足。'));
+        return null;
+    }
     sessionArchiveState.selectedId = item.id;
     if (options.clearAfter) clearChatHistory({ skipArchive: true });
     if (options.navigate) {
@@ -11707,6 +12106,7 @@ function restoreArchivedSession(id) {
         recordActiveChatArchiveMessage(msg);
         chatSessionHistory.push({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content || '' });
     });
+    persistChatSessionHistory();
     const chatNav = document.querySelector('.nav-item[data-tab="chat-view"]');
     if (chatNav) chatNav.click();
     showToast(t('session_archive.toast.restored'));
@@ -11780,15 +12180,78 @@ function resolveSelectedChatModel() {
     return null;
 }
 
+function chatModelSupportsImages(providerKey, modelId) {
+    const provider = localProviders && localProviders[providerKey];
+    const model = provider && Array.isArray(provider.models)
+        ? provider.models.find((item) => item && String(item.id) === String(modelId))
+        : null;
+    if (model) {
+        if (model.supportsImages === true || model.supportsImage === true || model.vision === true || model.multimodal === true) return true;
+        const caps = model.input || model.inputs || model.modalities || model.capabilities;
+        if (Array.isArray(caps) && caps.some((value) => /^(image|images|vision|multimodal)$/i.test(String(value)))) return true;
+        if (caps && typeof caps === 'object' && (caps.image === true || caps.images === true || caps.vision === true || caps.multimodal === true)) return true;
+    }
+    return /(vision|gemini|gpt-4o|gpt-4\.1|claude-3|claude-sonnet-4|claude-opus-4|qwen.*vl|llava|pixtral|agnes-(?:1\.5|2\.0)-flash)/i.test(String(modelId || ''));
+}
+
+function resolveVisionChatModel() {
+    const cfgRef = configData && configData.agents && configData.agents.defaults && configData.agents.defaults.imageModel
+        ? configData.agents.defaults.imageModel.primary
+        : '';
+    const preferred = parseModelRef(cfgRef || '');
+    const candidates = [];
+    if (preferred.provider && preferred.id) candidates.push({ provider: preferred.provider, id: preferred.id });
+    for (const provider of Object.keys(localProviders || {})) {
+        const models = localProviders[provider] && Array.isArray(localProviders[provider].models)
+            ? localProviders[provider].models
+            : [];
+        for (const model of models) {
+            if (model && model.id) candidates.push({ provider, id: model.id });
+        }
+    }
+    for (const candidate of candidates) {
+        if (!chatModelSupportsImages(candidate.provider, candidate.id)) continue;
+        if (setChatModelSelection(candidate.id, candidate.provider)) return resolveSelectedChatModel();
+    }
+    return null;
+}
+
 // 处理发送消息（直连各厂家服务，不依赖Nexora Agent）
 async function handleSendMessage() {
     const inputArea = document.getElementById('chat-text-input');
+    if (!inputArea) return;
+    if (chatAttachmentLoading) {
+        showToast(t('图片仍在处理中，请稍候再发送。', 'The image is still being prepared.', '圖片仍在處理中，請稍候再傳送。'));
+        return;
+    }
+    if (chatSendInFlight) {
+        showToast(t('上一条消息仍在处理中，请稍候…', 'The previous message is still processing.', '上一條訊息仍在處理中，請稍候…'));
+        return;
+    }
     const text = inputArea.value.trim();
     if (!text && !chatAttachmentBase64) return;
+
+    chatSendInFlight = true;
+    const btnSend = document.getElementById('btn-chat-send');
+    const previousSendDisabled = btnSend ? btnSend.disabled : false;
+    if (btnSend) {
+        btnSend.disabled = true;
+        btnSend.setAttribute('aria-busy', 'true');
+    }
+    const releaseChatSend = () => {
+        chatSendInFlight = false;
+        if (btnSend) {
+            btnSend.disabled = previousSendDisabled;
+            btnSend.removeAttribute('aria-busy');
+        }
+        chatSendAbortController = null;
+    };
 
     inputArea.value = '';
 
     // 上一次是生图/生视频临时切了图片/视频模型，这次发普通消息 → 自动切回原来的文字聊天模型
+    let historyStartLength = null;
+    let timeoutId = null;
     try {
         if (window.__preGenChatModel && window.__preGenChatModel.value) {
             const sel = ensureChatModelSelect();
@@ -11812,18 +12275,50 @@ async function handleSendMessage() {
 
     // 对话内角色指令不请求模型，由客户端直接执行并立即反馈。
     if (!file && typeof handleChatRoleCommand === 'function') {
-        const roleCommandHandled = await handleChatRoleCommand(text);
-        if (roleCommandHandled) return;
+        try {
+            const roleCommandHandled = await withChatTimeout(
+                handleChatRoleCommand(text),
+                CHAT_ROLE_COMMAND_TIMEOUT_MS,
+                'Role command timed out'
+            );
+            if (!roleCommandHandled) {
+                // Continue to the model request below.
+            } else {
+                releaseChatSend();
+                return;
+            }
+        } catch (e) {
+            console.error('Chat role command failed:', e);
+            appendChatMessage('ai', '⚠️ 角色指令执行失败，请重试。');
+            releaseChatSend();
+            return;
+        }
     }
 
     let resolved = resolveSelectedChatModel();
     if (!resolved) {
-        try { await loadChatModels(); } catch (e) {}
+        try {
+            await withChatTimeout(
+                loadChatModels(),
+                CHAT_MODEL_LOAD_TIMEOUT_MS,
+                'Chat model list timed out'
+            );
+        } catch (e) {}
         resolved = resolveSelectedChatModel();
     }
     if (!resolved || !resolved.modelId) {
         appendChatMessage('ai', '⚠️ 请先在右上角选择对话所用的大模型！如果下拉框为空，请先在【模型配置】中配置厂家模型。');
+        releaseChatSend();
         return;
+    }
+
+    if (file && !chatModelSupportsImages(resolved.providerKey, resolved.modelId)) {
+        resolved = resolveVisionChatModel();
+        if (!resolved) {
+            appendChatMessage('ai', '⚠️ 当前没有可用的图片识别模型，请在【模型配置】中为支持识图的模型开启图片输入能力。');
+            releaseChatSend();
+            return;
+        }
     }
 
     const providerKey = resolved.providerKey;
@@ -11835,6 +12330,7 @@ async function handleSendMessage() {
 
     if (!isAgnesBuiltIn && !localProviders[providerKey]) {
         appendChatMessage('ai', '⚠️ 所选的提供商配置不存在，请在【模型配置】中确认。');
+        releaseChatSend();
         return;
     }
 
@@ -11852,6 +12348,7 @@ async function handleSendMessage() {
 
     if (!baseUrl) {
         appendChatMessage('ai', `⚠️ 厂家 "${providerKey}" 未配置 Base URL 接口地址，请先前往【模型配置】填写。`);
+        releaseChatSend();
         return;
     }
 
@@ -11920,6 +12417,11 @@ async function handleSendMessage() {
      - **MCP 插件加载报错**：部分复杂的 MCP 插件需要外部的 \`python\` 或 \`uv\` 运行时支持。如果日志提示无法运行相关指令，请在系统内安装对应的运行环境，并在配置文件中核对执行路径。
      - **请求/转发报错（如 401/403/429 等）**：若与本地 AI 对话时，日志区提示 \`[patch-gateway] 请求大模型失败\`，代表本地网关网络是通的，但你配置的第三方大模型 API Key 无效、到期、欠费或超频限流，请前往【模型配置】中重新校对您的 API 密钥与代理端点。`;
 
+        // The legacy FAQ prompt above is intentionally not sent on every turn:
+        // repeating a full troubleshooting manual consumes context and delays
+        // first-token latency. Keep the stable identity/behavior contract short.
+        const conciseSystemPrompt = `你是 Nexora Agent 桌面应用中的智能助手。当前模型为 ${providerKey}/${modelId}。请直接、准确地回答用户问题；涉及模型身份时如实说明当前提供商和模型；涉及 Nexora Agent 故障时给出可执行的排查步骤，不虚构运行状态、日志或已经执行的操作。`;
+
         // 附加全局角色口吻（每次发送前强制读取最新启用角色，避免页面间状态不同步）
         let roleAddon = '';
         try {
@@ -11930,7 +12432,7 @@ async function handleSendMessage() {
                 roleAddon = getActiveRoleChatAddon() || '';
             }
         } catch (e) {}
-        let systemPromptToUse = systemPrompt;
+        let systemPromptToUse = conciseSystemPrompt;
         if (file) {
             systemPromptToUse = `你是一个具备强大视觉分析能力的智能 AI 助手。当前运行的底层模型为：【提供商: ${providerKey}, 模型ID: ${modelId}】。
 请仔细分析用户上传的这幅图像，并根据图像内容以及用户的提问，给出极其准确、客观且条理清晰的解答。`;
@@ -11941,7 +12443,11 @@ async function handleSendMessage() {
         });
         
         // 追加历史会话记录
+        if (file) {
+            chatSessionHistory = chatSessionHistory.map(stripChatImagePayload);
+        }
         messages.push(...chatSessionHistory);
+        historyStartLength = chatSessionHistory.length;
 
         let currentUserMsg;
         if (file) {
@@ -11968,7 +12474,8 @@ async function handleSendMessage() {
 
         // 增加 120 秒超时机制，防范上游 API 挂死导致界面无限卡顿
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        chatSendAbortController = controller;
+        timeoutId = setTimeout(() => controller.abort(), 120000);
 
         const response = await fetch(chatUrl, {
             method: 'POST',
@@ -11976,11 +12483,13 @@ async function handleSendMessage() {
             body: JSON.stringify(reqBody),
             signal: controller.signal
         });
-        clearTimeout(timeoutId);
 
         if (response.ok) {
-            const result = await response.json();
+            const result = await readChatResponseJson(response, controller);
             let reply = extractChatReply(result);
+            if (reply == null || String(reply).trim() === '') {
+                throw new Error('模型返回了空内容');
+            }
             
             if (typeof reply === 'string' && (/MEDIA\s*:/i.test(reply) || reply.includes('[[image]]') || reply.includes('[image]'))) {
                 const rendered = renderChatMediaHtml(reply);
@@ -11995,9 +12504,8 @@ async function handleSendMessage() {
             });
             recordActiveChatArchiveMessage({ role: 'assistant', content: reply, createdAt: new Date().toISOString() });
             // 限制历史记录长度，保留最近的20条（10轮）
-            if (chatSessionHistory.length > 20) {
-                chatSessionHistory = chatSessionHistory.slice(chatSessionHistory.length - 20);
-            }
+            chatSessionHistory = compactChatSessionHistory(chatSessionHistory);
+            persistChatSessionHistory();
 
             // 计入会话用量
             const usage = result.usage || { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 };
@@ -12008,20 +12516,38 @@ async function handleSendMessage() {
                 maybeSpeakDesktopReply(reply);
             }
         } else {
-            const errText = await response.text();
+            chatSessionHistory.splice(historyStartLength);
+            persistChatSessionHistory();
+            const errText = await readChatResponseText(response, controller, 15000);
             // errText 是模型厂家/中转返回的原始响应体，必须转义，否则恶意/被劫持的端点可注入可执行 HTML
-            aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 接口响应错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
+            aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 接口响应错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(safeDebugJson(errText || '未知错误', 2000))}</span>`;
         }
     } catch (e) {
-        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 联络模型接口失败，请确认该厂家的 Base URL 和您的网络连通状态。</span>`;
+        if (typeof historyStartLength === 'number') chatSessionHistory.splice(historyStartLength);
+        persistChatSessionHistory();
+        const message = e && (e.name === 'AbortError' || e.name === 'ChatTimeoutError')
+            ? '请求超时（120 秒），请检查网络或模型服务状态后重试。'
+            : (e && e.message ? e.message : '请确认该厂家的 Base URL 和您的网络连通状态。');
+        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 聊天请求失败：${escapeHtml(message)}</span>`;
         console.error('Chat completions error:', e);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+        releaseChatSend();
     }
 }
 
 // 真实调用图片/视频生成 API
+let mediaGenerationInFlight = false;
+
 async function handleActionGenerate(type) {
+    if (mediaGenerationInFlight) {
+        showToast('已有图片/视频生成任务进行中，请等待当前任务完成');
+        return;
+    }
+    mediaGenerationInFlight = true;
     const inputArea = document.getElementById('chat-text-input');
     const prompt = inputArea.value.trim();
+    if (!prompt) mediaGenerationInFlight = false;
     if (!prompt) {
         showToast(`请先在输入框中输入您要生成${type === 'image' ? '图片' : '视频'}的画面描述哦！`);
         return;
@@ -12142,8 +12668,9 @@ async function handleActionGenerate(type) {
             });
 
             if (!response.ok) {
+                mediaGenerationInFlight = false;
                 const errText = await response.text();
-                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生图接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
+                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生图接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(safeDebugJson(errText || '未知错误', 2000))}</span>`;
                 return;
             }
 
@@ -12165,9 +12692,9 @@ async function handleActionGenerate(type) {
                 aiBubble.innerHTML = `
                     <div style="display: flex; flex-direction: column; gap: 10px;">
                         <span style="font-weight: 600; color: #b894ff;">🎨 智能生图创作已完成！</span>
-                        <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${prompt}" | 模型: ${modelId}</span>
+                        <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${escapeHtml(prompt)}" | 模型: ${escapeHtml(modelId)}</span>
                         <div style="position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(140, 82, 255, 0.2); box-shadow: 0 4px 20px rgba(140, 82, 255, 0.15);">
-                            <img src="${imgSrc}" style="width: 100%; height: auto; max-height: 480px; object-fit: contain; display: block;" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;color:#ff6b6b;\\'>图片加载失败</div>'">
+                            <img src="${escapeHtml(imgSrc)}" style="width: 100%; height: auto; max-height: 480px; object-fit: contain; display: block;" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;color:#ff6b6b;\\'>图片加载失败</div>'">
                         </div>
                     </div>
                 `;
@@ -12180,6 +12707,7 @@ async function handleActionGenerate(type) {
                 `;
             }
             addSessionLog('image-gen', modelId, 500, 0, 0, 3000);
+            mediaGenerationInFlight = false;
         } else {
             // 视频生成 API（官方参数：width/height/num_frames/frame_rate）
             const cleanVideoModel = String(modelId || 'agnes-video-v2.0').includes('/')
@@ -12201,8 +12729,9 @@ async function handleActionGenerate(type) {
             });
 
             if (!response.ok) {
+                mediaGenerationInFlight = false;
                 const errText = await response.text();
-                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生视频接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(errText || '未知错误')}</span>`;
+                aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 生视频接口错误 (HTTP ${escapeHtml(String(response.status))}): ${escapeHtml(safeDebugJson(errText || '未知错误', 2000))}</span>`;
                 return;
             }
 
@@ -12222,16 +12751,17 @@ async function handleActionGenerate(type) {
                     aiBubble.innerHTML = `
                         <div style="display: flex; flex-direction: column; gap: 10px;">
                             <span style="font-weight: 600; color: #7fe6ff;">🎥 创意 AI 视频创作已完成！</span>
-                            <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${prompt}" | 模型: ${modelId}</span>
+                            <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${escapeHtml(prompt)}" | 模型: ${escapeHtml(modelId)}</span>
                             <div style="position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.2); box-shadow: 0 4px 20px rgba(0, 210, 255, 0.15);">
-                                <video src="${videoUrl}" autoplay loop muted playsinline controls style="width: 100%; height: auto; max-height: 400px; object-fit: contain; display: block;"></video>
+                                <video src="${escapeHtml(videoUrl)}" autoplay loop muted playsinline controls style="width: 100%; height: auto; max-height: 400px; object-fit: contain; display: block;"></video>
                             </div>
                         </div>
                     `;
                 } else {
-                    aiBubble.innerHTML = `<pre style="font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${JSON.stringify(result, null, 2)}</pre>`;
+                    aiBubble.innerHTML = `<pre style="font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(safeDebugJson(result))}</pre>`;
                 }
                 addSessionLog('video-gen', modelId, 1000, 0, 0, 8000);
+                mediaGenerationInFlight = false;
                 return;
             }
 
@@ -12246,13 +12776,17 @@ async function handleActionGenerate(type) {
             }
             const maxPolls = 180; // 最多轮询 180 次 (15分钟)
             let pollCount = 0;
+            let pollInFlight = false;
 
             const pollInterval = setInterval(async () => {
+                if (pollInFlight) return;
+                pollInFlight = true;
                 pollCount++;
                 try {
                     const pollResp = await fetch(pollUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } });
                     if (!pollResp.ok) {
                         clearInterval(pollInterval);
+                        mediaGenerationInFlight = false;
                         aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 查询视频任务状态失败 (HTTP ${pollResp.status})</span>`;
                         return;
                     }
@@ -12290,6 +12824,7 @@ async function handleActionGenerate(type) {
 
                     if (status === 'completed' || status === 'succeeded' || status === 'success') {
                         clearInterval(pollInterval);
+                        mediaGenerationInFlight = false;
                         let videoUrl = '';
                         if (pollResult.metadata && pollResult.metadata.url) videoUrl = pollResult.metadata.url;
                         else if (pollResult.video && pollResult.video.url) videoUrl = pollResult.video.url;
@@ -12302,9 +12837,9 @@ async function handleActionGenerate(type) {
                             aiBubble.innerHTML = `
                                 <div style="display: flex; flex-direction: column; gap: 10px;">
                                     <span style="font-weight: 600; color: #7fe6ff;">🎥 创意 AI 视频创作已完成！</span>
-                                    <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${prompt}" | 模型: ${modelId}</span>
+                                    <span style="font-size: 12px; color: var(--text-secondary);">提示词: "${escapeHtml(prompt)}" | 模型: ${escapeHtml(modelId)}</span>
                                     <div style="position: relative; border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.2); box-shadow: 0 4px 20px rgba(0, 210, 255, 0.15);">
-                                        <video src="${videoUrl}" autoplay loop muted playsinline controls style="width: 100%; height: auto; max-height: 400px; object-fit: contain; display: block;"></video>
+                                        <video src="${escapeHtml(videoUrl)}" autoplay loop muted playsinline controls style="width: 100%; height: auto; max-height: 400px; object-fit: contain; display: block;"></video>
                                     </div>
                                 </div>
                             `;
@@ -12319,19 +12854,26 @@ async function handleActionGenerate(type) {
                         addSessionLog('video-gen', modelId, 1000, 0, 0, pollCount * 15000);
                     } else if (status === 'failed' || status === 'error') {
                         clearInterval(pollInterval);
-                        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 视频生成失败: ${pollResult.error || pollResult.message || '未知错误'}</span>`;
-                    } else if (pollCount >= maxPolls) {
+                        mediaGenerationInFlight = false;
+                        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 视频生成失败: ${escapeHtml(safeDebugJson(pollResult.error || pollResult.message || '未知错误', 1000))}</span>`;
+                    } else if (pollCount >= Math.min(maxPolls, 60)) {
                         clearInterval(pollInterval);
+                        mediaGenerationInFlight = false;
                         aiBubble.innerHTML = `<span style="color: #ff6b6b;">⏰ 视频生成超时（等待超过15分钟），任务ID: ${taskId}</span>`;
                     }
                 } catch (pollErr) {
                     clearInterval(pollInterval);
+                    mediaGenerationInFlight = false;
                     aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 轮询视频状态失败: ${pollErr.message}</span>`;
+                } finally {
+                    pollInFlight = false;
+                    if (pollCount >= Math.min(maxPolls, 60)) mediaGenerationInFlight = false;
                 }
             }, 15000); // 每15秒查询一次
         }
     } catch (e) {
-        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ ${type === 'image' ? '生图' : '生视频'}请求失败: ${e.message || '网络错误，请检查接口地址和网络连接'}</span>`;
+        mediaGenerationInFlight = false;
+        aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ ${type === 'image' ? '生图' : '生视频'}请求失败: ${escapeHtml(String(e && e.message || '网络错误，请检查接口地址和网络连接'))}</span>`;
         console.error('Generation error:', e);
     }
     document.getElementById('chat-messages-container').scrollTop = document.getElementById('chat-messages-container').scrollHeight;
@@ -13043,16 +13585,21 @@ async function updateConsoleChannelStatusUI() {
 
 // 扫码绑定期间的高频轮询兜底：即使主进程成功事件因时序丢失，也能在 ~2s 内刷新状态并关闭二维码弹窗。
 let wechatBindingFastPollTimer = null;
+let wechatBindingFastPollInFlight = false;
 function startWeChatBindingFastPoll() {
     if (wechatBindingFastPollTimer) return;
     wechatBindingFastPollTimer = setInterval(async () => {
+        if (wechatBindingFastPollInFlight) return;
+        wechatBindingFastPollInFlight = true;
         try {
             const result = await window.api.checkWeChatStatus();
             if (result && result.bound && result.details) {
                 stopWeChatBindingFastPoll();
                 await updateWeChatStatusUI();
             }
-        } catch (e) {}
+        } catch (e) {} finally {
+            wechatBindingFastPollInFlight = false;
+        }
     }, 2000);
 }
 function stopWeChatBindingFastPoll() {
@@ -17773,7 +18320,11 @@ async function handleChatRoleCommand(text) {
 
     const role = matches[0];
     try {
-        const result = await window.api.saveRoleConfig({ action: 'activate', roleId: role.id });
+        const result = await withChatTimeout(
+            window.api.saveRoleConfig({ action: 'activate', roleId: role.id }),
+            CHAT_ROLE_CONFIG_TIMEOUT_MS,
+            'Role configuration save timed out'
+        );
         if (!result || !result.success || !result.data) {
             throw new Error((result && result.error) || 'unknown error');
         }
@@ -17990,7 +18541,11 @@ async function loadRoleConfigState(opts = {}) {
         return null;
     }
     try {
-        const result = await window.api.readRoleConfig();
+        const result = await withChatTimeout(
+            window.api.readRoleConfig(),
+            CHAT_ROLE_CONFIG_TIMEOUT_MS,
+            'Role configuration read timed out'
+        );
         if (!result || result.success === false || !result.data) {
             if (!opts.silent) showToast(roleT('roles.toast.loaded_fail', '角色配置加载失败'));
             return null;

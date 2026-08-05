@@ -11,7 +11,12 @@ const path = require('path');
 const CHANNEL_PLUGIN_IDS = [
   'feishu', 'qqbot', 'slack', 'whatsapp', 'matrix', 'voice-call', 'telegram'
 ];
-const STALE_PLUGIN_IDS = ['long-term-memory', 'channel-router'];
+const STALE_PLUGIN_IDS = [
+  'long-term-memory',
+  'channel-router',
+  'key-rotator-proxy',
+  'system-control'
+];
 
 function exists(p) {
   try { return !!(p && fs.existsSync(p)); } catch (e) { return false; }
@@ -211,6 +216,45 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
       config.plugins.allow = next;
       changed = true;
     }
+  }
+
+  if (config.plugins.installs && typeof config.plugins.installs === 'object') {
+    for (const id of STALE_PLUGIN_IDS) {
+      if (config.plugins.installs[id]) {
+        delete config.plugins.installs[id];
+        changed = true;
+      }
+    }
+  }
+
+  if (Array.isArray(config.plugins.allow)) {
+    const requiredBundledIds = new Set();
+    if (config.browser && config.browser.enabled !== false) requiredBundledIds.add('browser');
+    const webSearchProvider = config.tools?.web?.search?.provider;
+    const webFetchProvider = config.tools?.web?.fetch?.provider;
+    if (typeof webSearchProvider === 'string' && webSearchProvider.trim()) {
+      requiredBundledIds.add(webSearchProvider.trim());
+    }
+    if (typeof webFetchProvider === 'string' && webFetchProvider.trim()) {
+      requiredBundledIds.add(webFetchProvider.trim());
+    }
+    if (config.models?.providers?.ollama) requiredBundledIds.add('ollama');
+    for (const id of requiredBundledIds) {
+      if (!config.plugins.allow.includes(id)) {
+        config.plugins.allow.push(id);
+        changed = true;
+      }
+    }
+  }
+
+  // Explicit plugin allow lists avoid scanning stale ~/.openclaw/npm/projects
+  // entries that shadow the bundled communication packages at startup.
+  if (Array.isArray(config.plugins.allow)
+    && config.plugins.allow.length > 0
+    && !config.plugins.allow.includes('*')
+    && config.plugins.bundledDiscovery !== 'allowlist') {
+    config.plugins.bundledDiscovery = 'allowlist';
+    changed = true;
   }
 
   for (const id of CHANNEL_PLUGIN_IDS) {

@@ -132,16 +132,32 @@ function resolvePrimaryModelRef(cfg) {
 }
 
 function resolveVisionModelRef(cfg) {
-  const primaryVisionRef = resolvePrimaryModelRef(cfg);
-  if (primaryVisionRef) return primaryVisionRef;
-
   const imageModelRef =
     cfg &&
     cfg.agents &&
     cfg.agents.defaults &&
     cfg.agents.defaults.imageModel &&
     cfg.agents.defaults.imageModel.primary;
-  if (imageModelRef) return String(imageModelRef).trim();
+  if (imageModelRef) {
+    const parsed = parseModelRef(imageModelRef);
+    const model = parsed && findProviderModel(cfg, parsed.provider, parsed.model);
+    if (parsed && model && (isVisionModelObject(model) || isLikelyVisionModelId(parsed.model))) {
+      return parsed.primary;
+    }
+
+    // A stale/invalid explicit image reference should recover to the bundled
+    // known-good vision model before borrowing the primary model. This avoids
+    // routing image analysis back through a text endpoint or a provider that
+    // has already rejected the current region.
+    const defaultParsed = parseModelRef(DEFAULT_VISION_MODEL);
+    const defaultModel = defaultParsed && findProviderModel(cfg, defaultParsed.provider, defaultParsed.model);
+    if (defaultParsed && defaultModel && isVisionModelObject(defaultModel)) {
+      return DEFAULT_VISION_MODEL;
+    }
+  }
+
+  const primaryVisionRef = resolvePrimaryModelRef(cfg);
+  if (primaryVisionRef) return primaryVisionRef;
 
   return findFirstVisionModelRef(cfg) || DEFAULT_VISION_MODEL;
 }
@@ -228,7 +244,12 @@ function ensureVisionModelConfig(cfg, opts = {}) {
   const visionRef = resolveVisionModelRef(cfg);
   const currentImageModel =
     cfg.agents.defaults.imageModel.primary && String(cfg.agents.defaults.imageModel.primary).trim();
-  if (!currentImageModel || currentImageModel === DEFAULT_VISION_MODEL && visionRef !== DEFAULT_VISION_MODEL) {
+  const currentParsed = parseModelRef(currentImageModel);
+  const currentModel = currentParsed && findProviderModel(cfg, currentParsed.provider, currentParsed.model);
+  const currentExists = Boolean(
+    currentParsed && currentModel && (isVisionModelObject(currentModel) || isLikelyVisionModelId(currentParsed.model))
+  );
+  if (!currentImageModel || !currentExists || (currentImageModel === DEFAULT_VISION_MODEL && visionRef !== DEFAULT_VISION_MODEL)) {
     cfg.agents.defaults.imageModel.primary = visionRef;
     changed = true;
   }
