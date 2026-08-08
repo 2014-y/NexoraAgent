@@ -3222,6 +3222,8 @@ function applyChannelStatusFromLogLine(lineHtml) {
         line.includes('飞书/Lark 消息通道已成功上线')
         || line.includes('飞书/Lark 的消息通道已成功上线')
         || (line.includes('飞书插件') && line.includes('🟢'))
+        || (/websocket client started/i.test(line) && /feishu|飞书|lark/i.test(line))
+        || /feishu\[[^\]]+\]:\s*websocket client started/i.test(line)
     ) {
         setChannelStatusTile('feishu', true);
         hit = true;
@@ -3274,6 +3276,8 @@ function syncChannelStatusTilesFromLogs(options = {}) {
                 line.includes('飞书/Lark 消息通道已成功上线')
                 || line.includes('飞书/Lark 的消息通道已成功上线')
                 || (line.includes('飞书插件') && line.includes('🟢'))
+                || (/websocket client started/i.test(line) && /feishu|飞书|lark/i.test(line))
+                || /feishu\[[^\]]+\]:\s*websocket client started/i.test(line)
             ) {
                 latest.feishu = true;
             }
@@ -3770,15 +3774,27 @@ function formatLogForUser(text) {
         return `[🤖 QQ机器人] 🟢 QQ 机器人消息通道已成功上线连接！正在实时接收消息中...`;
     }
 
-    // 飞书/Lark 通道就绪
+    // 飞书/Lark 通道就绪（真实网关日志：feishu[id]: WebSocket client started）
     if (
-        lowerLine.includes('feishu ready') || 
-        lowerLine.includes('feishu connected') || 
-        lowerLine.includes('lark connected') ||
-        lowerLine.includes('websocket client started') ||
-        lowerLine.includes('starting webhook server')
+        lowerLine.includes('feishu ready')
+        || lowerLine.includes('feishu connected')
+        || lowerLine.includes('lark connected')
+        || lowerLine.includes('websocket client started')
+        || lowerLine.includes('starting webhook server')
+        || /feishu\[[^\]]+\]:\s*websocket client started/i.test(cleanLine)
+        || /\[feishu\].*websocket client started/i.test(cleanLine)
+        || (lowerLine.includes('feishu') && lowerLine.includes('webhook server listening'))
     ) {
         return `[🕊️ 飞书插件] 🟢 飞书/Lark 消息通道已成功上线连接！正在实时接收消息中...`;
+    }
+
+    // 飞书开始建连（仅进度，不点亮绿点）
+    if (
+        /starting feishu\[/i.test(cleanLine)
+        || /feishu\[[^\]]+\]:\s*starting websocket connection/i.test(cleanLine)
+        || (lowerLine.includes('feishu') && lowerLine.includes('bot open_id resolved'))
+    ) {
+        return `[🕊️ 飞书插件] 正在建立飞书/Lark 消息通道连接...`;
     }
 
     // 健康监测
@@ -3940,7 +3956,7 @@ function setupIpcListeners() {
                 }
                 stateChanged = true;
             }
-            // Feishu Gateway（websocket client started 等原先只会落到 active）
+            // Feishu Gateway（真实日志：feishu[id]: WebSocket client started）
             if (lowerText.includes('feishu') || lowerText.includes('lark')) {
                 if (
                     lowerText.includes('ready')
@@ -3950,6 +3966,7 @@ function setupIpcListeners() {
                     || lowerText.includes('websocket client started')
                     || lowerText.includes('starting webhook server')
                     || lowerText.includes('消息通道已成功上线')
+                    || /feishu\[[^\]]+\]:\s*websocket client started/i.test(text)
                 ) {
                     topoNodeStates['node-feishu'] = 'completed';
                 } else if (topoNodeStates['node-feishu'] !== 'completed') {
@@ -3990,15 +4007,24 @@ function setupIpcListeners() {
             return;
         }
 
-        // 🌟 拦截飞书 WebSocket 调试与长连接引导提示信息，防止刷屏影响首屏日志视觉
-        if (text.includes('persistent connection only available') || text.includes('Developer Console(开发者后台)') || text.includes('Events and Callbacks') || text.includes('开发者后台')) {
-            return;
-        }
-
         // 🌟 过滤冗余的未安装插件警告、框架表格线与垃圾说明，使终端日志框只保留核心关键步骤
+        // 注意：飞书 Lark SDK 的「persistent connection / 开发者后台」提示会与
+        // 「WebSocket client started」同一批 stdout 刷出；绝不能整块 return，只能按行丢噪音，
+        // 否则活动流无飞书上线日志、右侧飞书绿点也永远点不亮。
         const filteredLines = text.split('\n').filter(line => {
             const cleanLine = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
+            if (!cleanLine) return false;
             if (isMediaApiNoiseLog(cleanLine)) return false;
+            // 飞书 SDK 长连接引导噪音（按行丢弃，保留同批成功日志）
+            if (
+                cleanLine.includes('persistent connection only available')
+                || cleanLine.includes('Developer Console(开发者后台)')
+                || cleanLine.includes('Events and Callbacks')
+                || cleanLine.includes('开发者后台')
+                || /receive events or callbacks through persistent connection/i.test(cleanLine)
+            ) {
+                return false;
+            }
             // 启动成败行必须保留，即使含表格竖线 / doctor 字样
             const keepStartOutcome =
                 cleanLine.includes('Gateway failed to start') ||
@@ -4007,15 +4033,19 @@ function setupIpcListeners() {
                 cleanLine.includes('已拦截非授权启动') ||
                 cleanLine.includes('正在准备启动 Gateway') ||
                 cleanLine.includes('正在拉起内置 OpenClaw Gateway') ||
-                (cleanLine.includes('端口') && cleanLine.includes('仍被占用'));
+                (cleanLine.includes('端口') && cleanLine.includes('仍被占用')) ||
+                // 飞书/QQ 上线成功行绝不能被表格线等规则误杀
+                /websocket client started/i.test(cleanLine) ||
+                /starting feishu\[/i.test(cleanLine) ||
+                /feishu\[.+\]:\s*bot open_id resolved/i.test(cleanLine);
             if (keepStartOutcome) return true;
             return !(
-                cleanLine.includes('|') || 
-                cleanLine.includes('plugin not installed') || 
+                cleanLine.includes('|') ||
+                cleanLine.includes('plugin not installed') ||
                 cleanLine.includes('failed probing with reason') || // 过滤云电脑/虚拟网卡回环导致的 Bonjour 冲突报错
                 cleanLine.includes('Can\'t probe for a service which is announced already') ||
-                cleanLine.includes('plugins.allow is empty') || 
-                cleanLine.includes('discovered non-bundled plugins') || 
+                cleanLine.includes('plugins.allow is empty') ||
+                cleanLine.includes('discovered non-bundled plugins') ||
                 cleanLine.includes('To trust them') ||
                 cleanLine.includes('Run \'openclaw plugins') ||
                 cleanLine.includes('you trust to plugins') ||
@@ -4025,7 +4055,7 @@ function setupIpcListeners() {
                 /^[\u2580-\u259F\s]+$/.test(cleanLine) // 过滤字符画二维码方块行（已有 Canvas 弹窗展示）
             );
         });
-        
+
         if (filteredLines.length === 0) {
             return;
         }

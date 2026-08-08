@@ -69,9 +69,7 @@ function isPluginPathStaleOnThisMachine(pluginPath, ctx = {}) {
     return true;
 }
 
-function looksLikeOfficialOpenClawChannelPath(p) {
-    return /[\\/]@openclaw[\\/](feishu|qqbot|slack|whatsapp|matrix|voice-call)(?:[\\/]|$)/i.test(String(p || ''));
-}
+function looksLikeOfficialOpenClawChannelPath(p) { return false; }
 
 /**
  * 统一清洗 plugins.load.paths / installs：丢掉野指针，官方渠道路径不进 load.paths。
