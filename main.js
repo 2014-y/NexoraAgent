@@ -219,20 +219,30 @@ function resolveAppFsPath(...segments) {
 function getAvailableNodePath() {
     const isWin = process.platform === 'win32';
     const sandboxName = isWin ? 'node.exe' : 'node';
-    const sandboxPath = resolveAppFsPath('.node-sandbox', sandboxName);
-    if (fs.existsSync(sandboxPath)) {
-        try {
-            // 检查内置 node 是否真的能运行（防范缺少 VC++ 运行库或被安全组策略拦截）
-            const check = require('child_process').execFileSync(sandboxPath, ['-v'], { encoding: 'utf8', timeout: 1000 }).trim();
-            const match = check.match(/^v(\d+)\.(\d+)\.(\d+)/);
-            const major = match ? parseInt(match[1], 10) : 0;
-            const minor = match ? parseInt(match[2], 10) : 0;
-            const patch = match ? parseInt(match[3], 10) : 0;
-            if (major > 24 || (major === 24 && (minor > 15 || (minor === 15 && patch >= 0))) || (major === 22 && minor >= 22) || major >= 25) {
-                return sandboxPath;
+    let runtimeRoot = null;
+    try { runtimeRoot = getGatewayRuntimeRoot(app); } catch (e) {}
+
+    const candidates = [
+        resolveAppFsPath('.node-sandbox', sandboxName),
+        runtimeRoot ? path.join(runtimeRoot, '.node-sandbox', sandboxName) : null,
+        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'NexoraAgent', 'gateway-runtime', '.node-sandbox', sandboxName) : null,
+    ].filter(Boolean);
+
+    for (const sandboxPath of candidates) {
+        if (fs.existsSync(sandboxPath)) {
+            try {
+                // 检查内置 node 是否真的能运行（防范缺少 VC++ 运行时库或被安全组策略拦截）
+                const check = require('child_process').execFileSync(sandboxPath, ['-v'], { encoding: 'utf8', timeout: 1000 }).trim();
+                const match = check.match(/^v(\d+)\.(\d+)\.(\d+)/);
+                const major = match ? parseInt(match[1], 10) : 0;
+                const minor = match ? parseInt(match[2], 10) : 0;
+                const patch = match ? parseInt(match[3], 10) : 0;
+                if (major > 24 || (major === 24 && (minor > 15 || (minor === 15 && patch >= 0))) || (major === 22 && minor >= 22) || major >= 25) {
+                    return sandboxPath;
+                }
+            } catch (e) {
+                console.warn(`[NodeSandbox] 内置 Node 存在但无法运行 (${sandboxPath}): ${e.message}`);
             }
-        } catch (e) {
-            console.warn(`[NodeSandbox] 内置 Node 存在但无法运行: ${e.message}`);
         }
     }
     
@@ -1846,13 +1856,7 @@ function isMediaApiNoiseLog(text) {
         l.includes('unsupportedparamserror') ||
         l.includes('all image api keys failed') ||
         l.includes('all video api keys failed') ||
-        l.includes('parseerror') ||
-        l.includes('unexpected token') ||
-        // 恢复类插件加载失败绝不能吞：它们挂了 = 溢出自愈网整个失效，必须让用户/日志看得见
-        (l.includes('failed to load plugin')
-            && !l.includes('session-overflow-rollover')
-            && !l.includes('error-filter')
-            && !l.includes('session-tool-heal')) ||
+        
         l.includes('extensions/image-generator') ||
         l.includes('extensions/video-generator') ||
         l.includes('extensions\\image-generator') ||
