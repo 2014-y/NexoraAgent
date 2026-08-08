@@ -1046,6 +1046,15 @@ function applyProviderUiMetaToConfig(config) {
 function stripNonSchemaOpenClawConfig(config, options = {}) {
     let changed = false;
     if (!config || typeof config !== 'object') return false;
+    if (config.channels && typeof config.channels === 'object') {
+        if (config.channels.feishu && typeof config.channels.feishu === 'object') {
+            const mode = config.channels.feishu.connectionMode;
+            if (mode && mode !== 'websocket' && mode !== 'webhook') {
+                config.channels.feishu.connectionMode = 'websocket';
+                changed = true;
+            }
+        }
+    }
     if (config.imageGenerator) { delete config.imageGenerator; changed = true; }
     if (config.videoGenerator) { delete config.videoGenerator; changed = true; }
     if (config.agents && config.agents.defaults) {
@@ -5797,6 +5806,13 @@ function ensureOpenClawConfigInitialized() {
             needsSave = true;
             console.log('[System] Stripped root "google" key from openclaw.json for Gateway compatibility');
         }
+
+        try {
+            if (stripNonSchemaOpenClawConfig(config)) {
+                needsSave = true;
+                console.log('[ConfigSanitize] Stripped non-schema fields and normalized channel config');
+            }
+        } catch (e) {}
 
         // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
         if (!config.ui) { config.ui = {}; needsSave = true; }
