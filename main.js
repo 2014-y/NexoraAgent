@@ -1,4 +1,7 @@
 // main.js - Electron 主进程入口
+// [FIX] 清理外部 NODE_OPTIONS 污染，防止 --require 等参数干扰 Electron 主进程启动
+// 打包后的应用不应依赖任何外部 NODE_OPTIONS 设置
+delete process.env.NODE_OPTIONS;
 const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session, dialog, clipboard, protocol, crashReporter } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -1414,8 +1417,8 @@ function deployRuntimeArtifacts() {
     }
     const patchAbs = path.join(dir, 'patch_gateway.js');
     const patchPath = patchAbs.replace(/\\/g, '/');
-    process.env.NEXORA_AGENT_PATCH_PATH = patchPath;
-    process.env.NEXORA_AGENT_RUNTIME_DIR = dir;
+    // [FIX] 不再往 process.env 写入，避免污染 Electron 主进程环境变量
+    // 这些值通过返回值传递给 startGatewayProcess 中的子进程环境
     return { runtimeDir: dir, patchPath, patchAbs };
 }
 
@@ -2295,12 +2298,14 @@ function sanitizeFeishuConfig(config) {
 }
 
 // 通过 NODE_OPTIONS 把 patch_gateway.js 传播到Nexora Agent及其 spawn 出的所有子进程/worker。
-function buildPatchedNodeOptions(patchPath) {
+function buildPatchedNodeOptions(patchPath, baseNodeOptions) {
     const targetPath = String(patchPath || process.env.NEXORA_AGENT_PATCH_PATH || '')
         .replace(/\\/g, '/');
-    if (!targetPath) return (process.env.NODE_OPTIONS || '').trim();
+    // [FIX] 不再从主进程 process.env.NODE_OPTIONS 继承（主进程启动时已清理）
+    // 改为显式接收 baseNodeOptions 参数，默认为空
+    const existing = String(baseNodeOptions || '').trim();
+    if (!targetPath) return existing;
     const injected = `--require "${targetPath}" --dns-result-order=ipv4first --no-warnings`;
-    const existing = (process.env.NODE_OPTIONS || '').trim();
     if (existing.includes(targetPath) || existing.includes('patch_gateway.js')) return existing.includes(targetPath) ? existing : `${injected} ${existing}`;
     return existing ? `${injected} ${existing}` : injected;
 }
@@ -5122,8 +5127,9 @@ async function startGatewayProcess(opts = {}) {
                 childEnv.NODE_TLS_REJECT_UNAUTHORIZED = '0';
             }
             childEnv.NEXORA_AGENT_PATCH_PATH = patchPath;
-            childEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
-            childEnv.NEXORA_AGENT_RUNTIME_DIR = process.env.NEXORA_AGENT_RUNTIME_DIR || path.dirname(patchPath);
+            // 显式传入前置的 NODE_OPTIONS (如果想继承其他的，改从 baseEnv 中取)
+            childEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath, childEnv.NODE_OPTIONS);
+            childEnv.NEXORA_AGENT_RUNTIME_DIR = path.dirname(patchPath);
             childEnv.OPENCLAW_SUPPRESS_CRASH_BREAKER = 'true';
             childEnv.OPENCLAW_IGNORE_UNCLEAN_BOOTS = 'true';
             childEnv.OPENCLAW_RESET_RESTART_LOOP = 'true';
@@ -7944,7 +7950,7 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
     for (const key of Object.keys(cleanEnv)) {
         if (key.toLowerCase().includes('proxy')) delete cleanEnv[key];
     }
-    cleanEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath);
+    cleanEnv.NODE_OPTIONS = buildPatchedNodeOptions(patchPath, '');
     try {
         const runtimeNm = resolveAppFsPath('node_modules');
         if (fs.existsSync(runtimeNm)) {
