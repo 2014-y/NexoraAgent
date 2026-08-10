@@ -1267,8 +1267,11 @@ let CONFIG_PATH = path.join(CONFIG_DIR, 'openclaw.json');
  * 消除「非原子整文件覆盖」被网关并发读到半截 JSON 的问题（这是 .rejected /
  * unreadable-config-before-write / .bak-jsonfix 等损坏文件的根因）。
  * 同卷 rename 在 Windows/NTFS 上是原子替换，读者永远看到完整旧文件或完整新文件。
- * 注：这只根治「torn read 损坏」；app 与网关双写导致的 clobber+restore ping-pong
- * 需「单一写者」架构改造，后续处理。
+ * 注：同时同步网关 clobber 守卫的还原源（.bak）与基线（.last-good）。
+ * OpenClaw 网关会把「体积骤降 50%+ 的外部写入」当成配置损坏，从 .bak 整体还原——
+ * 用户在 UI 里删厂商/换模型会让配置合法变小，若不同步基线就会被守卫秒回滚
+ * （表现为「厂商删了重启又回来」「配置的模型不生效」）。
+ * 同步后即使守卫触发，还原源也是同一份新内容，等于放行。
  */
 function writeConfigFileAtomic(contents) {
     const fs = require('fs');
@@ -1289,6 +1292,8 @@ function writeConfigFileAtomic(contents) {
         try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
         throw e;
     }
+    try { fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + '.bak'); } catch (_) {}
+    try { fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + '.last-good'); } catch (_) {}
 }
 
 function resolveStableOpenClawHome(preferredHome) {
@@ -7148,17 +7153,10 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             }
         } catch (e) {}
         
-        // 读取原本的文件尺寸
-        const originalBytes = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).size : 39500;
-        
-        let newJson = JSON.stringify(cleanConfig, null, 2);
-        
-        // 空白填充算法防回滚自愈
-        const newBytes = Buffer.byteLength(newJson, 'utf8');
-        if (newBytes < originalBytes) {
-            const padSize = originalBytes - newBytes;
-            newJson = newJson + '\n' + ' '.repeat(padSize - 1);
-        }
+        // 不再做空白填充防回滚：填充会让配置和守卫基线的体积只增不减（曾膨胀到 159KB），
+        // 之后任何合法删减都必然触发 50% 体积骤降判定被整体还原。
+        // 现在 writeConfigFileAtomic 会同步 .bak/.last-good 基线，从根上放行合法写入。
+        const newJson = JSON.stringify(cleanConfig, null, 2);
 
         writeConfigFileAtomic(newJson);
 
