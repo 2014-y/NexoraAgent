@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Nexora Agent",
   "keywords": [
     "ai",
@@ -34,8 +34,8 @@
     "app:start": "electron .",
     "preapp:dist": "node scripts/clean-dist.js && node scripts/ensure-asr-release-asset.js && node scripts/ensure-builtin-asr.js && node scripts/ensure-voice-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "clean:dist": "node scripts/clean-dist.js",
-    "app:dist": "electron-builder --windows nsis",
-    "postapp:dist": "node scripts/copy-asr-to-dist.js && node scripts/copy-voice-to-dist.js",
+    "app:dist": "node scripts/run-electron-builder.js --windows nsis",
+    "postapp:dist": "node scripts/copy-asr-to-dist.js && node scripts/copy-voice-to-dist.js && node scripts/verify-windows-package.js",
     "asr:ensure": "node scripts/ensure-asr-release-asset.js",
     "asr:copy-dist": "node scripts/copy-asr-to-dist.js",
     "voice:ensure": "node scripts/ensure-voice-release-asset.js",
@@ -45,10 +45,11 @@
     "app:dist:mac": "npm run clean:dist && npm run dist:prepare && electron-builder --mac",
     "app:dist:linux": "npm run clean:dist && npm run dist:prepare && electron-builder --linux",
     "pack:runtime": "node scripts/pack-gateway-runtime.js",
+    "verify:package": "node scripts/verify-windows-package.js",
     "data-center:install": "npm --prefix data-center install --omit=dev"
   },
   "dependencies": {
-    "@openclaw/feishu": "2026.6.11",
+    "@openclaw/feishu": "2026.7.1",
     "@openclaw/matrix": "^2026.7.1",
     "@openclaw/qqbot": "^2026.7.1",
     "@openclaw/slack": "^2026.7.1",
@@ -65,11 +66,11 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "optionalDependencies": {
-    "sherpa-onnx-win-x64": "^1.13.4",
     "sherpa-onnx-darwin-arm64": "^1.13.4",
     "sherpa-onnx-darwin-x64": "^1.13.4",
+    "sherpa-onnx-linux-arm64": "^1.13.4",
     "sherpa-onnx-linux-x64": "^1.13.4",
-    "sherpa-onnx-linux-arm64": "^1.13.4"
+    "sherpa-onnx-win-x64": "^1.13.4"
   },
   "devDependencies": {
     "electron": "^31.0.0",

@@ -7,6 +7,7 @@
 
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
+!include "nsProcess.nsh"
 
 !macro customHeader
   ShowInstDetails show
@@ -24,26 +25,73 @@
 !macro NexoraAgent_ForceKill
   SetDetailsPrint both
   !insertmacro NexoraAgent_Log "[process] stopping existing Nexora Agent processes"
-  ; 主进程直接 taskkill（/T 连带子进程），不依赖 PowerShell 解析
+  ; 优先使用 NSIS 原生插件，不依赖 PowerShell 执行策略或命令解析。
+  ${nsProcess::KillProcess} "Nexora Agent.exe" $0
+  ${nsProcess::KillProcess} "NexoraAgent.exe" $0
+  ${nsProcess::KillProcess} "ai-assistant.exe" $0
+  ${nsProcess::KillProcess} "AI Assistant.exe" $0
+  ${nsProcess::KillProcess} "ClawAI.exe" $0
+  ${nsProcess::KillProcess} "Claw AI.exe" $0
+  ; 当前品牌名以及历史版本可能使用过的可执行文件名都要关闭。
+  ; /T 连带 Electron renderer / gateway 等子进程，/F 避免托盘驻留拦截升级。
   nsExec::Exec 'taskkill /F /T /IM "Nexora Agent.exe"'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM "NexoraAgent.exe"'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM "ai-assistant.exe"'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM "AI Assistant.exe"'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM "ClawAI.exe"'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM "Claw AI.exe"'
   Pop $0
   ; runtime 里的 node.exe 按路径过滤后杀（同时匹配安装目录 Nexora Agent 与缓存目录 NexoraAgent）
   ; 注意：NSIS 中 $$_ 才展开为 PowerShell 管道变量 $_，写成 $$. 会展开成 $. 造成整段解析失败
-  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { try { $$p = [string]$$_.Path; $$p -like \"*Nexora Agent*\" -or $$p -like \"*NexoraAgent*\" } catch { $$false } } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0"'
+  nsExec::Exec 'powershell.exe -NoProfile -NoLogo -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$ErrorActionPreference=\"SilentlyContinue\"; Get-Process -ErrorAction SilentlyContinue | Where-Object { try { $$n = [string]$$_.ProcessName; $$p = [string]$$_.Path; $$n -in @(\"Nexora Agent\",\"ai-assistant\",\"ClawAI\",\"Claw AI\") -or ($$n -eq \"node\" -and ($$p -like \"*Nexora Agent*\" -or $$p -like \"*NexoraAgent*\" -or $$p -like \"*ClawAI*\")) } catch { $$false } } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0"'
   Pop $0
-  ; 轮询等进程真正退出（最多 5 秒），避免解压时文件仍被占用
+  ; 用 NSIS 原生插件轮询所有历史主进程名（最多 10 秒）。
   StrCpy $1 0
   ${Do}
-    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Nexora Agent.exe" | find /I "Nexora Agent.exe" >nul'
-    Pop $0
-    ${IfThen} $0 != 0 ${|} ${ExitDo} ${|}
+    StrCpy $2 1
+    ${nsProcess::FindProcess} "Nexora Agent.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${nsProcess::FindProcess} "NexoraAgent.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${nsProcess::FindProcess} "ai-assistant.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${nsProcess::FindProcess} "AI Assistant.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${nsProcess::FindProcess} "ClawAI.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${nsProcess::FindProcess} "Claw AI.exe" $0
+    ${IfThen} $0 == 0 ${|} StrCpy $2 0 ${|}
+    ${IfThen} $2 == 1 ${|} ${ExitDo} ${|}
     Sleep 500
     IntOp $1 $1 + 1
-  ${LoopUntil} $1 >= 10
+  ${LoopUntil} $1 >= 20
+
+  ; 若目标程序以管理员权限运行，普通安装器无法结束它。
+  ; 仅在确认仍存活时请求一次管理员权限执行 taskkill，然后再次等待。
+  ${If} $2 == 0
+    !insertmacro NexoraAgent_Log "[process] process still alive; requesting elevated shutdown"
+    ExecShell "runas" "$SYSDIR\taskkill.exe" '/F /T /IM "Nexora Agent.exe"' SW_HIDE
+    Sleep 3000
+    ${nsProcess::KillProcess} "Nexora Agent.exe" $0
+    ${nsProcess::KillProcess} "NexoraAgent.exe" $0
+    ${nsProcess::KillProcess} "ai-assistant.exe" $0
+    ${nsProcess::KillProcess} "AI Assistant.exe" $0
+    ${nsProcess::KillProcess} "ClawAI.exe" $0
+    ${nsProcess::KillProcess} "Claw AI.exe" $0
+  ${EndIf}
+  ${nsProcess::Unload}
   !insertmacro NexoraAgent_Log "[process] force kill finished (waited $1 rounds)"
 !macroend
 
 !macro customInit
+  ; 必须在新安装器调用旧版 uninstaller.exe /S 之前关闭程序。
+  ; 只放在 customInstall 会太晚，旧卸载器会先弹出“无法关闭”对话框。
+  !insertmacro NexoraAgent_ForceKill
 !macroend
 
 !macro customCheckAppRunning
@@ -93,7 +141,7 @@
     ; 与 gateway-runtime.js writeRuntimeStamp 对齐，避免首次启动再整包重解压
 
     FileOpen $1 "$LOCALAPPDATA\NexoraAgent\gateway-runtime\.runtime-stamp" w
-    FileWrite $1 "${VERSION}:pack-025a244ce6f2"
+    FileWrite $1 "${VERSION}:pack-452fd6370bd9"
     FileClose $1
     !insertmacro NexoraAgent_Log "[runtime] fresh runtime install completed"
   ${Else}

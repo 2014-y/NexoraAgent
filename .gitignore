@@ -18,6 +18,12 @@ __pycache__/
 /dist/
 /dist2/
 /dist_release/
+/dist-release/
+/dist-autoclose/
+/dist-autoclose-v2/
+/dist-final/
+/dist-final-v2/
+/dist-final-v3/
 /build-resources/
 
 # Scratch and runtime version files
@@ -25,6 +31,7 @@ __pycache__/
 .tmp*
 _tmp_*
 .runtime-version
+.build-output-dir
 
 # Voice models (runtime downloads / local caches)
 builtin-asr/

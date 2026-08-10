@@ -8,16 +8,16 @@
 const fs = require('fs');
 const path = require('path');
 
+const { resolveBuildOutputPath } = require('./build-output-dir');
 const ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(ROOT, 'release-assets', 'voice-packs');
-const DIST = path.join(ROOT, 'dist');
 
 function main() {
   if (!fs.existsSync(SRC_DIR)) {
     console.warn('[copy-voice-to-dist] skip: missing', SRC_DIR);
     return;
   }
-  fs.mkdirSync(DIST, { recursive: true });
+  fs.mkdirSync(resolveBuildOutputPath(), { recursive: true });
   const entries = fs.readdirSync(SRC_DIR).filter((name) => {
     if (name === 'README.md' || name.startsWith('.')) return false;
     const full = path.join(SRC_DIR, name);
@@ -29,7 +29,7 @@ function main() {
   }
   for (const name of entries) {
     const src = path.join(SRC_DIR, name);
-    const dest = path.join(DIST, name);
+    const dest = resolveBuildOutputPath(name);
     fs.copyFileSync(src, dest);
     const mb = (fs.statSync(dest).size / 1048576).toFixed(2);
     console.log(`[copy-voice-to-dist] copied -> ${dest} (${mb} MB)`);

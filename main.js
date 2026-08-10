@@ -3976,6 +3976,58 @@ function prepareChannelPluginsBeforeGateway() {
         }
     }
 
+    // -------------------
+    // 清扫 ~/.openclaw/npm/projects 里残缺的官方插件缓存副本。
+    // OpenClaw 启动时会优先校验这些副本；若其声明的 runtime 入口（dist/*.js）
+    // 缺失，整个 Gateway 会以 Invalid config 拒绝启动，即使随包 runtime 完好。
+    // -------------------
+    try {
+        const projectsDir = path.join(CONFIG_DIR, 'npm', 'projects');
+        if (fs.existsSync(projectsDir)) {
+            for (const projName of fs.readdirSync(projectsDir)) {
+                const projDir = path.join(projectsDir, projName);
+                let broken = false;
+                try {
+                    if (!fs.statSync(projDir).isDirectory()) continue;
+                    const nmDir = path.join(projDir, 'node_modules');
+                    if (!fs.existsSync(nmDir)) continue;
+                    const pkgDirs = [];
+                    for (const scopeOrPkg of fs.readdirSync(nmDir)) {
+                        const p1 = path.join(nmDir, scopeOrPkg);
+                        if (scopeOrPkg.startsWith('@')) {
+                            for (const sub of fs.readdirSync(p1)) pkgDirs.push(path.join(p1, sub));
+                        } else {
+                            pkgDirs.push(p1);
+                        }
+                    }
+                    for (const pkgDir of pkgDirs) {
+                        const pkgJsonPath = path.join(pkgDir, 'package.json');
+                        if (!fs.existsSync(pkgJsonPath)) continue;
+                        let meta = null;
+                        try { meta = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')).openclaw; } catch (e) {}
+                        if (!meta) continue;
+                        const declared = []
+                            .concat(Array.isArray(meta.runtimeExtensions) ? meta.runtimeExtensions : [])
+                            .concat(meta.runtimeSetupEntry ? [meta.runtimeSetupEntry] : []);
+                        for (const rel of declared) {
+                            if (typeof rel !== 'string' || !rel) continue;
+                            if (!fs.existsSync(path.join(pkgDir, rel))) { broken = true; break; }
+                        }
+                        if (broken) break;
+                    }
+                } catch (e) { continue; }
+                if (broken) {
+                    try {
+                        fs.rmSync(projDir, { recursive: true, force: true });
+                        console.log(`[PluginSeed] Removed broken npm/projects plugin cache: ${projName}`);
+                    } catch (e) {
+                        console.error(`[PluginSeed] Failed to remove broken plugin cache ${projName}:`, e.message);
+                    }
+                }
+            }
+        }
+    } catch (e) {}
+
 
     if (needsSave) {
         writeConfigFileAtomic(JSON.stringify(config, null, 2));

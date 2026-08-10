@@ -5,10 +5,10 @@
 const fs = require('fs');
 const path = require('path');
 
+const { resolveBuildOutputPath } = require('./build-output-dir');
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'release-assets', 'asr-models', 'sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2');
-const DIST = path.join(ROOT, 'dist');
-const DEST = path.join(DIST, 'sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2');
+const DEST = resolveBuildOutputPath('sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2');
 
 function main() {
   if (!fs.existsSync(SRC)) {
@@ -16,7 +16,7 @@ function main() {
     console.warn('[copy-asr-to-dist] run: node scripts/ensure-asr-release-asset.js');
     return;
   }
-  fs.mkdirSync(DIST, { recursive: true });
+  fs.mkdirSync(path.dirname(DEST), { recursive: true });
   fs.copyFileSync(SRC, DEST);
   const mb = (fs.statSync(DEST).size / 1048576).toFixed(1);
   console.log(`[copy-asr-to-dist] copied -> ${DEST} (${mb} MB)`);

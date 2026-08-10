@@ -101,11 +101,15 @@ function pathMeta(p) {
 
 function computeFingerprint() {
   const h = crypto.createHash('sha1');
-  h.update(`v7|pack-id-dynamic|`);
+  h.update(`v8|pack-id-stable|`);
   h.update(fileHash(path.join(ROOT, 'package.json')));
   h.update(fileHash(path.join(ROOT, 'package-lock.json')));
-  // 排除 runtime-pack-manifest.js，防止自更新导致指纹无限改变
-  for (const f of ROOT_FILES) h.update(fileHash(path.join(ROOT, f)));
+  // manifest 内含由本指纹派生的 RUNTIME_PACK_ID，绝不能反过来参与指纹，
+  // 否则每次构建都会得到新 ID，造成 app.asar / installer / runtime 版本混杂。
+  for (const f of ROOT_FILES) {
+    if (f === 'runtime-pack-manifest.js') continue;
+    h.update(f + '=' + fileHash(path.join(ROOT, f)) + ';');
+  }
   const keys = [
     'node_modules/openclaw/package.json',
     'node_modules/@tencent-weixin/openclaw-weixin/package.json',
