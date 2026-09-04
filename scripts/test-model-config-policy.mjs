@@ -130,6 +130,8 @@ const plugin = fs.readFileSync(path.join(root, 'plugins', 'dual-model-trainer', 
 assert.match(renderer, /buildConfigDraftFromForm/);
 assert.match(renderer, /fallbackRefs/);
 assert.doesNotMatch(renderer, /fallbacks\s*=\s*\[finalFallback\]/);
+assert.match(renderer, /function findChatModelOptionIndex[\s\S]*?if \(provider\)[\s\S]*?return -1;[\s\S]*?\n    }\n    for \(let i = 0; i < select\.options\.length; i\+\+\)/,
+  'explicit provider selection must not fall back to a same-named model from another provider');
 assert.match(main, /normalizeConfigRouting\(cleanConfig/);
 assert.match(html, /id="model-fallback-enabled"/);
 assert.match(html, /id="dmt-mode"/);

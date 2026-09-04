@@ -11243,6 +11243,10 @@ function findChatModelOptionIndex(select, id, provider) {
             const opt = select.options[i];
             if (opt.value === id && opt.getAttribute('data-provider') === provider) return i;
         }
+        // When a provider is explicitly supplied, never silently fall back to
+        // a same-named model from another provider. Model routing is a
+        // provider/model pair and must remain unambiguous.
+        return -1;
     }
     for (let i = 0; i < select.options.length; i++) {
         if (select.options[i].value === id) return i;
