@@ -17,6 +17,7 @@ const tests = [
   'test-openclaw-stable-update.mjs',
   'test-media-dedupe.mjs',
   'test-menu-visibility-guards.mjs',
+  'test-model-config-policy.mjs',
   'test-outbound-dedupe.mjs',
   'test-overflow-continuity.mjs',
   'test-overflow-delivery-route.mjs',

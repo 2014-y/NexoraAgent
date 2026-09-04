@@ -255,10 +255,11 @@ function getUseBuiltIn() {
     return localStorage.getItem('setting_use_built_in_models') !== 'false';
 }
 
-/** 内置开启时，默认模型选型 / 聊天模型仅允许这两个通道 */
-const BUILTIN_ALLOWED_PROVIDERS = ['agnes-ai', 'ollama'];
-const BUILTIN_DEFAULT_PRIMARY = 'agnes-ai/agnes-2.0-flash';
-const BUILTIN_DEFAULT_FALLBACK = 'agnes-ai/agnes-1.5-flash';
+/** 默认模型配置规则在渲染进程和主进程共用，避免界面与落盘校验各走一套。 */
+const MODEL_CONFIG_POLICY = window.NexoraModelConfig;
+const BUILTIN_ALLOWED_PROVIDERS = MODEL_CONFIG_POLICY.BUILTIN_ALLOWED_PROVIDERS.slice();
+const BUILTIN_DEFAULT_PRIMARY = MODEL_CONFIG_POLICY.DEFAULT_PRIMARY;
+const BUILTIN_DEFAULT_FALLBACK = MODEL_CONFIG_POLICY.DEFAULT_FALLBACK;
 
 const MODEL_API_PROTOCOLS = [
     { value: 'openai-completions', label: 'OpenAI Completions', family: 'openai', chatPath: '/chat/completions', modelsPath: '/models' },
@@ -470,13 +471,7 @@ function isBuiltinAllowedProvider(providerKey) {
 
 /** 解析 provider/model；同时提供 id 与 model 别名，避免后文重复定义覆盖后字段不一致 */
 function parseModelRef(ref) {
-    const raw = String(ref || '').trim();
-    if (!raw) return { provider: '', id: '', model: '' };
-    const idx = raw.indexOf('/');
-    if (idx <= 0) return { provider: '', id: raw, model: raw };
-    const provider = raw.slice(0, idx).trim();
-    const id = raw.slice(idx + 1).trim();
-    return { provider, id, model: id };
+    return MODEL_CONFIG_POLICY.parseModelRef(ref);
 }
 
 function isBuiltinAllowedModelRef(ref) {
@@ -486,8 +481,7 @@ function isBuiltinAllowedModelRef(ref) {
 
 /** 聊天主流程不应出现的图像/视频模型 id */
 function isNonChatModelId(modelId) {
-    const id = String(modelId || '').toLowerCase();
-    return id.includes('image') || id.includes('video') || id.includes('embed');
+    return MODEL_CONFIG_POLICY.isNonChatModelId(modelId);
 }
 
 /** 模型下拉可选厂家：学生永远仅 ollama；内置开时主/备/老师仅 agnes-ai + ollama；关则全部 */
@@ -504,7 +498,12 @@ function getModelPickerProviderKeys(inputId) {
 /** 收集某输入框可用的模型推荐列表 */
 function collectModelPickerOptions(inputId) {
     const allModels = [];
-    const providerKeys = getModelPickerProviderKeys(inputId);
+    let providerKeys = getModelPickerProviderKeys(inputId);
+    if (inputId === 'model-primary' || inputId === 'model-fallback') {
+        const providerSelectId = inputId === 'model-primary' ? 'model-primary-provider' : 'model-fallback-provider';
+        const selectedProvider = document.getElementById(providerSelectId)?.value || '';
+        if (selectedProvider) providerKeys = providerKeys.filter((key) => key === selectedProvider);
+    }
     for (const providerKey of providerKeys) {
         const provider = localProviders[providerKey];
         if (!provider) continue;
@@ -813,7 +812,7 @@ function markConfigDirty() {
 function markJsonPanelDirty() {
     const jsonSaveBtn = document.getElementById('config-save-btn');
     if (jsonSaveBtn) {
-        jsonSaveBtn.innerText = '💾 保存配置 (有未保存修改*)';
+        jsonSaveBtn.innerText = '💾 保存 JSON (有未保存修改*)';
         jsonSaveBtn.style.background = 'linear-gradient(135deg, #ff9800 0%, #ff5722 100%)';
         jsonSaveBtn.style.boxShadow = '0 0 15px rgba(255, 87, 34, 0.4)';
     }
@@ -1492,6 +1491,7 @@ function renderQqbotAccounts() {
 
 // 1. 全局状态
 let configData = null;
+let jsonConfigDraft = null;
 let currentTab = 'console-view';
 let gatewayStatus = 'stopped';
 
@@ -2902,17 +2902,12 @@ async function init() {
                 if (jsonErrorEl) jsonErrorEl.style.display = 'none';
                 if (jsonSaveBtn) jsonSaveBtn.removeAttribute('disabled');
 
-                // 预览里是脱敏值：还原后再写入内存，避免把 ******** 保存进 openclaw.json
+                // JSON 编辑区使用独立草稿，不能在用户点击保存前污染左侧表单或已保存基线。
                 const previous = configData ? JSON.parse(JSON.stringify(configData)) : null;
                 restoreMaskedSecretsFromPrevious(parsed, previous);
-                configData = parsed;
-
-                // 同步刷新 localProviders 变量，确保保存时不被旧数据覆盖
-                if (parsed.models && parsed.models.providers) {
-                    localProviders = JSON.parse(JSON.stringify(parsed.models.providers));
-                }
-                syncJsonToFormFields(parsed);
+                jsonConfigDraft = parsed;
             } catch (err) {
+                jsonConfigDraft = null;
                 if (jsonErrorEl) jsonErrorEl.style.display = 'block';
                 if (jsonSaveBtn) jsonSaveBtn.setAttribute('disabled', 'true');
             }
@@ -4949,19 +4944,13 @@ function applyBuiltInModelPolicy(cfg) {
 
 async function loadAndRenderConfig() {
     configData = await window.api.readConfig();
+    jsonConfigDraft = null;
     if (!configData) {
         logTerminal.innerText = '[System] [Error] 无法读取 openclaw.json 配置文件！\n';
         return;
     }
 
-    // 内置模型开启时：磁盘若仍是其它主模型，立即对齐写回，消除「设置开着 / 配置页与 OpenClaw 不一致」
-    try {
-        if (applyBuiltInModelPolicy(configData) && window.api && window.api.saveConfig) {
-            await window.api.saveConfig(configData);
-        }
-    } catch (e) {
-        console.warn('[BuiltIn] enforce on load failed:', e);
-    }
+    // 打开页面只读取、绝不写盘。模式冲突由路由状态明确提示，只有用户点击保存才会落盘。
 
     // 深度拷贝厂商数据到本地变量以支持动态修改与渲染
     if (configData.models && configData.models.providers) {
@@ -4975,6 +4964,12 @@ async function loadAndRenderConfig() {
     updateModelsDatalist();
 
     // 填充并发数与主备模型
+    const primaryModelInput = document.getElementById('model-primary');
+    const fallbackModelInput = document.getElementById('model-fallback');
+    const fallbackEnabledInput = document.getElementById('model-fallback-enabled');
+    if (primaryModelInput) primaryModelInput.value = '';
+    if (fallbackModelInput) fallbackModelInput.value = '';
+    if (fallbackEnabledInput) fallbackEnabledInput.checked = false;
     if (configData.agents && configData.agents.defaults) {
         const defaults = configData.agents.defaults;
         if (defaults.model) {
@@ -4982,9 +4977,9 @@ async function loadAndRenderConfig() {
             let primaryModelId = primary;
             let primaryProvider = '';
             if (primary.includes('/')) {
-                const parts = primary.split('/');
-                primaryProvider = parts[0];
-                primaryModelId = parts[1];
+                const parsedPrimary = parseModelRef(primary);
+                primaryProvider = parsedPrimary.provider;
+                primaryModelId = parsedPrimary.model;
             }
             document.getElementById('model-primary').value = primaryModelId;
 
@@ -4992,11 +4987,13 @@ async function loadAndRenderConfig() {
             let fallbackModelId = fallback;
             let fallbackProvider = '';
             if (fallback.includes('/')) {
-                const parts = fallback.split('/');
-                fallbackProvider = parts[0];
-                fallbackModelId = parts[1];
+                const parsedFallback = parseModelRef(fallback);
+                fallbackProvider = parsedFallback.provider;
+                fallbackModelId = parsedFallback.model;
             }
             document.getElementById('model-fallback').value = fallbackModelId;
+            const fallbackEnabledEl = document.getElementById('model-fallback-enabled');
+            if (fallbackEnabledEl) fallbackEnabledEl.checked = Boolean(fallbackModelId || fallbackProvider);
             
             // 进行一次供应商下拉框刷新并设置选中值
             updateAssignedProviderSelects(primaryModelId, fallbackModelId, primaryProvider, fallbackProvider);
@@ -5020,16 +5017,27 @@ async function loadAndRenderConfig() {
         }
     }
 
-    // 双模型教学：老师模型锁定跟随主用模型；学生模型仍可配置
+    // 双模型教学：模式、老师、学生三者明确联动
     const teacherEl = document.getElementById('model-teacher');
     const studentEl = document.getElementById('model-student');
     if (teacherEl || studentEl) {
+        if (studentEl) studentEl.value = '';
+        const dmtEntry = (configData.plugins
+            && configData.plugins.entries
+            && configData.plugins.entries['dual-model-trainer']) || {};
         const dmtCfg = (configData.plugins
             && configData.plugins.entries
             && configData.plugins.entries['dual-model-trainer']
             && configData.plugins.entries['dual-model-trainer'].config) || {};
         if (studentEl) studentEl.value = normalizeStudentModelRef(dmtCfg.studentModel || '');
+        const dmtModeEl = document.getElementById('dmt-mode');
+        if (dmtModeEl) {
+            dmtModeEl.value = dmtEntry.enabled === false
+                ? 'off'
+                : (dmtCfg.mode === 'teach-learn' && dmtCfg.enableTeachLearn === true ? 'teach-learn' : 'collect-only');
+        }
         syncTeacherModelFromPrimary();
+        syncDualModelModeUi();
     }
 
     // 优先从本地 localStorage 加载自定义的视频/图片生成配置（不写盘入 openclaw.json 以免损坏Nexora Agent配置格式）
@@ -5082,6 +5090,8 @@ async function loadAndRenderConfig() {
     // 控制内置模型配置项的启用与置灰
     toggleProviderInputsEditable();
 
+    syncModelRoutingUi();
+
     // 初始化 JSON 预览展示
     updateConfigJsonPreview();
 
@@ -5095,96 +5105,71 @@ async function loadAndRenderConfig() {
     updateRightPluginsCountUI();
 }
 
-// 🌐 配置文件 JSON 右侧实时预览更新函数
+function applyRoutingAndLearningFormToConfig(target) {
+    const draft = target;
+    if (!draft.models) draft.models = {};
+    draft.models.providers = JSON.parse(JSON.stringify(localProviders));
+    if (!draft.agents) draft.agents = {};
+    if (!draft.agents.defaults) draft.agents.defaults = {};
+    if (!draft.agents.defaults.model) draft.agents.defaults.model = {};
+
+    const routing = getModelRoutingFormState();
+    draft.agents.defaults.model.primary = routing.primaryRef;
+    draft.agents.defaults.model.fallbacks = routing.fallbackRefs;
+
+    if (!draft.plugins) draft.plugins = {};
+    if (!draft.plugins.entries) draft.plugins.entries = {};
+    if (!draft.plugins.entries['dual-model-trainer']) draft.plugins.entries['dual-model-trainer'] = {};
+    const dmt = draft.plugins.entries['dual-model-trainer'];
+    if (!dmt.config) dmt.config = {};
+    const mode = document.getElementById('dmt-mode')?.value || 'collect-only';
+    dmt.enabled = mode !== 'off';
+    dmt.config.mode = mode === 'teach-learn' ? 'teach-learn' : 'collect-only';
+    dmt.config.enableTeachLearn = mode === 'teach-learn';
+    dmt.config.teacherModel = routing.primaryRef;
+    dmt.config.studentModel = normalizeStudentModelRef(document.getElementById('model-student')?.value || '');
+    dmt.config.timeoutMs = Math.min(20000, Math.max(1000, Number(dmt.config.timeoutMs) || 20000));
+    return { draft, routing, dmtMode: mode };
+}
+
+function buildConfigDraftFromForm() {
+    const draft = JSON.parse(JSON.stringify(configData || {}));
+    const applied = applyRoutingAndLearningFormToConfig(draft);
+    draft.__nexoraUseBuiltIn = getUseBuiltIn();
+    const maxConcurrentEl = document.getElementById('max-concurrent');
+    draft.agents.defaults.maxConcurrent = maxConcurrentEl
+        ? (parseInt(maxConcurrentEl.value, 10) || 4)
+        : (draft.agents.defaults.maxConcurrent || 4);
+
+    if (!draft.videoGenerator) draft.videoGenerator = {};
+    if (!draft.imageGenerator) draft.imageGenerator = {};
+    const videoApiBaseEl = document.getElementById('video-api-base');
+    const videoApiKeyEl = document.getElementById('video-api-key');
+    const imageApiBaseEl = document.getElementById('image-api-base');
+    const imageApiKeyEl = document.getElementById('image-api-key');
+    if (videoApiBaseEl) draft.videoGenerator.apiBase = videoApiBaseEl.value.trim();
+    if (videoApiKeyEl) draft.videoGenerator.apiKey = videoApiKeyEl.value.trim();
+    if (imageApiBaseEl) draft.imageGenerator.apiBase = imageApiBaseEl.value.trim();
+    if (imageApiKeyEl) draft.imageGenerator.apiKey = imageApiKeyEl.value.trim();
+    const modelVideoEl = document.getElementById('model-video');
+    const modelImageEl = document.getElementById('model-image');
+    if (modelVideoEl) draft.videoGenerator.model = modelVideoEl.value.trim();
+    if (modelImageEl) draft.imageGenerator.model = modelImageEl.value.trim();
+
+    if (!draft.gateway) draft.gateway = {};
+    const gatewayPortEl = document.getElementById('gateway-port');
+    if (gatewayPortEl) draft.gateway.port = parseInt(gatewayPortEl.value, 10) || 18789;
+    return applied;
+}
+
+// 🌐 配置文件 JSON 右侧实时预览更新函数。预览只操作草稿，绝不改写已加载配置。
 function updateConfigJsonPreview(force = false) {
     if (!configData) return;
-
-    // 1. 同步保存提供商与模型白名单
-    if (!configData.models) configData.models = {};
-    const finalProviders = JSON.parse(JSON.stringify(localProviders));
-    configData.models.providers = finalProviders;
-
-    // 2. 同步并发选项及默认主备模型选择
-    if (!configData.agents) configData.agents = {};
-    if (!configData.agents.defaults) configData.agents.defaults = {};
-    
-    const maxConcurrentEl = document.getElementById('max-concurrent');
-    if (maxConcurrentEl) {
-        configData.agents.defaults.maxConcurrent = parseInt(maxConcurrentEl.value, 10) || 4;
-    } else {
-        configData.agents.defaults.maxConcurrent = configData.agents.defaults.maxConcurrent || 4;
-    }
-    
-    if (!configData.agents.defaults.model) configData.agents.defaults.model = {};
-    const primaryModelEl = document.getElementById('model-primary');
-    const primaryProviderEl = document.getElementById('model-primary-provider');
-    if (primaryModelEl) {
-        const mVal = primaryModelEl.value.trim();
-        const pVal = primaryProviderEl ? primaryProviderEl.value : '';
-        if (pVal && mVal && !mVal.includes('/')) {
-            configData.agents.defaults.model.primary = `${pVal}/${mVal}`;
-        } else {
-            configData.agents.defaults.model.primary = mVal;
-        }
-    }
-    const fallbackModelEl = document.getElementById('model-fallback');
-    const fallbackProviderEl = document.getElementById('model-fallback-provider');
-    if (fallbackModelEl) {
-        const mVal = fallbackModelEl.value.trim();
-        const pVal = fallbackProviderEl ? fallbackProviderEl.value : '';
-        let finalFallback = mVal;
-        if (pVal && mVal && !mVal.includes('/')) {
-            finalFallback = `${pVal}/${mVal}`;
-        }
-        configData.agents.defaults.model.fallbacks = [finalFallback];
-    }
-
-    if (!configData.agents.defaults.imageGenerationModel) configData.agents.defaults.imageGenerationModel = {};
-    const modelImageEl = document.getElementById('model-image');
-    if (modelImageEl) {
-        configData.agents.defaults.imageGenerationModel.primary = modelImageEl.value.trim();
-    }
-
-    if (!configData.agents.defaults.videoGenerationModel) configData.agents.defaults.videoGenerationModel = {};
-    const modelVideoEl = document.getElementById('model-video');
-    if (modelVideoEl) {
-        configData.agents.defaults.videoGenerationModel.primary = modelVideoEl.value.trim();
-    }
-
-    if (!configData.videoGenerator) configData.videoGenerator = {};
-    const videoApiBaseEl = document.getElementById('video-api-base');
-    if (videoApiBaseEl) configData.videoGenerator.apiBase = videoApiBaseEl.value.trim();
-    const videoApiKeyEl = document.getElementById('video-api-key');
-    if (videoApiKeyEl) configData.videoGenerator.apiKey = videoApiKeyEl.value.trim();
-
-    if (!configData.imageGenerator) configData.imageGenerator = {};
-    const imageApiBaseEl = document.getElementById('image-api-base');
-    if (imageApiBaseEl) configData.imageGenerator.apiBase = imageApiBaseEl.value.trim();
-    const imageApiKeyEl = document.getElementById('image-api-key');
-    if (imageApiKeyEl) configData.imageGenerator.apiKey = imageApiKeyEl.value.trim();
-
-    if (!configData.gateway) configData.gateway = {};
-    const gatewayPortEl = document.getElementById('gateway-port');
-    if (gatewayPortEl) configData.gateway.port = parseInt(gatewayPortEl.value, 10) || 18789;
-
-    // 内置开启时：主/备若落在非 agnes-ai/ollama，钳制回默认；允许在二者间切换
-    if (getUseBuiltIn()) {
-        applyBuiltInModelPolicy(configData);
-        if (configData.models && configData.models.providers) {
-            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
-        }
-    }
-
+    if (jsonConfigDraft && !force) return;
+    const { draft } = buildConfigDraftFromForm();
     const previewEl = document.getElementById('config-json-preview');
-    // 只有当用户当前没有聚焦在 JSON 编辑框输入时，才自动用表单最新状态覆盖内容，防止打字时光标位移
     if (previewEl && (force || document.activeElement !== previewEl)) {
-        const previewConfig = JSON.parse(JSON.stringify(configData));
-        if (previewConfig.agents && previewConfig.agents.defaults) {
-            delete previewConfig.agents.defaults.imageGenerationModel;
-            delete previewConfig.agents.defaults.videoGenerationModel;
-        }
-        // 预览脱敏：真实密钥仍留在 configData / 磁盘，此处仅展示掩码
-        previewEl.value = JSON.stringify(maskSecretsForJsonPreview(previewConfig), null, 2);
+        previewEl.value = JSON.stringify(maskSecretsForJsonPreview(draft), null, 2);
     }
 }
 
@@ -5206,9 +5191,9 @@ function syncJsonToFormFields(parsed) {
             if (primaryEl && defaults.model.primary !== undefined) {
                 const primary = defaults.model.primary || '';
                 if (primary.includes('/')) {
-                    const parts = primary.split('/');
-                    primaryProvider = parts[0];
-                    primaryModelId = parts[1];
+                    const ref = parseModelRef(primary);
+                    primaryProvider = ref.provider;
+                    primaryModelId = ref.model;
                 } else {
                     primaryModelId = primary;
                 }
@@ -5221,14 +5206,17 @@ function syncJsonToFormFields(parsed) {
             if (fallbackEl && defaults.model.fallbacks && defaults.model.fallbacks[0] !== undefined) {
                 const fallback = defaults.model.fallbacks[0] || '';
                 if (fallback.includes('/')) {
-                    const parts = fallback.split('/');
-                    fallbackProvider = parts[0];
-                    fallbackModelId = parts[1];
+                    const ref = parseModelRef(fallback);
+                    fallbackProvider = ref.provider;
+                    fallbackModelId = ref.model;
                 } else {
                     fallbackModelId = fallback;
                 }
                 fallbackEl.value = fallbackModelId;
             }
+
+            const fallbackEnabledEl = document.getElementById('model-fallback-enabled');
+            if (fallbackEnabledEl) fallbackEnabledEl.checked = Boolean(fallbackModelId || fallbackProvider);
 
             updateAssignedProviderSelects(primaryModelId, fallbackModelId, primaryProvider, fallbackProvider);
         }
@@ -5255,6 +5243,8 @@ function syncJsonToFormFields(parsed) {
         if (videoApiKeyEl && parsed.videoGenerator.apiKey !== undefined) {
             videoApiKeyEl.value = parsed.videoGenerator.apiKey;
         }
+        const videoModelEl = document.getElementById('model-video');
+        if (videoModelEl && parsed.videoGenerator.model !== undefined) videoModelEl.value = parsed.videoGenerator.model;
     }
 
     if (parsed.imageGenerator) {
@@ -5266,6 +5256,8 @@ function syncJsonToFormFields(parsed) {
         if (imageApiKeyEl && parsed.imageGenerator.apiKey !== undefined) {
             imageApiKeyEl.value = parsed.imageGenerator.apiKey;
         }
+        const imageModelEl = document.getElementById('model-image');
+        if (imageModelEl && parsed.imageGenerator.model !== undefined) imageModelEl.value = parsed.imageGenerator.model;
     }
 
     if (parsed.gateway) {
@@ -5282,16 +5274,19 @@ function syncJsonToFormFields(parsed) {
         updateModelsDatalist();
     }
 
-    // 内置开启时：JSON 手改不得突破 agnes-ai/ollama 限制，并刷新厂家列表可见范围
-    if (getUseBuiltIn()) {
-        applyBuiltInModelPolicy(configData);
-        if (configData.models && configData.models.providers) {
-            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
+    const dmtEntry = parsed.plugins?.entries?.['dual-model-trainer'];
+    if (dmtEntry) {
+        const dmtModeEl = document.getElementById('dmt-mode');
+        const dmtCfg = dmtEntry.config || {};
+        if (dmtModeEl) {
+            dmtModeEl.value = dmtEntry.enabled === false
+                ? 'off'
+                : (dmtCfg.mode === 'teach-learn' && dmtCfg.enableTeachLearn === true ? 'teach-learn' : 'collect-only');
         }
-        renderProvidersList();
-        updateModelsDatalist();
-        updateConfigJsonPreview();
+        const studentEl = document.getElementById('model-student');
+        if (studentEl) studentEl.value = normalizeStudentModelRef(dmtCfg.studentModel || '');
     }
+    syncModelRoutingUi();
 }
 
 // 渲染提供商卡片列表
@@ -5676,7 +5671,7 @@ function toggleProviderInputsEditable() {
         if (videoToggleBtn) videoToggleBtn.style.display = 'flex';
     }
 
-    // 默认模型选型：内置开 → 可改，但供应商仅 agnes-ai / ollama；关 → 全部放开
+    // 默认模型选型：只控制可见提供商范围，不再静默替换用户选择。
     const modelPrimary = document.getElementById('model-primary');
     const modelFallback = document.getElementById('model-fallback');
     const modelPrimaryProvider = document.getElementById('model-primary-provider');
@@ -5690,86 +5685,21 @@ function toggleProviderInputsEditable() {
         el.style.pointerEvents = '';
     };
 
-    if (useBuiltIn) {
-        unlockModelField(modelPrimary);
-        unlockModelField(modelFallback);
-
-        const clampPair = (modelEl, providerEl, defaultRef) => {
-            const def = parseModelRef(defaultRef);
-            let provider = providerEl ? providerEl.value : '';
-            let modelId = modelEl ? modelEl.value.trim() : '';
-            if (modelId.includes('/')) {
-                const parsed = parseModelRef(modelId);
-                provider = parsed.provider || provider;
-                modelId = parsed.model || modelId;
-            }
-            if (!isBuiltinAllowedProvider(provider)) {
-                provider = def.provider;
-                modelId = def.model;
-            }
-            if (modelEl) modelEl.value = modelId;
-            if (providerEl) {
-                providerEl.disabled = false;
-                const wrapper = providerEl.closest('.custom-select-wrapper');
-                if (wrapper) wrapper.classList.remove('disabled');
-            }
-            return { provider, modelId };
-        };
-
-        const primary = clampPair(modelPrimary, modelPrimaryProvider, BUILTIN_DEFAULT_PRIMARY);
-        const fallback = clampPair(modelFallback, modelFallbackProvider, BUILTIN_DEFAULT_FALLBACK);
-        updateAssignedProviderSelects(primary.modelId, fallback.modelId, primary.provider, fallback.provider);
-        if (modelPrimaryProvider) modelPrimaryProvider.dispatchEvent(new Event('sync-beautified'));
-        if (modelFallbackProvider) modelFallbackProvider.dispatchEvent(new Event('sync-beautified'));
-    } else {
-        unlockModelField(modelPrimary);
-        unlockModelField(modelFallback);
-        if (modelPrimaryProvider) {
-            modelPrimaryProvider.disabled = false;
-            const wrapper = modelPrimaryProvider.closest('.custom-select-wrapper');
-            if (wrapper) wrapper.classList.remove('disabled');
-        }
-        if (modelFallbackProvider) {
-            modelFallbackProvider.disabled = false;
-            const wrapper = modelFallbackProvider.closest('.custom-select-wrapper');
-            if (wrapper) wrapper.classList.remove('disabled');
-        }
-
-        // 重新填入用户自定义的原配置大模型数据
-        if (configData && configData.agents && configData.agents.defaults) {
-            const defaults = configData.agents.defaults;
-            if (defaults.model) {
-                const primary = defaults.model.primary || '';
-                let primaryModelId = primary;
-                let primaryProvider = '';
-                if (primary.includes('/')) {
-                    const parts = primary.split('/');
-                    primaryProvider = parts[0];
-                    primaryModelId = parts[1];
-                }
-                if (modelPrimary) modelPrimary.value = primaryModelId;
-
-                const fallback = (defaults.model.fallbacks && defaults.model.fallbacks[0]) || '';
-                let fallbackModelId = fallback;
-                let fallbackProvider = '';
-                if (fallback.includes('/')) {
-                    const parts = fallback.split('/');
-                    fallbackProvider = parts[0];
-                    fallbackModelId = parts[1];
-                }
-                if (modelFallback) modelFallback.value = fallbackModelId;
-
-                updateAssignedProviderSelects(primaryModelId, fallbackModelId, primaryProvider, fallbackProvider);
-            } else {
-                updateAssignedProviderSelects();
-            }
-        } else {
-            updateAssignedProviderSelects();
-        }
-
-        if (modelPrimaryProvider) modelPrimaryProvider.dispatchEvent(new Event('sync-beautified'));
-        if (modelFallbackProvider) modelFallbackProvider.dispatchEvent(new Event('sync-beautified'));
+    unlockModelField(modelPrimary);
+    unlockModelField(modelFallback);
+    if (modelPrimaryProvider) {
+        modelPrimaryProvider.disabled = false;
+        const wrapper = modelPrimaryProvider.closest('.custom-select-wrapper');
+        if (wrapper) wrapper.classList.remove('disabled');
     }
+    if (modelFallbackProvider) {
+        const fallbackEnabled = document.getElementById('model-fallback-enabled')?.checked === true;
+        modelFallbackProvider.disabled = !fallbackEnabled;
+        const wrapper = modelFallbackProvider.closest('.custom-select-wrapper');
+        if (wrapper) wrapper.classList.toggle('disabled', !fallbackEnabled);
+    }
+    updateAssignedProviderSelects(undefined, undefined, modelPrimaryProvider?.value, modelFallbackProvider?.value);
+    syncModelRoutingUi();
 }
 
 // 绑定动态卡片事件
@@ -5845,21 +5775,20 @@ function bindProviderEvents() {
             expandedProviders.add(newKey);
         }
 
-        ['model-primary', 'model-fallback', 'model-teacher', 'model-student', 'image-model', 'video-model'].forEach((id) => {
+        const primaryProviderEl = document.getElementById('model-primary-provider');
+        const fallbackProviderEl = document.getElementById('model-fallback-provider');
+        const nextPrimaryProvider = primaryProviderEl?.value === oldKey ? newKey : (primaryProviderEl?.value || '');
+        const nextFallbackProvider = fallbackProviderEl?.value === oldKey ? newKey : (fallbackProviderEl?.value || '');
+        ['model-teacher', 'model-student', 'model-image', 'model-video'].forEach((id) => {
             const el = document.getElementById(id);
             if (!el) return;
             const next = rewriteProviderRef(el.value, oldKey, newKey);
             if (next !== el.value) el.value = next;
         });
-        ['model-primary-provider', 'model-fallback-provider'].forEach((id) => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            if (el.value === oldKey) el.value = newKey;
-        });
 
         renderProvidersList();
         updateModelsDatalist();
-        try { updateAssignedProviderSelects(); } catch (_) {}
+        updateAssignedProviderSelects(undefined, undefined, nextPrimaryProvider, nextFallbackProvider);
         markConfigDirty();
         showToast(t(`已将厂商标识改为 ${newKey}`, `Provider ID renamed to ${newKey}`, `已將廠商標識改為 ${newKey}`));
         return true;
@@ -5944,10 +5873,27 @@ function bindProviderEvents() {
         btn.addEventListener('click', async (e) => {
             const provider = e.target.getAttribute('data-provider');
             if (provider === 'agnes-ai' || provider === 'ollama') return;
+            if (document.getElementById('model-primary-provider')?.value === provider) {
+                showToast(t('该提供商正在作为主用路由，请先切换主用模型后再删除', 'This provider is the primary route. Switch the primary model before deleting it.', '該提供商正在作為主用路由，請先切換主用模型後再刪除'));
+                return;
+            }
             if (await confirm(t(`确定要彻底删除厂家 "${getProviderLabel(provider)}" 及其下的所有模型配置吗？`, `Are you sure you want to completely delete provider "${getProviderLabel(provider)}" and all its model configurations?`, `確定要徹底刪除廠商 "${getProviderLabel(provider)}" 及其下的所有模型配置嗎？`))) {
+                if (document.getElementById('model-fallback-provider')?.value === provider) {
+                    const fallbackEnabled = document.getElementById('model-fallback-enabled');
+                    if (fallbackEnabled) fallbackEnabled.checked = false;
+                    const fallbackProvider = document.getElementById('model-fallback-provider');
+                    const fallbackModel = document.getElementById('model-fallback');
+                    if (fallbackProvider) fallbackProvider.value = '';
+                    if (fallbackModel) fallbackModel.value = '';
+                }
+                ['model-image', 'model-video'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el && String(el.value || '').startsWith(provider + '/')) el.value = '';
+                });
                 delete localProviders[provider];
                 renderProvidersList();
                 updateModelsDatalist();
+                syncModelRoutingUi();
                 markConfigDirty();
             }
         });
@@ -5993,7 +5939,18 @@ function bindProviderEvents() {
                 }
                 localProviders[provider].models[index].id = nextId;
                 localProviders[provider].models[index].name = nextId;
+                const primaryProvider = document.getElementById('model-primary-provider');
+                const primaryModel = document.getElementById('model-primary');
+                if (primaryProvider?.value === provider && primaryModel?.value === previousId) primaryModel.value = nextId;
+                const fallbackProvider = document.getElementById('model-fallback-provider');
+                const fallbackModel = document.getElementById('model-fallback');
+                if (fallbackProvider?.value === provider && fallbackModel?.value === previousId) fallbackModel.value = nextId;
+                ['model-student', 'model-image', 'model-video'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el && el.value === `${provider}/${previousId}`) el.value = `${provider}/${nextId}`;
+                });
                 updateModelsDatalist();
+                syncModelRoutingUi();
                 markConfigDirty();
             }
         });
@@ -6108,9 +6065,27 @@ function bindProviderEvents() {
         btn.addEventListener('click', (e) => {
             const provider = e.target.getAttribute('data-provider');
             const index = parseInt(e.target.getAttribute('data-index'), 10);
+            const modelId = String(localProviders[provider]?.models?.[index]?.id || '').trim();
+            if (document.getElementById('model-primary-provider')?.value === provider
+                && document.getElementById('model-primary')?.value === modelId) {
+                showToast(t('该模型正在作为主用路由，请先切换主用模型后再删除', 'This model is the primary route. Switch the primary model before deleting it.', '該模型正在作為主用路由，請先切換主用模型後再刪除'));
+                return;
+            }
+            if (document.getElementById('model-fallback-provider')?.value === provider
+                && document.getElementById('model-fallback')?.value === modelId) {
+                const fallbackEnabled = document.getElementById('model-fallback-enabled');
+                if (fallbackEnabled) fallbackEnabled.checked = false;
+                document.getElementById('model-fallback-provider').value = '';
+                document.getElementById('model-fallback').value = '';
+            }
+            ['model-student', 'model-image', 'model-video'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el && el.value === `${provider}/${modelId}`) el.value = '';
+            });
             localProviders[provider].models.splice(index, 1);
             renderProvidersList();
             updateModelsDatalist();
+            syncModelRoutingUi();
             markConfigDirty();
         });
     });
@@ -6664,77 +6639,32 @@ function updateAssignedProviderSelects(primaryModelId, fallbackModelId, selected
 
     if (!primarySelect || !fallbackSelect) return;
 
-    const pmId = (primaryModelId !== undefined) ? primaryModelId : (primaryInput ? primaryInput.value.trim() : '');
-    const fmId = (fallbackModelId !== undefined) ? fallbackModelId : (fallbackInput ? fallbackInput.value.trim() : '');
-
     const pSelVal = (selectedPrimaryProvider !== undefined) ? selectedPrimaryProvider : primarySelect.value;
     const fSelVal = (selectedFallbackProvider !== undefined) ? selectedFallbackProvider : fallbackSelect.value;
-
     const allProviderKeys = getSelectableProviderKeys();
 
-    // 1. 处理主用模型供应商
-    let matchedPrimary = [];
-    if (pmId) {
-        matchedPrimary = allProviderKeys.filter(key => {
-            const provider = localProviders[key];
-            if (!provider) return false;
-            const models = provider.models || [];
-            return models.some(m => m.id === pmId);
+    const refill = (select, selected) => {
+        select.innerHTML = '<option value="">-- 请选择提供商 --</option>';
+        allProviderKeys.forEach((key) => {
+            if (!localProviders[key]) return;
+            const option = document.createElement('option');
+            option.value = key;
+            option.innerText = getProviderLabel(key, localProviders[key]);
+            select.appendChild(option);
         });
-    }
-    
-    primarySelect.innerHTML = '<option value="">-- 自动检测供应商 --</option>';
-    const primaryOptions = matchedPrimary.length > 0 ? matchedPrimary : allProviderKeys;
-    primaryOptions.forEach(key => {
-        const option = document.createElement('option');
-        option.value = key;
-        option.innerText = key;
-        primarySelect.appendChild(option);
-    });
+        select.value = selected && allProviderKeys.includes(selected) ? selected : '';
+        select.dataset.previousValue = select.value;
+    };
+    refill(primarySelect, pSelVal);
+    refill(fallbackSelect, fSelVal);
 
-    if (pSelVal && primaryOptions.includes(pSelVal)) {
-        primarySelect.value = pSelVal;
-    } else if (matchedPrimary.length === 1) {
-        primarySelect.value = matchedPrimary[0];
-    } else if (getUseBuiltIn() && primaryOptions.includes('agnes-ai')) {
-        primarySelect.value = 'agnes-ai';
-    } else {
-        primarySelect.value = '';
-    }
-
-    // 2. 处理备用模型供应商
-    let matchedFallback = [];
-    if (fmId) {
-        matchedFallback = allProviderKeys.filter(key => {
-            const provider = localProviders[key];
-            if (!provider) return false;
-            const models = provider.models || [];
-            return models.some(m => m.id === fmId);
-        });
-    }
-
-    fallbackSelect.innerHTML = '<option value="">-- 自动检测供应商 --</option>';
-    const fallbackOptions = matchedFallback.length > 0 ? matchedFallback : allProviderKeys;
-    fallbackOptions.forEach(key => {
-        const option = document.createElement('option');
-        option.value = key;
-        option.innerText = key;
-        fallbackSelect.appendChild(option);
-    });
-
-    if (fSelVal && fallbackOptions.includes(fSelVal)) {
-        fallbackSelect.value = fSelVal;
-    } else if (matchedFallback.length === 1) {
-        fallbackSelect.value = matchedFallback[0];
-    } else if (getUseBuiltIn() && fallbackOptions.includes('agnes-ai')) {
-        fallbackSelect.value = 'agnes-ai';
-    } else {
-        fallbackSelect.value = '';
-    }
+    if (primaryModelId !== undefined && primaryInput) primaryInput.value = primaryModelId || '';
+    if (fallbackModelId !== undefined && fallbackInput) fallbackInput.value = fallbackModelId || '';
 
     primarySelect.dispatchEvent(new Event('sync-beautified'));
     fallbackSelect.dispatchEvent(new Event('sync-beautified'));
     syncTeacherModelFromPrimary();
+    syncModelRoutingUi();
 }
 
 /** 从当前 UI 拼出主用模型完整引用（provider/model） */
@@ -6745,9 +6675,92 @@ function getPrimaryModelRefFromUi() {
     let modelVal = primaryInput.value.trim();
     const providerVal = primarySelect ? primarySelect.value.trim() : '';
     if (!modelVal) return '';
-    if (modelVal.includes('/')) return modelVal;
-    if (providerVal) return `${providerVal}/${modelVal}`;
-    return modelVal;
+    return MODEL_CONFIG_POLICY.composeModelRef(providerVal, modelVal).ref;
+}
+
+function getModelRoutingFormState() {
+    const primaryModel = document.getElementById('model-primary')?.value.trim() || '';
+    const primaryProvider = document.getElementById('model-primary-provider')?.value.trim() || '';
+    const fallbackEnabled = document.getElementById('model-fallback-enabled')?.checked === true;
+    const fallbackModel = document.getElementById('model-fallback')?.value.trim() || '';
+    const fallbackProvider = document.getElementById('model-fallback-provider')?.value.trim() || '';
+    return MODEL_CONFIG_POLICY.validateRoutingForm({
+        providers: localProviders,
+        allowedProviders: getUseBuiltIn() ? BUILTIN_ALLOWED_PROVIDERS : [],
+        primaryProvider,
+        primaryModel,
+        fallbackEnabled,
+        fallbackProvider,
+        fallbackModel
+    });
+}
+
+function syncModelRoutingUi() {
+    const state = getModelRoutingFormState();
+    const fallbackEnabled = document.getElementById('model-fallback-enabled')?.checked === true;
+    const fallbackFields = document.getElementById('model-fallback-fields');
+    const fallbackProvider = document.getElementById('model-fallback-provider');
+    const fallbackModel = document.getElementById('model-fallback');
+    if (fallbackProvider) fallbackProvider.disabled = !fallbackEnabled;
+    if (fallbackModel) fallbackModel.disabled = !fallbackEnabled;
+    if (fallbackFields) fallbackFields.classList.toggle('is-disabled', !fallbackEnabled);
+    const fallbackProviderWrapper = fallbackProvider?.closest('.custom-select-wrapper');
+    if (fallbackProviderWrapper) fallbackProviderWrapper.classList.toggle('disabled', !fallbackEnabled);
+
+    const primaryResolved = document.getElementById('model-primary-resolved');
+    const fallbackResolved = document.getElementById('model-fallback-resolved');
+    if (primaryResolved) primaryResolved.textContent = state.primaryRef || '—';
+    if (fallbackResolved) fallbackResolved.textContent = fallbackEnabled ? (state.fallback.ref || '—') : t('未启用', 'Disabled', '未啟用');
+
+    const badge = document.getElementById('model-routing-health');
+    const message = document.getElementById('model-routing-message');
+    if (badge) {
+        badge.dataset.state = state.errors.length ? 'error' : (state.warnings.length ? 'warn' : 'ok');
+        badge.textContent = state.errors.length
+            ? t('配置不完整', 'Incomplete', '配置不完整')
+            : (state.warnings.length ? t('需要确认', 'Review', '需要確認') : t('路由有效', 'Valid route', '路由有效'));
+    }
+    if (message) {
+        const issues = state.errors.length ? state.errors : state.warnings;
+        message.dataset.state = state.errors.length ? 'error' : (state.warnings.length ? 'warn' : 'info');
+        message.textContent = issues.join('；');
+    }
+    syncTeacherModelFromPrimary();
+    syncDualModelModeUi();
+    return state;
+}
+
+function syncDualModelModeUi() {
+    const mode = document.getElementById('dmt-mode')?.value || 'collect-only';
+    const student = document.getElementById('model-student');
+    const badge = document.getElementById('dmt-status-badge');
+    const explanation = document.getElementById('dmt-mode-explanation');
+    const validation = document.getElementById('dmt-validation-message');
+    const teachEnabled = mode === 'teach-learn';
+    if (student) {
+        student.disabled = !teachEnabled;
+        student.placeholder = teachEnabled ? '例如: ollama/qwen2.5:7b' : t('开启后台教学后配置本地学生模型', 'Enable background teaching to configure a local student model', '開啟背景教學後配置本地學生模型');
+    }
+    if (badge) {
+        badge.dataset.state = teachEnabled ? 'warn' : 'safe';
+        badge.textContent = mode === 'off'
+            ? t('已关闭', 'Off', '已關閉')
+            : (teachEnabled ? t('后台教学', 'Teaching', '背景教學') : t('仅收集', 'Collect only', '僅收集'));
+    }
+    if (explanation) {
+        explanation.textContent = mode === 'off'
+            ? t('插件不采集数据，也不会调用学生模型。', 'The plugin collects no data and makes no student-model calls.', '插件不收集資料，也不會呼叫學生模型。')
+            : (teachEnabled
+                ? t('正常回复仍由主用模型产生；回复后仅在后台调用一次本地学生模型进行学习。', 'Normal replies still come from the primary model; one local student-model learning call runs afterward in the background.', '正常回覆仍由主用模型產生；回覆後僅在背景呼叫一次本地學生模型學習。')
+                : t('只保存主模型回答作为训练样本，不额外调用任何模型。', 'Primary-model replies are saved as training samples with no extra model calls.', '只儲存主模型回覆作為訓練樣本，不額外呼叫模型。'));
+    }
+    if (validation) {
+        const normalized = normalizeStudentModelRef(student?.value || '');
+        validation.dataset.state = teachEnabled && !normalized ? 'error' : (teachEnabled ? 'warn' : 'info');
+        validation.textContent = teachEnabled && !normalized
+            ? t('后台教学需要先配置可用的 Ollama 本地学生模型。', 'Background teaching requires a working local Ollama student model.', '背景教學需要先配置可用的 Ollama 本地學生模型。')
+            : (teachEnabled ? t('该模式会增加本机算力占用；学生调用在后台执行，不阻塞正常回复。', 'This mode uses additional local compute; student calls run in the background and do not block replies.', '此模式會增加本機運算負載；學生呼叫在背景執行，不阻塞正常回覆。') : '');
+    }
 }
 
 /** 教学老师模型始终等于主用模型：只读同步，不可单独改 */
@@ -6764,11 +6777,11 @@ function handlePrimaryInput() {
     const input = document.getElementById('model-primary');
     if (!input) return;
     let val = input.value.trim();
-    let provider = '';
+    let provider;
     if (val.includes('/')) {
-        const parts = val.split('/');
-        provider = parts[0];
-        val = parts[1];
+        const parsed = parseModelRef(val);
+        provider = parsed.provider;
+        val = parsed.model;
         input.value = val;
     }
     updateAssignedProviderSelects(val, undefined, provider, undefined);
@@ -6781,11 +6794,11 @@ function handleFallbackInput() {
     const input = document.getElementById('model-fallback');
     if (!input) return;
     let val = input.value.trim();
-    let provider = '';
+    let provider;
     if (val.includes('/')) {
-        const parts = val.split('/');
-        provider = parts[0];
-        val = parts[1];
+        const parsed = parseModelRef(val);
+        provider = parsed.provider;
+        val = parsed.model;
         input.value = val;
     }
     updateAssignedProviderSelects(undefined, val, undefined, provider);
@@ -6980,6 +6993,10 @@ function beautifyAllSelects() {
 
             trigger.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (select.disabled) {
+                    wrapper.classList.remove('active');
+                    return;
+                }
                 document.querySelectorAll('.custom-select-wrapper.active').forEach(w => {
                     if (w !== wrapper) w.classList.remove('active');
                 });
@@ -7025,8 +7042,25 @@ function startSelectAutoBeautify() {
 }
 
 // 供应商下拉框发生改变
-function handleProviderChange() {
-    syncTeacherModelFromPrimary();
+function handleProviderChange(event) {
+    const select = event?.currentTarget || event?.target;
+    if (select) {
+        const isPrimary = select.id === 'model-primary-provider';
+        const modelInput = document.getElementById(isPrimary ? 'model-primary' : 'model-fallback');
+        const previousProvider = select.dataset.previousValue || '';
+        const nextProvider = select.value || '';
+        if (previousProvider && nextProvider && previousProvider !== nextProvider && modelInput?.value.trim()
+            && !MODEL_CONFIG_POLICY.providerHasModel(localProviders, nextProvider, modelInput.value.trim())) {
+            modelInput.value = '';
+            showToast(t(
+                '已切换提供商，请重新选择该通道下的模型',
+                'Provider changed. Select a model available on the new channel.',
+                '已切換提供商，請重新選擇該通道下的模型'
+            ));
+        }
+        select.dataset.previousValue = nextProvider;
+    }
+    syncModelRoutingUi();
     updateConfigJsonPreview();
 }
 
@@ -7036,6 +7070,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const fallbackInput = document.getElementById('model-fallback');
     const primarySelect = document.getElementById('model-primary-provider');
     const fallbackSelect = document.getElementById('model-fallback-provider');
+    const fallbackEnabled = document.getElementById('model-fallback-enabled');
+    const dmtMode = document.getElementById('dmt-mode');
+    const studentInput = document.getElementById('model-student');
     
     if (primaryInput) {
         primaryInput.addEventListener('input', handlePrimaryInput);
@@ -7048,6 +7085,21 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     if (fallbackSelect) {
         fallbackSelect.addEventListener('change', handleProviderChange);
+    }
+    if (fallbackEnabled) {
+        fallbackEnabled.addEventListener('change', () => {
+            syncModelRoutingUi();
+            updateConfigJsonPreview();
+        });
+    }
+    if (dmtMode) {
+        dmtMode.addEventListener('change', () => {
+            syncDualModelModeUi();
+            updateConfigJsonPreview();
+        });
+    }
+    if (studentInput) {
+        studentInput.addEventListener('input', syncDualModelModeUi);
     }
     
     // 初始化自定义下拉推荐菜单
@@ -7156,7 +7208,7 @@ async function handleResetConfigAction() {
         );
         clearSaveBtnDirtyState(
             document.getElementById('config-save-btn'),
-            t('保存配置', 'Save Configuration', '保存配置')
+            t('保存 JSON', 'Save JSON', '儲存 JSON')
         );
         const jsonErrorEl = document.getElementById('json-format-error');
         if (jsonErrorEl) jsonErrorEl.style.display = 'none';
@@ -7182,6 +7234,7 @@ async function handleJsonPreviewResetAction() {
     ));
     if (!confirmReset) return;
 
+    jsonConfigDraft = null;
     const previewEl = document.getElementById('config-json-preview');
     if (previewEl && document.activeElement === previewEl) previewEl.blur();
     updateConfigJsonPreview(true);
@@ -7190,7 +7243,7 @@ async function handleJsonPreviewResetAction() {
     if (jsonErrorEl) jsonErrorEl.style.display = 'none';
     clearSaveBtnDirtyState(
         document.getElementById('config-save-btn'),
-        t('保存配置', 'Save Configuration', '保存配置')
+        t('保存 JSON', 'Save JSON', '儲存 JSON')
     );
     showToast(t('🔄 已还原 JSON 预览', 'JSON preview restored', '🔄 已還原 JSON 預覽'));
 }
@@ -7216,103 +7269,96 @@ const handleSaveConfigAction = async () => {
     };
 
     if (!configData) return;
+    if (jsonConfigDraft) {
+        showToast(t(
+            '右侧 JSON 有未保存修改，请先在 JSON 区保存或放弃，再保存左侧表单。',
+            'The JSON panel has unsaved changes. Save or discard them there before saving the form.',
+            '右側 JSON 有未儲存修改，請先在 JSON 區儲存或放棄，再儲存左側表單。'
+        ));
+        return;
+    }
+    const { draft: workingConfig, routing, dmtMode } = buildConfigDraftFromForm();
+    const providersValidation = MODEL_CONFIG_POLICY.validateProviders(workingConfig.models.providers);
+    if (!providersValidation.ok) {
+        showToast(t('提供商配置有误：', 'Invalid provider configuration: ', '提供商配置有誤：') + providersValidation.errors[0]);
+        document.getElementById('providers-list-zone')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+    if (!routing.ok) {
+        showToast(t('模型路由配置有误：', 'Invalid model routing: ', '模型路由配置有誤：') + routing.errors.join('；'));
+        document.getElementById('model-routing-message')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
+    const studentInput = document.getElementById('model-student');
+    const normalizedStudent = normalizeStudentModelRef(studentInput?.value || '');
+    if (dmtMode === 'teach-learn' && !normalizedStudent) {
+        showToast(t('后台教学需要配置 Ollama 本地学生模型', 'Background teaching requires a local Ollama student model.', '背景教學需要配置 Ollama 本地學生模型'));
+        studentInput?.focus();
+        return;
+    }
 
-    // 1. 同步保存提供商与模型白名单
-    if (!configData.models) configData.models = {};
-    
+    const port = parseInt(document.getElementById('gateway-port')?.value, 10);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        showToast(t('网关端口必须是 1024 至 65535 的整数', 'Gateway port must be an integer from 1024 to 65535.', '網關連接埠必須是 1024 至 65535 的整數'));
+        document.getElementById('gateway-port')?.focus();
+        return;
+    }
+
     const useBuiltIn = getUseBuiltIn();
-    configData.__nexoraUseBuiltIn = useBuiltIn;
-    const finalProviders = JSON.parse(JSON.stringify(localProviders));
-    
+    const finalProviders = workingConfig.models.providers;
     if (useBuiltIn && finalProviders['agnes-ai']) {
         finalProviders['agnes-ai'].baseUrl = 'https://apihub.agnes-ai.com/v1';
         finalProviders['agnes-ai'].apiKey = '';
     }
-    
-    configData.models.providers = finalProviders;
 
-    // 2. 同步生成环境变量 (env) 机制
-    if (!configData.env) configData.env = {};
-    for (const key of Object.keys(localProviders)) {
+    // 手动输入但尚未加入白名单的路由模型，在明确保存时同步加入对应提供商。
+    const ensureRouteModelListed = (ref) => {
+        const parsed = parseModelRef(ref);
+        const provider = finalProviders[parsed.provider];
+        if (!provider || !parsed.model) return;
+        if (!Array.isArray(provider.models)) provider.models = [];
+        if (!provider.models.some((model) => String(model?.id || model?.name || '').trim() === parsed.model)) {
+            provider.models.push({
+                id: parsed.model,
+                name: parsed.model,
+                contextWindow: inferContextWindow(parsed.model),
+                maxTokens: 8192
+            });
+        }
+    };
+    ensureRouteModelListed(routing.primaryRef);
+    routing.fallbackRefs.forEach(ensureRouteModelListed);
+    if (dmtMode === 'teach-learn') ensureRouteModelListed(normalizedStudent);
+
+    // API Key 环境变量与当前厂家全量对齐，清空/删除厂家时不保留旧凭据。
+    if (!workingConfig.env) workingConfig.env = {};
+    const activeEnvNames = new Set();
+    for (const [key, provider] of Object.entries(finalProviders)) {
         const envKeyName = key.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase() + '_API_KEY';
-        let val = localProviders[key].apiKey;
+        activeEnvNames.add(envKeyName);
+        let val = provider?.apiKey || '';
         if (key === 'agnes-ai' && useBuiltIn) val = '';
-        if (val) {
-            configData.env[envKeyName] = val;
-        } else {
-            // 用户清空了该 provider 的 key：删掉对应 env 项，否则旧 key 残留、网关继续用它
-            // （表现为「我删了 key 但它还能用」）
-            delete configData.env[envKeyName];
-        }
+        if (val) workingConfig.env[envKeyName] = val;
+        else delete workingConfig.env[envKeyName];
+    }
+    for (const envName of Object.keys(workingConfig.env)) {
+        if (/_API_KEY$/.test(envName) && !activeEnvNames.has(envName)) delete workingConfig.env[envName];
     }
 
-    // 3. 同步并发选项及默认主备模型选择
-    if (!configData.agents) configData.agents = {};
-    if (!configData.agents.defaults) configData.agents.defaults = {};
-    
-    const maxConcurrentEl = document.getElementById('max-concurrent');
-    configData.agents.defaults.maxConcurrent = maxConcurrentEl ? parseInt(maxConcurrentEl.value, 10) : (configData.agents.defaults.maxConcurrent || 4);
-    
-    if (!configData.agents.defaults.model) configData.agents.defaults.model = {};
-    const primaryModelVal = document.getElementById('model-primary').value.trim();
-    const primaryProviderVal = document.getElementById('model-primary-provider').value;
-    if (primaryProviderVal && primaryModelVal && !primaryModelVal.includes('/')) {
-        configData.agents.defaults.model.primary = `${primaryProviderVal}/${primaryModelVal}`;
-    } else {
-        configData.agents.defaults.model.primary = primaryModelVal;
-    }
-
-    const fallbackModelVal = document.getElementById('model-fallback').value.trim();
-    const fallbackProviderVal = document.getElementById('model-fallback-provider').value;
-    let finalFallback = fallbackModelVal;
-    if (fallbackProviderVal && fallbackModelVal && !fallbackModelVal.includes('/')) {
-        finalFallback = `${fallbackProviderVal}/${fallbackModelVal}`;
-    }
-    configData.agents.defaults.model.fallbacks = [finalFallback];
-
-    // 内置开启：最终钳制一次，防止写回非 agnes-ai/ollama 的主备模型
-    if (useBuiltIn) {
-        applyBuiltInModelPolicy(configData);
-        if (configData.models && configData.models.providers) {
-            localProviders = JSON.parse(JSON.stringify(configData.models.providers));
-        }
-    }
-
-    // 双模型教学：老师/学生模型写回插件配置
-    if (!configData.plugins) configData.plugins = {};
-    if (!configData.plugins.entries) configData.plugins.entries = {};
-    if (!configData.plugins.entries['dual-model-trainer']) {
-        configData.plugins.entries['dual-model-trainer'] = { enabled: true };
-    }
-    const dmtEntry = configData.plugins.entries['dual-model-trainer'];
-    if (!dmtEntry.config) dmtEntry.config = {};
-    const studentInput = document.getElementById('model-student');
-    // 老师模型强制等于主用模型（不可单独配置）
-    dmtEntry.config.teacherModel = (configData.agents.defaults.model.primary || getPrimaryModelRefFromUi() || '').trim();
-    syncTeacherModelFromPrimary();
-    if (studentInput) {
-        const normalizedStudent = normalizeStudentModelRef(studentInput.value);
-        if (studentInput.value.trim() && !normalizedStudent) {
-            showToast(t('模仿学生模型仅支持本地 ollama 模型（例如 ollama/qwen2.5:7b）', 'Student model only supports local ollama models (e.g. ollama/qwen2.5:7b).', '模仿學生模型僅支援本地 ollama 模型（例如 ollama/qwen2.5:7b）'));
-            studentInput.focus();
-            return;
-        }
-        studentInput.value = normalizedStudent;
-        dmtEntry.config.studentModel = normalizedStudent;
-    }
-
-    if (!configData.videoGenerator) configData.videoGenerator = {};
-    if (!configData.imageGenerator) configData.imageGenerator = {};
+    if (studentInput) studentInput.value = normalizedStudent;
+    workingConfig.gateway.port = port;
 
     if (useBuiltIn) {
         localStorage.setItem('client_pref_image_model', 'agnes-ai/agnes-image-2.0-flash');
         localStorage.setItem('client_pref_video_model', 'agnes-ai/agnes-video-v2.0');
 
-        configData.imageGenerator.apiBase = 'https://apihub.agnes-ai.com/v1/images/generations';
-        configData.imageGenerator.apiKey = '';
+        workingConfig.imageGenerator.apiBase = 'https://apihub.agnes-ai.com/v1/images/generations';
+        workingConfig.imageGenerator.apiKey = '';
+        workingConfig.imageGenerator.model = 'agnes-ai/agnes-image-2.0-flash';
 
-        configData.videoGenerator.apiBase = 'https://apihub.agnes-ai.com/v1/videos';
-        configData.videoGenerator.apiKey = '';
+        workingConfig.videoGenerator.apiBase = 'https://apihub.agnes-ai.com/v1/videos';
+        workingConfig.videoGenerator.apiKey = '';
+        workingConfig.videoGenerator.model = 'agnes-ai/agnes-video-v2.0';
     } else {
         const imageVal = document.getElementById('model-image').value.trim();
         localStorage.setItem('client_pref_image_model', imageVal);
@@ -7320,40 +7366,36 @@ const handleSaveConfigAction = async () => {
         const videoVal = document.getElementById('model-video').value.trim();
         localStorage.setItem('client_pref_video_model', videoVal);
 
-        configData.imageGenerator.apiBase = document.getElementById('image-api-base').value.trim();
-        configData.imageGenerator.model = imageVal;
+        workingConfig.imageGenerator.apiBase = document.getElementById('image-api-base').value.trim();
+        workingConfig.imageGenerator.model = imageVal;
         const imgKey = document.getElementById('image-api-key').value.trim();
-        configData.imageGenerator.apiKey = imgKey === KEY_MASK ? '' : imgKey;
+        workingConfig.imageGenerator.apiKey = imgKey === KEY_MASK ? '' : imgKey;
 
-        configData.videoGenerator.apiBase = document.getElementById('video-api-base').value.trim();
-        configData.videoGenerator.model = videoVal;
+        workingConfig.videoGenerator.apiBase = document.getElementById('video-api-base').value.trim();
+        workingConfig.videoGenerator.model = videoVal;
         const vidKey = document.getElementById('video-api-key').value.trim();
-        configData.videoGenerator.apiKey = vidKey === KEY_MASK ? '' : vidKey;
+        workingConfig.videoGenerator.apiKey = vidKey === KEY_MASK ? '' : vidKey;
     }
 
     // 存储在本地 localStorage 供客户端回显使用
-    localStorage.setItem('client_pref_video_generator', JSON.stringify(configData.videoGenerator));
-    localStorage.setItem('client_pref_image_generator', JSON.stringify(configData.imageGenerator));
+    localStorage.setItem('client_pref_video_generator', JSON.stringify(workingConfig.videoGenerator));
+    localStorage.setItem('client_pref_image_generator', JSON.stringify(workingConfig.imageGenerator));
 
     // 彻底从 configData 中删除非法字段以防止Nexora Agent启动 Schema 校验崩溃闪退
-    if (configData.agents && configData.agents.defaults) {
-        delete configData.agents.defaults.imageGenerationModel;
-        delete configData.agents.defaults.videoGenerationModel;
+    if (workingConfig.agents && workingConfig.agents.defaults) {
+        delete workingConfig.agents.defaults.imageGenerationModel;
+        delete workingConfig.agents.defaults.videoGenerationModel;
     }
 
-    if (!configData.gateway) configData.gateway = {};
-    configData.gateway.port = parseInt(document.getElementById('gateway-port').value, 10);
-
     // 调用 API 保存配置
-    const result = await window.api.saveConfig(configData);
+    const result = await window.api.saveConfig(workingConfig);
     if (result.success) {
         await loadAndRenderConfig();
-        const saveLabel = t('保存配置', 'Save Configuration', '保存配置');
-        clearSaveBtnDirtyState(document.getElementById('config-save-btn-top'), saveLabel);
-        clearSaveBtnDirtyState(document.getElementById('config-save-btn'), saveLabel);
+        clearSaveBtnDirtyState(document.getElementById('config-save-btn-top'), t('保存配置', 'Save Configuration', '保存配置'));
+        clearSaveBtnDirtyState(document.getElementById('config-save-btn'), t('保存 JSON', 'Save JSON', '儲存 JSON'));
         const jsonErrorEl = document.getElementById('json-format-error');
         if (jsonErrorEl) jsonErrorEl.style.display = 'none';
-        if (statPort) statPort.innerText = configData.gateway.port;
+        if (statPort) statPort.innerText = workingConfig.gateway.port;
 
         if (gatewayStatus === 'running') {
             showToast(t(
@@ -7369,8 +7411,35 @@ const handleSaveConfigAction = async () => {
     }
 };
 
+const handleSaveJsonConfigAction = async () => {
+    const previewEl = document.getElementById('config-json-preview');
+    const errorEl = document.getElementById('json-format-error');
+    if (!previewEl || !configData) return;
+    let parsed;
+    try {
+        parsed = JSON.parse(previewEl.value);
+        restoreMaskedSecretsFromPrevious(parsed, configData);
+    } catch (error) {
+        if (errorEl) errorEl.style.display = 'block';
+        showToast(t('JSON 语法有误，无法保存', 'Invalid JSON syntax. Cannot save.', 'JSON 語法有誤，無法儲存'));
+        return;
+    }
+    parsed.__nexoraUseBuiltIn = getUseBuiltIn();
+    const result = await window.api.saveConfig(parsed);
+    if (!result || result.success !== true) {
+        showToast(t('JSON 配置保存失败：', 'Failed to save JSON configuration: ', 'JSON 配置儲存失敗：') + ((result && result.error) || 'unknown error'));
+        return;
+    }
+    jsonConfigDraft = null;
+    await loadAndRenderConfig();
+    if (errorEl) errorEl.style.display = 'none';
+    clearSaveBtnDirtyState(document.getElementById('config-save-btn'), t('保存 JSON', 'Save JSON', '儲存 JSON'));
+    clearSaveBtnDirtyState(document.getElementById('config-save-btn-top'), t('保存配置', 'Save Configuration', '保存配置'));
+    showToast(t('JSON 配置已保存并重新载入', 'JSON configuration saved and reloaded.', 'JSON 配置已儲存並重新載入'));
+};
+
 // 为顶部与底部的两个“保存配置”按钮统一绑定监听
-document.getElementById('config-save-btn').addEventListener('click', handleSaveConfigAction);
+document.getElementById('config-save-btn').addEventListener('click', handleSaveJsonConfigAction);
 const topSaveBtn = document.getElementById('config-save-btn-top');
 if (topSaveBtn) {
     topSaveBtn.addEventListener('click', handleSaveConfigAction);

@@ -2,6 +2,33 @@
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
+
+// Windows 旧版系统 Node 也可运行打包烟测；应用自己的运行时解包前不依赖全局 fetch/WebSocket。
+if (typeof global.WebSocket === 'undefined') {
+  try { global.WebSocket = require('ws'); }
+  catch (_) { global.WebSocket = require('../node_modules/openclaw/node_modules/ws'); }
+}
+if (typeof global.fetch === 'undefined') {
+  global.fetch = (url) => new Promise((resolve, reject) => {
+    const client = String(url).startsWith('https:') ? https : http;
+    const request = client.get(url, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status: response.statusCode || 0,
+          ok: (response.statusCode || 0) >= 200 && (response.statusCode || 0) < 300,
+          text: async () => body,
+          json: async () => JSON.parse(body)
+        });
+      });
+    });
+    request.on('error', reject);
+  });
+}
 
 const port = Number(process.env.NEXORA_CDP_PORT || 9333);
 const outputDir = path.resolve(__dirname, '..', 'output', 'playwright');

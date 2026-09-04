@@ -778,44 +778,94 @@
                   </div>
                 </div>
 
-                <!-- 模型选择与权重 -->
-                <div class="form-group-section">
-                  <h3 data-i18n="config.section.default_models">🤖 默认模型选型</h3>
-                  <div class="form-row">
-                    <div class="form-field">
-                      <label for="model-primary" data-i18n="config.label.primary_model">主用模型 (Primary Model)</label>
-                      <input type="text" id="model-primary" autocomplete="off" placeholder="请选择或输入, 例如: agnes-ai/agnes-2.0-flash" data-i18n-placeholder="config.placeholder.primary_model">
+                <!-- 默认聊天路由：提供商与模型成对绑定，禁止依靠模型名猜测提供商 -->
+                <div class="form-group-section model-routing-section">
+                  <div class="section-title-row">
+                    <div>
+                      <h3 data-i18n="config.section.default_models">🤖 默认模型选型</h3>
+                      <p class="section-help" data-i18n="config.desc.routing">先选提供商，再选该通道下的模型；保存值与实际调用均为 provider/model。</p>
                     </div>
-                    <div class="form-field">
-                      <label for="model-fallback" data-i18n="config.label.fallback_model">备用模型 (Fallback Model)</label>
-                      <input type="text" id="model-fallback" autocomplete="off" placeholder="请选择或输入, 例如: agnes-ai/agnes-1.5-flash" data-i18n-placeholder="config.placeholder.fallback_model">
+                    <span id="model-routing-health" class="config-state-badge" data-state="pending">待检查</span>
+                  </div>
+
+                  <div class="model-route-card" data-route="primary">
+                    <div class="model-route-heading">
+                      <div>
+                        <strong data-i18n="config.route.primary">主用路由</strong>
+                        <span data-i18n="config.route.primary_desc">正常情况下所有对话都走这里</span>
+                      </div>
+                      <code id="model-primary-resolved">—</code>
+                    </div>
+                    <div class="form-row model-route-fields">
+                      <div class="form-field">
+                        <label for="model-primary-provider" data-i18n="config.label.primary_provider">主用模型供应商 (Primary Model Provider)</label>
+                        <select id="model-primary-provider">
+                          <option value="" data-i18n="config.option.select_provider">-- 请选择提供商 --</option>
+                        </select>
+                      </div>
+                      <div class="form-field">
+                        <label for="model-primary" data-i18n="config.label.primary_model">主用模型 (Primary Model)</label>
+                        <input type="text" id="model-primary" autocomplete="off" placeholder="先选择提供商，再选择或输入模型 ID" data-i18n-placeholder="config.placeholder.route_model">
+                      </div>
                     </div>
                   </div>
-                  <!-- 供模糊匹配选型的动态列表 -->
+
+                  <div class="model-route-card" data-route="fallback">
+                    <div class="model-route-heading">
+                      <div>
+                        <strong data-i18n="config.route.fallback">备用路由</strong>
+                        <span data-i18n="config.route.fallback_desc">仅当主用模型失败时按顺序尝试</span>
+                      </div>
+                      <label class="model-route-toggle" for="model-fallback-enabled">
+                        <span data-i18n="config.route.fallback_enabled">启用备用</span>
+                        <span class="switch-slider-btn">
+                          <input type="checkbox" id="model-fallback-enabled">
+                          <span class="slider-knob"></span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="form-row model-route-fields" id="model-fallback-fields">
+                      <div class="form-field">
+                        <label for="model-fallback-provider" data-i18n="config.label.fallback_provider">备用模型供应商 (Fallback Model Provider)</label>
+                        <select id="model-fallback-provider">
+                          <option value="" data-i18n="config.option.select_provider">-- 请选择提供商 --</option>
+                        </select>
+                      </div>
+                      <div class="form-field">
+                        <label for="model-fallback" data-i18n="config.label.fallback_model">备用模型 (Fallback Model)</label>
+                        <input type="text" id="model-fallback" autocomplete="off" placeholder="先选择提供商，再选择或输入模型 ID" data-i18n-placeholder="config.placeholder.route_model">
+                      </div>
+                    </div>
+                    <code id="model-fallback-resolved" class="model-route-resolved">未启用</code>
+                  </div>
+
+                  <div id="model-routing-message" class="config-inline-message" data-state="info"></div>
                   <datalist id="models-datalist"></datalist>
-                  
-                  <div class="form-row">
-                    <div class="form-field">
-                      <label for="model-primary-provider" data-i18n="config.label.primary_provider">主用模型供应商 (Primary Model Provider)</label>
-                      <select id="model-primary-provider">
-                        <option value="" data-i18n="config.option.auto_detect_provider">-- 自动检测供应商 --</option>
-                      </select>
-                    </div>
-                    <div class="form-field">
-                      <label for="model-fallback-provider" data-i18n="config.label.fallback_provider">备用模型供应商 (Fallback Model Provider)</label>
-                      <select id="model-fallback-provider">
-                        <option value="" data-i18n="config.option.auto_detect_provider">-- 自动检测供应商 --</option>
-                      </select>
-                    </div>
-                  </div>
                 </div>
 
                 <!-- 双模型教学配置 -->
                 <div class="form-group-section" id="section-dual-model-trainer">
-                  <h3 data-i18n="config.section.dual_model">🧠 双模型教学配置 (Teach-Learn Mode)</h3>
-                  <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; margin-top: -8px;" data-i18n="config.desc.dual_model">
-                    启用双模型教学时，网关将使用“教学老师模型”生成的回答，训练并让“模仿学生模型”（专属本地模型）进行 1:1 的口吻模仿
-                  </p>
+                  <div class="section-title-row">
+                    <div>
+                      <h3 data-i18n="config.section.dual_model">🧠 本地学习与双模型教学</h3>
+                      <p class="section-help" data-i18n="config.desc.dual_model">默认仅收集主模型的优质回答；开启教学后，本地学生模型会在后台学习，不阻塞正常回复。</p>
+                    </div>
+                    <span id="dmt-status-badge" class="config-state-badge" data-state="safe">仅收集</span>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-field">
+                      <label for="dmt-mode" data-i18n="config.label.dmt_mode">运行模式</label>
+                      <select id="dmt-mode">
+                        <option value="off" data-i18n="config.dmt.off">关闭学习插件</option>
+                        <option value="collect-only" data-i18n="config.dmt.collect">仅收集主模型回答（推荐，零额外调用）</option>
+                        <option value="teach-learn" data-i18n="config.dmt.teach">后台教学（会额外调用本地学生模型）</option>
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label data-i18n="config.label.dmt_effect">实际运行效果</label>
+                      <div id="dmt-mode-explanation" class="config-readonly-value">只保存主模型回答作为训练样本，不额外调用模型。</div>
+                    </div>
+                  </div>
                   <div class="form-row">
                     <div class="form-field">
                       <label for="model-teacher" data-i18n="config.label.teacher_model">教学老师模型（跟随主用模型，不可单独修改）</label>
@@ -826,6 +876,7 @@
                       <input type="text" id="model-student" autocomplete="off" placeholder="例如: ollama/你的本地模型" data-i18n-placeholder="config.placeholder.student_model">
                     </div>
                   </div>
+                  <div id="dmt-validation-message" class="config-inline-message" data-state="info"></div>
                 </div>
                 
                 <!-- 图片生成设置 -->
@@ -906,11 +957,11 @@
                   <h3 data-i18n="config.section.json_preview">📄 openclaw.json 实时预览</h3>
                   <div style="display: flex; gap: 8px; align-items: center;">
                     <button type="button" class="btn-secondary" id="config-reset-btn" style="padding: 0 14px; font-size: 12px; font-weight: 600; border-radius: 6px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); color: #ffffff; transition: all 0.3s ease; cursor: pointer; height: 32px; line-height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; margin-top: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.2);" data-i18n="config.btn.reset_json" title="仅还原 JSON 预览区手写内容">放弃修改</button>
-                    <button type="button" class="btn-primary" id="config-save-btn" style="padding: 0 16px; font-size: 12px; font-weight: 600; border-radius: 6px; box-shadow: var(--accent-glow); cursor: pointer; height: 32px; line-height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; margin-top: 0;" data-i18n="config.btn.save">保存配置</button>
+                    <button type="button" class="btn-primary" id="config-save-btn" style="padding: 0 16px; font-size: 12px; font-weight: 600; border-radius: 6px; box-shadow: var(--accent-glow); cursor: pointer; height: 32px; line-height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; margin-top: 0;" data-i18n="config.btn.save_json">保存 JSON</button>
                     <span style="font-size: 11px; color: var(--text-secondary); background: rgba(255,255,255,0.06); padding: 0 8px; border-radius: 4px; font-weight: 500; height: 28px; display: inline-flex; align-items: center; box-sizing: border-box;" data-i18n="config.badge.manual_edit">支持手动直接修改</span>
                   </div>
                 </div>
-                <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.5;" data-i18n="config.desc.json_preview">左侧表单项的改动会实时自动反映在此处；API 密钥等敏感字段已脱敏为 ********。您也可以直接手写 JSON，点击保存后一并生效。</p>
+                <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.5;" data-i18n="config.desc.json_preview">左侧表单改动会实时预览；敏感字段已脱敏。手写 JSON 使用独立草稿，只由本区域的“保存 JSON”提交。</p>
                 <textarea id="config-json-preview" class="config-json-textarea" spellcheck="false" placeholder="正在读取网关配置文件..." data-i18n-placeholder="config.placeholder.json_reading"></textarea>
                 <div id="json-format-error" class="json-error-msg" data-i18n="config.error.json_syntax">⚠️ JSON 语法格式有误，请检查大括号、逗号或双引号闭合状态。</div>
               </div>
@@ -2345,6 +2396,7 @@
   <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <script src="jsQR.js"></script>
   <script src="locales.js"></script>
+  <script src="model-config-policy.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

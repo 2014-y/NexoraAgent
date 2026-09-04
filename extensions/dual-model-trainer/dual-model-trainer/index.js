@@ -848,21 +848,13 @@ ${question}
         return;
       }
 
-      // Teach-Learn 模式 — 异步后台执行，不阻塞主链路
+      // Teach-Learn 模式：复用当前主链路回复作为老师答案，只在后台调用一次本地学生模型。
       if (!config.enableTeachLearn) return;
-
-      // Fire-and-forget: teachAndLearn 现在只跑老师回答（快速），
-      // 学生模仿在后台异步进行，结果存入 learning_log.jsonl
-      Promise.resolve(teachAndLearn(question, deliveryContext))
-        .then(result => {
-          const elapsed = result?.teacherFailed ? 'N/A' : 'fast';
-          const summary = result?.teacherFailed
-            ? '🔄 老师不可用'
-            : result?.mode === 'autonomous'
-              ? '🔄 自主模式'
-              : '👨‍🏫 老师回答已返回';
-
-          console.log(`[${pluginName}] 📊 ${summary} | 学生后台学习中... | 累计教学: ${stats.teachRounds} | 降级: ${stats.fallbackActivations} | 错误: ${stats.totalErrors}`);
+      const teacherAnswer = context.response?.content || context.response;
+      if (typeof teacherAnswer !== 'string' || teacherAnswer.length < config.minAnswerLength) return;
+      Promise.resolve(studentLearnInBackground(question, teacherAnswer, deliveryContext))
+        .then(() => {
+          console.log(`[${pluginName}] 📊 学生后台学习完成 | 累计教学: ${stats.teachRounds} | 错误: ${stats.totalErrors}`);
         })
         .catch(error => {
           stats.totalErrors++;

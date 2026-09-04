@@ -3177,6 +3177,149 @@ textarea.acc-input {
   white-space: nowrap;
 }
 
+#config-view .section-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+#config-view .section-title-row h3 {
+  margin-bottom: 6px;
+}
+
+#config-view .section-help {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.config-state-badge {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.config-state-badge[data-state="ok"],
+.config-state-badge[data-state="safe"] {
+  color: #65e3a6;
+  border-color: rgba(101, 227, 166, 0.35);
+  background: rgba(101, 227, 166, 0.08);
+}
+
+.config-state-badge[data-state="warn"] {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.35);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.config-state-badge[data-state="error"] {
+  color: #ff7b86;
+  border-color: rgba(255, 82, 82, 0.35);
+  background: rgba(255, 82, 82, 0.08);
+}
+
+.model-route-card {
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.model-route-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.model-route-heading > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.model-route-heading strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.model-route-heading span,
+.model-route-resolved {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.model-route-heading code,
+.model-route-resolved {
+  color: #cba5ff;
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  border-radius: 6px;
+  padding: 5px 8px;
+  word-break: break-all;
+}
+
+.model-route-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.model-route-fields.is-disabled {
+  opacity: 0.5;
+}
+
+.config-inline-message {
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.config-inline-message[data-state="error"] {
+  color: #ff9aa2;
+  background: rgba(255, 82, 82, 0.08);
+}
+
+.config-inline-message[data-state="warn"] {
+  color: #ffd166;
+  background: rgba(255, 193, 7, 0.07);
+}
+
+.config-inline-message:empty {
+  display: none;
+}
+
+.config-readonly-value {
+  min-height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 8px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* --- 控制台 Tab --- */
 .console-grid {
   display: flex;

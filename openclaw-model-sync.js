@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ensureVisionModelConfig } = require('./vision-model-config');
+const { omitBlankProviderApiKeys } = require('./model-config-policy');
 
 function parseProviderModel(primary) {
     const s = String(primary || '').trim();
@@ -135,7 +136,7 @@ function syncAgentModelCatalog(stateDir, sourceConfig) {
     let updated = 0;
     for (const [providerId, provider] of Object.entries(sourceProviders)) {
         if (!provider || typeof provider !== 'object') continue;
-        const next = cloneJson(provider);
+        const next = omitBlankProviderApiKeys({ provider: cloneJson(provider) }).provider;
         if (!jsonChanged(data.providers[providerId], next)) {
             continue;
         }

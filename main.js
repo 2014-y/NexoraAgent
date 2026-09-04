@@ -50,6 +50,11 @@ const {
 } = require('./gateway-auth');
 const { syncModelConfigToStateDirs } = require('./openclaw-model-sync');
 const {
+    normalizeConfigRouting,
+    omitBlankProviderApiKeys,
+    BUILTIN_ALLOWED_PROVIDERS
+} = require('./model-config-policy');
+const {
     getConfiguredAgnesApiKey,
     ensureAgnesAuthProfileConfig,
     syncAgnesAuthProfileToState
@@ -1461,6 +1466,12 @@ function lockGatewayAuthBeforeStart() {
     try {
         if (fs.existsSync(CONFIG_PATH)) {
             const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+            const providersBefore = JSON.stringify(cfg.models && cfg.models.providers || {});
+            omitBlankProviderApiKeys(cfg.models && cfg.models.providers);
+            if (providersBefore !== JSON.stringify(cfg.models && cfg.models.providers || {})) {
+                writeConfigFileAtomic(JSON.stringify(cfg, null, 2) + '\n');
+                console.log('[ModelSync] Removed blank provider API keys from primary config');
+            }
             const syncedModels = syncModelConfigToStateDirs(altDirs, cfg, CONFIG_DIR);
             if (syncedModels.length) {
                 console.log('[ModelSync] Pre-start synced model config to:', syncedModels.join(' | '));
@@ -7392,6 +7403,12 @@ ipcMain.handle('config-save', async (event, newConfig) => {
             if (!cleanConfig.models.providers['agnes-ai']) cleanConfig.models.providers['agnes-ai'] = {};
             cleanConfig.models.providers['agnes-ai'].apiKey = _AGNES_PRIMARY_KEY;
         }
+        // 主进程是最终写盘边界：拒绝缺少 provider/model、引用不存在厂家、
+        // 把图片模型当聊天模型等错误，并清理空/重复备用项。
+        normalizeConfigRouting(cleanConfig, {
+            allowedProviders: useBuiltInAgnes ? BUILTIN_ALLOWED_PROVIDERS : [],
+            inferLegacyRefs: true
+        });
         // OpenClaw 2026.9 的 profile 凭据优先于 models.json。把 Agnes 固定为
         // 单一 profile 权威源，并去掉同值 env 副本，避免首发先撞旧 profile 401。
         const agnesAuthConfig = ensureAgnesAuthProfileConfig(cleanConfig);

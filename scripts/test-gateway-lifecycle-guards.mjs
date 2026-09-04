@@ -84,15 +84,24 @@ try {
   fs.mkdirSync(agentDir, { recursive: true });
   const modelsPath = path.join(agentDir, 'models.json');
   fs.writeFileSync(modelsPath, JSON.stringify({
-    providers: { 'agnes-ai': { apiKey: 'YOUR_AGNES_API_KEY_HERE', models: [] } }
+    providers: {
+      'agnes-ai': { apiKey: 'YOUR_AGNES_API_KEY_HERE', models: [] },
+      ollama: { apiKey: 'stale-should-be-removed', models: [] }
+    }
   }));
   const result = syncAgentModelCatalog(modelSyncTemp, {
-    models: { providers: { 'agnes-ai': { apiKey: 'valid-restored-key-value-1234567890', models: [{ id: 'agnes-2.0-flash' }] } } }
+    models: {
+      providers: {
+        'agnes-ai': { apiKey: 'valid-restored-key-value-1234567890', models: [{ id: 'agnes-2.0-flash' }] },
+        ollama: { apiKey: '   ', baseUrl: 'http://localhost:11434/v1', models: [] }
+      }
+    }
   });
   const synced = JSON.parse(fs.readFileSync(modelsPath, 'utf8'));
   assert.equal(result.changed, true);
   assert.equal(synced.providers['agnes-ai'].apiKey, 'valid-restored-key-value-1234567890');
   assert.equal(synced.providers['agnes-ai'].models[0].id, 'agnes-2.0-flash');
+  assert.equal(Object.prototype.hasOwnProperty.call(synced.providers.ollama, 'apiKey'), false, 'blank local-provider API keys must be omitted');
 } finally {
   fs.rmSync(modelSyncTemp, { recursive: true, force: true });
 }

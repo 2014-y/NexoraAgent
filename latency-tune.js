@@ -523,7 +523,8 @@ function ensureLatencySafeConfig(config, opts = {}) {
     }
   }
 
-  // 双模型教学默认不打断主链路
+  // 双模型教学默认只收集。只有 UI 明确写入 mode=teach-learn 且
+  // enableTeachLearn=true 时才保留教学；不能在每次保存时偷偷关掉用户选择。
   if (!cfg.plugins) cfg.plugins = {};
   if (!cfg.plugins.entries) cfg.plugins.entries = {};
   if (!isObject(cfg.plugins.entries['dual-model-trainer'])) {
@@ -531,12 +532,13 @@ function ensureLatencySafeConfig(config, opts = {}) {
   }
   const dmt = cfg.plugins.entries['dual-model-trainer'];
   if (!isObject(dmt.config)) dmt.config = {};
-  if (!dmt.config.mode || dmt.config.mode === 'teach-learn') {
+  const explicitTeachLearn = dmt.config.mode === 'teach-learn' && dmt.config.enableTeachLearn === true;
+  if (!dmt.config.mode || (dmt.config.mode === 'teach-learn' && !explicitTeachLearn)) {
     const prev = dmt.config.mode;
     dmt.config.mode = 'collect-only';
     changes.push(`dual-model-trainer.mode: ${prev ?? 'unset'} -> collect-only`);
   }
-  if (dmt.config.enableTeachLearn !== false) {
+  if (!explicitTeachLearn && dmt.config.enableTeachLearn !== false) {
     dmt.config.enableTeachLearn = false;
     changes.push('dual-model-trainer.enableTeachLearn: -> false');
   }
