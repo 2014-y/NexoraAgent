@@ -16,6 +16,7 @@ const tests = [
   'test-gateway-lifecycle-guards.mjs',
   'test-openclaw-stable-update.mjs',
   'test-media-dedupe.mjs',
+  'test-menu-visibility-guards.mjs',
   'test-outbound-dedupe.mjs',
   'test-overflow-continuity.mjs',
   'test-overflow-delivery-route.mjs',

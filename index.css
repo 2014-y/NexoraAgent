@@ -5419,6 +5419,9 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* 系统设置 · 菜单排序 */
+.sidebar-nav > .nav-item.is-menu-hidden {
+  display: none !important;
+}
 .settings-menu-order-card {
   padding: 0;
   background: rgba(255, 255, 255, 0.02);
@@ -5521,6 +5524,14 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.12);
 }
+.settings-menu-order-row.is-hidden {
+  border-color: rgba(255, 255, 255, 0.035);
+  background: rgba(0, 0, 0, 0.2);
+}
+.settings-menu-order-row.is-hidden .settings-menu-order-index,
+.settings-menu-order-row.is-hidden .settings-menu-order-label {
+  opacity: 0.5;
+}
 .settings-menu-order-index {
   width: 22px;
   height: 22px;
@@ -5547,6 +5558,30 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+.settings-menu-visibility-btn {
+  min-width: 66px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.settings-menu-visibility-btn:hover {
+  border-color: rgba(var(--accent-rgb), 0.58);
+  background: rgba(var(--accent-rgb), 0.17);
+}
+.settings-menu-visibility-btn.is-show-action {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-secondary);
 }
 .settings-menu-order-btn {
   width: 28px;

@@ -18,6 +18,7 @@ const CLIENT_SETTING_DEFAULTS = Object.freeze({
     setting_auto_update: 'true',
     setting_language: 'zh-CN',
     setting_menu_order_expanded: 'false',
+    setting_sidebar_nav_visibility: '{}',
     'user-theme': 'theme-abyss',
     sidebar_collapsed: 'false',
     console_view_mode: 'step',
@@ -8612,6 +8613,8 @@ function updateMemoryMock() {
 
 // 7. Tab 页切换控制
 const SIDEBAR_NAV_ORDER_KEY = 'setting_sidebar_nav_order';
+const SIDEBAR_NAV_VISIBILITY_KEY = 'setting_sidebar_nav_visibility';
+const SIDEBAR_NAV_FIXED_TAB = 'console-view';
 const SIDEBAR_NAV_DEFAULT_ORDER = [
     'console-view',
     'acceleration-view',
@@ -8717,7 +8720,71 @@ function normalizeSidebarNavOrder(preferred) {
         }
         out.splice(insertAt, 0, tab);
     }
+    // 控制面板是永久入口：无论旧配置如何，都强制回到第一位。
+    const fixedIndex = out.indexOf(SIDEBAR_NAV_FIXED_TAB);
+    if (fixedIndex >= 0) out.splice(fixedIndex, 1);
+    out.unshift(SIDEBAR_NAV_FIXED_TAB);
     return out;
+}
+
+function readSavedSidebarNavVisibility() {
+    try {
+        const raw = localStorage.getItem(SIDEBAR_NAV_VISIBILITY_KEY);
+        if (!raw) return Object.create(null);
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return Object.create(null);
+        return parsed;
+    } catch (_) {
+        return Object.create(null);
+    }
+}
+
+function normalizeSidebarNavVisibility(preferred) {
+    const source = preferred && typeof preferred === 'object' && !Array.isArray(preferred)
+        ? preferred
+        : Object.create(null);
+    const normalized = Object.create(null);
+    for (const tabId of getDefaultSidebarNavOrder()) {
+        normalized[tabId] = tabId === SIDEBAR_NAV_FIXED_TAB ? true : source[tabId] !== false;
+    }
+    return normalized;
+}
+
+function saveSidebarNavVisibility(visibility) {
+    const normalized = normalizeSidebarNavVisibility(visibility);
+    try {
+        localStorage.setItem(SIDEBAR_NAV_VISIBILITY_KEY, JSON.stringify(normalized));
+    } catch (_) {}
+    return normalized;
+}
+
+function applySidebarNavVisibility(visibility) {
+    const normalized = normalizeSidebarNavVisibility(visibility || readSavedSidebarNavVisibility());
+    const root = getSidebarNavRoot();
+    if (!root) return normalized;
+    root.querySelectorAll(':scope > .nav-item[data-tab]').forEach((el) => {
+        const tabId = el.getAttribute('data-tab');
+        const visible = tabId === SIDEBAR_NAV_FIXED_TAB || normalized[tabId] !== false;
+        el.classList.toggle('is-menu-hidden', !visible);
+        el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    });
+    return normalized;
+}
+
+function setSidebarNavVisible(tabId, visible) {
+    if (!tabId || tabId === SIDEBAR_NAV_FIXED_TAB) return applySidebarNavVisibility();
+    const visibility = normalizeSidebarNavVisibility(readSavedSidebarNavVisibility());
+    visibility[tabId] = !!visible;
+    const saved = saveSidebarNavVisibility(visibility);
+    applySidebarNavVisibility(saved);
+    if (!visible) {
+        const active = document.querySelector(`.sidebar-nav .nav-item.active[data-tab="${tabId}"]`);
+        if (active) {
+            const fixed = document.querySelector(`.sidebar-nav .nav-item[data-tab="${SIDEBAR_NAV_FIXED_TAB}"]`);
+            if (fixed) fixed.click();
+        }
+    }
+    return saved;
 }
 
 function saveSidebarNavOrder(order) {
@@ -8743,15 +8810,16 @@ function applySidebarNavOrder(order) {
         const el = byTab.get(tab);
         if (el) root.appendChild(el);
     });
+    applySidebarNavVisibility();
     return normalized;
 }
 
 function moveSidebarNavOrder(tabId, direction) {
     const order = normalizeSidebarNavOrder(readSavedSidebarNavOrder());
     const idx = order.indexOf(tabId);
-    if (idx < 0) return order;
+    if (idx < 1 || tabId === SIDEBAR_NAV_FIXED_TAB) return order;
     const target = direction < 0 ? idx - 1 : idx + 1;
-    if (target < 0 || target >= order.length) return order;
+    if (target < 1 || target >= order.length) return order;
     const next = order.slice();
     const tmp = next[idx];
     next[idx] = next[target];
@@ -8763,7 +8831,10 @@ function moveSidebarNavOrder(tabId, direction) {
 
 function resetSidebarNavOrder() {
     try { localStorage.removeItem(SIDEBAR_NAV_ORDER_KEY); } catch (_) {}
-    return applySidebarNavOrder(getDefaultSidebarNavOrder());
+    try { localStorage.removeItem(SIDEBAR_NAV_VISIBILITY_KEY); } catch (_) {}
+    const order = applySidebarNavOrder(getDefaultSidebarNavOrder());
+    applySidebarNavVisibility(Object.create(null));
+    return order;
 }
 
 function getSidebarNavLabel(tabId) {
@@ -8777,8 +8848,11 @@ function renderMenuOrderSettingsUI() {
     const list = document.getElementById('setting-menu-order-list');
     if (!list) return;
     const order = normalizeSidebarNavOrder(readSavedSidebarNavOrder());
+    const visibility = normalizeSidebarNavVisibility(readSavedSidebarNavVisibility());
     const upLabel = t('settings.menu_order.up');
     const downLabel = t('settings.menu_order.down');
+    const showLabel = t('settings.menu_order.show');
+    const hideLabel = t('settings.menu_order.hide');
     const esc = (typeof escapeHtml === 'function')
         ? escapeHtml
         : (s) => String(s || '').replace(/[&<>"']/g, (c) => ({
@@ -8786,16 +8860,21 @@ function renderMenuOrderSettingsUI() {
         }[c]));
     list.innerHTML = order.map((tabId, index) => {
         const label = getSidebarNavLabel(tabId);
-        const atTop = index === 0;
+        const fixed = tabId === SIDEBAR_NAV_FIXED_TAB;
+        const visible = visibility[tabId] !== false;
+        const atTop = index <= 1;
         const atBottom = index === order.length - 1;
         return `
-          <div class="settings-menu-order-row" role="listitem" data-menu-tab="${tabId}">
+          <div class="settings-menu-order-row${visible ? '' : ' is-hidden'}${fixed ? ' is-fixed' : ''}" role="listitem" data-menu-tab="${tabId}">
             <div class="settings-menu-order-index">${index + 1}</div>
             <div class="settings-menu-order-label">${esc(label)}</div>
-            <div class="settings-menu-order-actions">
+            ${fixed ? '' : `<div class="settings-menu-order-actions">
+              <button type="button" class="settings-menu-visibility-btn${visible ? '' : ' is-show-action'}" data-menu-visibility="${visible ? 'hide' : 'show'}" data-menu-tab="${tabId}" title="${esc(visible ? hideLabel : showLabel)}" aria-label="${esc(visible ? hideLabel : showLabel)}">
+                <span aria-hidden="true">${visible ? '◉' : '○'}</span><span>${esc(visible ? hideLabel : showLabel)}</span>
+              </button>
               <button type="button" class="settings-menu-order-btn" data-menu-move="up" data-menu-tab="${tabId}" ${atTop ? 'disabled' : ''} title="${esc(upLabel)}" aria-label="${esc(upLabel)}">↑</button>
               <button type="button" class="settings-menu-order-btn" data-menu-move="down" data-menu-tab="${tabId}" ${atBottom ? 'disabled' : ''} title="${esc(downLabel)}" aria-label="${esc(downLabel)}">↓</button>
-            </div>
+            </div>`}
           </div>
         `;
     }).join('');
@@ -8848,6 +8927,16 @@ function initMenuOrderSettingsUI() {
     }
     list.dataset.menuOrderBound = '1';
     list.addEventListener('click', (e) => {
+        const visibilityBtn = e.target && e.target.closest ? e.target.closest('[data-menu-visibility]') : null;
+        if (visibilityBtn) {
+            const tabId = visibilityBtn.getAttribute('data-menu-tab');
+            const visible = visibilityBtn.getAttribute('data-menu-visibility') === 'show';
+            if (!tabId || tabId === SIDEBAR_NAV_FIXED_TAB) return;
+            setSidebarNavVisible(tabId, visible);
+            renderMenuOrderSettingsUI();
+            try { showToast(t(visible ? 'settings.menu_order.toast_shown' : 'settings.menu_order.toast_hidden')); } catch (_) {}
+            return;
+        }
         const btn = e.target && e.target.closest ? e.target.closest('[data-menu-move]') : null;
         if (!btn || btn.disabled) return;
         const tabId = btn.getAttribute('data-menu-tab');
