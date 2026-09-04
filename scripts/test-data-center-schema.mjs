@@ -8,6 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 const require = createRequire(import.meta.url);
 const { createApp } = require('../data-center/server.js');
+const dataCenterUi = fs.readFileSync(new URL('../data-center/public/index.html', import.meta.url), 'utf8');
+assert.match(dataCenterUi, /_activeFetchControllers: new Set\(\)/, 'data-center must track in-flight fetches');
+assert.match(dataCenterUi, /onHiddenPause\(\)/, 'data-center must pause polling when hidden');
+assert.match(dataCenterUi, /nexora-data-center-visibility/, 'parent must control data-center polling visibility');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexora-data-center-test-'));
 const stateDir = path.join(tempRoot, 'state');
 fs.mkdirSync(stateDir, { recursive: true });

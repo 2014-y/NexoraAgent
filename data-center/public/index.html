@@ -423,6 +423,9 @@ const app = Vue.createApp({
       _clockTimer: null,
       _visibleRetryTimers: [],
       _hadSuccessfulFetch: false,
+      _activeFetchControllers: new Set(),
+      _fetchGeneration: 0,
+      _paused: false,
     };
   },
   methods: {
@@ -430,7 +433,9 @@ const app = Vue.createApp({
       return n == null || Number(n) === 0 || Number.isNaN(Number(n));
     },
     async fetchJson(url) {
+      if (this._paused) throw new DOMException('Data center is paused', 'AbortError');
       const controller = new AbortController();
+      this._activeFetchControllers.add(controller);
       const timeout = setTimeout(() => controller.abort(), 4000);
       try {
         const r = await fetch(url, {
@@ -449,6 +454,7 @@ const app = Vue.createApp({
         return body;
       } finally {
         clearTimeout(timeout);
+        this._activeFetchControllers.delete(controller);
       }
     },
     clearVisibleRetries() {
@@ -633,8 +639,9 @@ const app = Vue.createApp({
       return this._charts[id];
     },
     async fetchAll(reason) {
-      if (this.refreshing) return;
+      if (this._paused || this.refreshing) return;
       this.refreshing = true;
+      const generation = this._fetchGeneration;
       const refreshWatchdog = setTimeout(() => {
         // 防止休眠唤醒后某次 fetch 挂起，卡住后续刷新
         this.refreshing = false;
@@ -661,6 +668,7 @@ const app = Vue.createApp({
             this.fetchJson(API+'/audit/stats'),
           ]);
 
+        if (this._paused || generation !== this._fetchGeneration) return;
         this.loadError = false;
         this.loadErrorDetail = '';
         this._hadSuccessfulFetch = true;
@@ -707,6 +715,7 @@ const app = Vue.createApp({
         this.renderGateway(boots);
         this.updateTime();
       } catch(e) {
+        if (this._paused || generation !== this._fetchGeneration || (e && e.name === 'AbortError')) return;
         console.error('Fetch error:', reason || '', e);
         this.loadError = true;
         this.loadErrorDetail = (e && e.message) ? String(e.message) : '读取失败';
@@ -878,8 +887,9 @@ const app = Vue.createApp({
     },
     startPolling() {
       this.stopPolling();
+      if (this._paused) return;
       this._pollTimer = setInterval(() => {
-        if (document.visibilityState === 'hidden') return;
+        if (this._paused || document.visibilityState === 'hidden') return;
         this.fetchAll('interval');
       }, 15000);
     },
@@ -890,6 +900,12 @@ const app = Vue.createApp({
       }
     },
     onVisibleRefresh() {
+      this._paused = false;
+      this._fetchGeneration += 1;
+      this._activeFetchControllers.forEach((controller) => {
+        try { controller.abort(); } catch (_) {}
+      });
+      this._activeFetchControllers.clear();
       // 息屏唤醒后可能卡在上一次 fetch；先放开锁再刷
       this.refreshing = false;
       this.fetchAll('visible');
@@ -899,27 +915,38 @@ const app = Vue.createApp({
         try { this._charts[id].resize(); } catch (_) {}
       });
     },
+    onHiddenPause() {
+      this._paused = true;
+      this._fetchGeneration += 1;
+      this.refreshing = false;
+      this.stopPolling();
+      this.clearVisibleRetries();
+      this._activeFetchControllers.forEach((controller) => {
+        try { controller.abort(); } catch (_) {}
+      });
+      this._activeFetchControllers.clear();
+    },
   },
   mounted() {
     this.updateTime();
     this._clockTimer = setInterval(() => this.updateTime(), 1000);
-    this.fetchAll('mount');
-    this.startPolling();
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') this.onVisibleRefresh();
-      else {
-        this.stopPolling();
-        this.clearVisibleRetries();
-      }
-    });
+      this.fetchAll('mount');
+      this.startPolling();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.onVisibleRefresh();
+        else this.onHiddenPause();
+      });
     window.addEventListener('focus', () => this.onVisibleRefresh());
     window.addEventListener('message', (evt) => {
       if (evt.source !== window.parent) return;
       const data = evt && evt.data;
       if (!data) return;
-      if (data.type === 'nexora-data-center-refresh' || data.type === 'nexora-theme') {
-        if (data.type === 'nexora-data-center-refresh') this.onVisibleRefresh();
-      }
+       if (data.type === 'nexora-data-center-visibility') {
+         if (data.visible) this.onVisibleRefresh();
+         else this.onHiddenPause();
+       } else if (data.type === 'nexora-data-center-refresh' || data.type === 'nexora-theme') {
+         if (data.type === 'nexora-data-center-refresh') this.onVisibleRefresh();
+       }
     });
     window.addEventListener('resize', () => {
       Object.keys(this._charts).forEach((id) => {
@@ -928,6 +955,7 @@ const app = Vue.createApp({
     });
   },
   beforeUnmount() {
+    this.onHiddenPause();
     this.stopPolling();
     this.clearVisibleRetries();
     if (this._clockTimer) clearInterval(this._clockTimer);

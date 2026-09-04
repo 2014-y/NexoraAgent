@@ -9259,6 +9259,13 @@ function setupTabSwitching() {
                 const frame = document.getElementById('data-center-iframe');
                 if (frame) {
                     frame.style.visibility = (nextTab === 'data-center-view') ? 'visible' : 'hidden';
+                    try {
+                        const origin = new URL(frame.src).origin;
+                        frame.contentWindow.postMessage({
+                            type: 'nexora-data-center-visibility',
+                            visible: nextTab === 'data-center-view'
+                        }, origin);
+                    } catch (_) {}
                     if (nextTab === 'data-center-view') {
                         try {
                             const origin = new URL(frame.src).origin;
