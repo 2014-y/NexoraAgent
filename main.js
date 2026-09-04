@@ -9711,7 +9711,8 @@ ipcMain.handle('stats-get', async () => {
         const stats = {
             total_tokens: 0,
             total_requests: 0,
-            total_cost: 0.0,
+            total_cost: null,
+            cost_known: true,
             sub_input_tokens: 0,
             sub_output_tokens: 0,
             sub_hit_tokens: 0,
@@ -9745,27 +9746,79 @@ ipcMain.handle('stats-get', async () => {
                 const content = fs.readFileSync(realTokensPath, 'utf8');
                 const realLogs = JSON.parse(content);
                 if (Array.isArray(realLogs)) {
+                    const providersByModel = new Map();
+                    const pricingByRoute = new Map();
+                    try {
+                        const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+                        for (const [providerKey, provider] of Object.entries(cfg && cfg.models && cfg.models.providers || {})) {
+                            for (const model of Array.isArray(provider && provider.models) ? provider.models : []) {
+                                const modelId = String(model && model.id || '').trim();
+                                if (!modelId) continue;
+                                const current = providersByModel.get(modelId);
+                                providersByModel.set(modelId, current && current !== providerKey ? '' : providerKey);
+                                if (model && model.cost && typeof model.cost === 'object') {
+                                    pricingByRoute.set(`${providerKey}/${modelId}`, model.cost);
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                    const toNonNegativeNumber = (value) => {
+                        const n = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+                        return Number.isFinite(n) && n >= 0 ? n : 0;
+                    };
+                    const resolveTimestamp = (log) => {
+                        const direct = Number(log && log.timestamp);
+                        if (Number.isFinite(direct) && direct > 0) return direct;
+                        const raw = String(log && log.time || '').trim();
+                        if (raw) {
+                            const parsed = Date.parse(raw.includes('T') || raw.includes('-') ? raw : `${new Date().toISOString().slice(0, 10)}T${raw}`);
+                            if (Number.isFinite(parsed)) return parsed;
+                        }
+                        return 0;
+                    };
                     for (const log of realLogs) {
-                        const p_name = log.provider || 'gateway';
                         const m_name = log.model || 'unknown-model';
-                        const input_t = parseInt(log.input) || 0;
-                        const output_t = parseInt(log.output) || 0;
-                        const hit_t = parseInt(log.hit) || 0;
+                        const legacyClientMarker = ['dialog-test', 'image-gen', 'video-gen'].includes(String(log.provider || ''));
+                        const p_name = legacyClientMarker ? (providersByModel.get(m_name) || 'unknown-provider') : (log.provider || 'gateway');
+                        const input_t = toNonNegativeNumber(log.input);
+                        const output_t = toNonNegativeNumber(log.output);
+                        const hit_t = toNonNegativeNumber(log.hit);
+                        // Older Nexora builds wrote a fake 3000+500 record for
+                        // every gateway console line. Keep the raw file intact
+                        // but exclude this unmarked legacy estimate from the
+                        // displayed totals so historical dashboards are not
+                        // permanently inflated.
+                        if (!log.source && input_t === 3000 && output_t === 500 && hit_t === 0) continue;
                         const elapsed_str = log.duration || '1.0s';
                         
                         let elapsed_ms = 1000;
                         try {
-                            elapsed_ms = parseInt(parseFloat(elapsed_str.replace('s', '')) * 1000);
+                            const parsedElapsed = Number.parseFloat(String(elapsed_str).replace('s', '')) * 1000;
+                            if (Number.isFinite(parsedElapsed) && parsedElapsed >= 0) elapsed_ms = parsedElapsed;
                         } catch(e) {}
                         
-                        const timestamp = log.timestamp || Date.now();
-                        const est_tokens = input_t + output_t + hit_t;
+                        const timestamp = resolveTimestamp(log);
+                        // Cached tokens are a subset of input tokens, not an
+                        // additional billable quantity. Never add them twice.
+                        const total_tokens = input_t + output_t;
+                        const explicitCost = log.cost == null ? Number.NaN : Number(log.cost);
+                        const pricing = pricingByRoute.get(`${p_name}/${m_name}`);
+                        const inputPrice = Number(pricing && pricing.input);
+                        const outputPrice = Number(pricing && pricing.output);
+                        const cacheReadPrice = Number(pricing && (pricing.cacheRead ?? pricing.cache_read));
+                        const computedCost = Number.isFinite(explicitCost) && explicitCost >= 0
+                            ? explicitCost
+                            : (Number.isFinite(inputPrice) && Number.isFinite(outputPrice)
+                                ? ((Math.max(0, input_t - hit_t) * inputPrice + output_t * outputPrice + hit_t * (Number.isFinite(cacheReadPrice) ? cacheReadPrice : inputPrice)) / 1000000)
+                                : null);
                         
-                        stats.total_tokens += est_tokens;
+                        stats.total_tokens += total_tokens;
                         stats.total_requests += 1;
                         stats.sub_input_tokens += input_t;
                         stats.sub_output_tokens += output_t;
                         stats.sub_hit_tokens += hit_t;
+                        if (computedCost == null) stats.cost_known = false;
+                        else stats.total_cost = (stats.total_cost || 0) + computedCost;
                         
                         const dt = new Date(timestamp);
                         const hour_str = `${dt.getHours().toString().padStart(2, '0')}:00`;
@@ -9781,18 +9834,19 @@ ipcMain.handle('stats-get', async () => {
                             stats.providers[p_name] = { requests: 0, tokens: 0, hit: 0 };
                         }
                         stats.providers[p_name].requests += 1;
-                        stats.providers[p_name].tokens += est_tokens;
+                        stats.providers[p_name].tokens += total_tokens;
                         stats.providers[p_name].hit += hit_t;
                         
-                        if (!stats.models[m_name]) {
-                            stats.models[m_name] = { provider: p_name, calls: 0, tokens: 0, duration: 0.0, hit: 0 };
+                        const model_key = `${p_name}/${m_name}`;
+                        if (!stats.models[model_key]) {
+                            stats.models[model_key] = { provider: p_name, model: m_name, calls: 0, tokens: 0, duration: 0.0, hit: 0 };
                         }
-                        stats.models[m_name].calls += 1;
-                        stats.models[m_name].tokens += est_tokens;
-                        stats.models[m_name].duration += (elapsed_ms / 1000.0);
-                        stats.models[m_name].hit += hit_t;
+                        stats.models[model_key].calls += 1;
+                        stats.models[model_key].tokens += total_tokens;
+                        stats.models[model_key].duration += (elapsed_ms / 1000.0);
+                        stats.models[model_key].hit += hit_t;
                         
-                        const time_str = log.time || `${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
+                        const time_str = log.time || (timestamp > 0 ? `${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}` : '未知时间');
                         stats.logs.push({
                             time: time_str,
                             provider: p_name,
@@ -9802,7 +9856,10 @@ ipcMain.handle('stats-get', async () => {
                             hit: hit_t,
                             duration: elapsed_str,
                             status: log.status || '成功',
-                            timestamp: timestamp
+                            timestamp: timestamp,
+                            source: log.source || (legacyClientMarker ? 'client' : 'gateway'),
+                            isPlugin: log.isPlugin === true,
+                            cost: computedCost
                         });
                     }
                 }
@@ -9815,12 +9872,15 @@ ipcMain.handle('stats-get', async () => {
             stats.hit_rate = (stats.sub_hit_tokens / stats.total_tokens) * 100.0;
         }
         
-        // 计算成本：输入 1.5$/M，输出 6.0$/M
-        stats.total_cost = (stats.sub_input_tokens / 1000000.0) * 1.5 + (stats.sub_output_tokens / 1000000.0) * 6.0;
+        if (!stats.total_requests) {
+            stats.total_cost = 0;
+            stats.cost_known = true;
+        } else if (!stats.cost_known) {
+            stats.total_cost = null;
+        }
         
-        // 按时间戳降序排列，取最近 1000 条 (前端需要全局数据计算总量)
+        // 保留全部明细，前端筛选器才能与汇总卡片使用同一数据范围。
         stats.logs.sort((a, b) => b.timestamp - a.timestamp);
-        stats.logs = stats.logs.slice(0, 1000);
 
         return { success: true, data: stats };
     } catch (e) {
@@ -9875,8 +9935,11 @@ ipcMain.handle('stats-append', async (event, logEntry) => {
             if (!logEntry.status) logEntry.status = '成功';
 
             realLogs.push(logEntry);
-            // 加上限(与网关侧一致的 1000 条)，避免无限增长拖慢统计加载
-            if (realLogs.length > 1000) realLogs = realLogs.slice(-1000);
+            // Keep newest entries first, matching the gateway writer. This
+            // prevents an append from retaining stale rows and dropping the
+            // newest usage record when the 1000-row cap is reached.
+            realLogs.sort((a, b) => Number(b && b.timestamp || 0) - Number(a && a.timestamp || 0));
+            if (realLogs.length > 1000) realLogs = realLogs.slice(0, 1000);
             // 原子写(临时文件 + rename)，避免网关并发读到半截 JSON 而误判损坏后清空
             const tmp = realTokensPath + `.tmp-${process.pid}-${Date.now()}`;
             fs.writeFileSync(tmp, JSON.stringify(realLogs, null, 2), 'utf8');

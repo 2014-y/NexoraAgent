@@ -1203,6 +1203,7 @@
               <select class="toolbar-select" id="stats-source-select">
                 <option value="all" data-i18n="stats.source.all">全部来源</option>
                 <option value="gateway" data-i18n="stats.source.gateway">网关入口</option>
+                <option value="client" data-i18n="stats.source.client">客户端直连</option>
                 <option value="plugins" data-i18n="stats.source.plugins">插件管道</option>
               </select>
               <div id="stats-model-picker" class="stats-model-picker">
@@ -1287,7 +1288,7 @@
             <div class="chart-panel-large" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 14px; padding: 16px; margin-bottom: 12px; display: flex; flex-direction: column;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);" data-i18n="stats.chart.title">使用趋势</div>
-                <div style="font-size: 10px; color: var(--text-secondary);" data-i18n="stats.chart.desc">当前展示: 当天 24小时走势</div>
+                <div id="stats-chart-desc" style="font-size: 10px; color: var(--text-secondary);">当前展示：当天 24 小时走势（Tokens）</div>
               </div>
               
               <!-- 平滑 SVG 大曲线图容器 -->
@@ -1297,8 +1298,6 @@
  
               <!-- 图表图例 -->
               <div class="chart-legends" style="display: flex; justify-content: center; gap: 14px; margin-top: 12px; font-size: 10px; color: var(--text-secondary);">
-                <span style="display: flex; align-items: center; gap: 4px;"><i style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff5252;"></i><span data-i18n="stats.chart.legend.cost">成本</span></span>
-                <span style="display: flex; align-items: center; gap: 4px;"><i style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff9100;"></i><span data-i18n="stats.chart.legend.cache_create">缓存创建</span></span>
                 <span style="display: flex; align-items: center; gap: 4px;"><i style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2979ff;"></i><span data-i18n="stats.chart.legend.cache_hit">缓存命中</span></span>
                 <span style="display: flex; align-items: center; gap: 4px;"><i style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #00e676;"></i><span data-i18n="stats.chart.legend.input">输入</span></span>
                 <span style="display: flex; align-items: center; gap: 4px;"><i style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-color);"></i><span data-i18n="stats.chart.legend.output">输出</span></span>

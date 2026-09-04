@@ -4284,29 +4284,9 @@ function setupIpcListeners() {
                 updateProgressUI(Math.max(currentProgress, 88), '正在绑定端口并装载渠道插件…');
             }
         }
-        // 仅在Nexora Agent真正运行中，且越过Nexora Agent刚启动时的 5 秒历史控制台日志喷吐垃圾冷区，才对全新实时流量记账
-        if (gatewayStatus === 'running' && (Date.now() - gatewayRunningTime > 5000)) {
-            if (text.includes('[model-fetch] response')) {
-                const provMatch = text.match(/provider=([^\s]+)/);
-                const modelMatch = text.match(/model=([^\s]+)/);
-                const elapsedMatch = text.match(/elapsedMs=([0-9]+)/);
-                if (provMatch && modelMatch) {
-                    const provider = provMatch[1].trim();
-                    const model = modelMatch[1].trim();
-                    const elapsed = elapsedMatch ? parseInt(elapsedMatch[1]) : 1000;
-                    
-                    const input = 3000;
-                    const output = 500;
-                    const hit = elapsed < 500 ? 2800 : 0;
-                    
-                    addSessionLog(provider, model, input, output, hit, elapsed);
-
-                    totalRequestCount++;
-                    const totalReqEl = document.getElementById('stat-total-requests');
-                    if (totalReqEl) totalReqEl.innerText = `${totalRequestCount}${t('次', '', '次')}`;
-                }
-            }
-        }
+        // Usage is persisted by the token-usage guard with the provider's
+        // reported counts. Do not synthesize a second fixed 3000+500 entry
+        // from a console line: that inflated totals and duplicated requests.
 
         // 联动日志流真实状态驱动进度条
         const progressContainer = document.getElementById('terminal-progress-bar-container');
@@ -9653,7 +9633,7 @@ async function renderUsageCharts() {
         }
     });
 
-    const norm = (v) => Math.min(100, Math.max(2, (v / 20000.0) * 100));
+    const norm = (v) => Math.min(100, Math.max(0, (v / 20000.0) * 100));
     const processedLineData = {
         cost: lineData.input.map((v, i) => norm(v * 0.000002 + lineData.output[i] * 0.000008)),
         cacheCreate: lineData.input.map(v => norm(v * 0.15)),
@@ -9668,7 +9648,10 @@ async function renderUsageCharts() {
     todayStart.setHours(0, 0, 0, 0);
     const todayTimestamp = todayStart.getTime();
     const todayLogs = (stats.logs || []).filter(log => {
-        const ts = log.timestamp || (log.time ? new Date(log.time).getTime() : Date.now());
+        const direct = Number(log && log.timestamp);
+        const raw = String(log && log.time || '').trim();
+        const parsed = raw ? Date.parse(raw.includes('T') || raw.includes('-') ? raw : `${new Date().toISOString().slice(0, 10)}T${raw}`) : 0;
+        const ts = Number.isFinite(direct) && direct > 0 ? direct : (Number.isFinite(parsed) ? parsed : 0);
         return ts >= todayTimestamp;
     });
     totalRequestCount = todayLogs.length;
@@ -9689,7 +9672,9 @@ async function renderUsageCharts() {
         }
     }
     document.getElementById('summary-requests').innerText = stats.total_requests.toLocaleString();
-    document.getElementById('summary-cost').innerText = `$${stats.total_cost.toFixed(4)}`;
+    document.getElementById('summary-cost').innerText = stats.cost_known !== false && Number.isFinite(Number(stats.total_cost))
+        ? `$${Number(stats.total_cost).toFixed(4)}`
+        : 'N/A';
     document.getElementById('sub-input').innerText = formatNumberWithUnit(stats.sub_input_tokens);
     document.getElementById('sub-output').innerText = formatNumberWithUnit(stats.sub_output_tokens);
     document.getElementById('sub-hit').innerText = formatNumberWithUnit(stats.sub_hit_tokens);
@@ -9713,7 +9698,8 @@ async function renderUsageCharts() {
         const y = paddingTop + (plotHeight / yLines) * i;
         gridHtml += `<line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="rgba(255,255,255,0.04)" />`;
         const labelVal = Math.round(20000 * (1 - i / yLines));
-        gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${labelVal}k</text>`;
+        const label = labelVal >= 1000 ? `${Math.round(labelVal / 1000)}k` : String(labelVal);
+        gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${label}</text>`;
     }
 
     hours.forEach((h, idx) => {
@@ -9900,7 +9886,7 @@ async function renderUsageCharts() {
             const m = modelsMap[k];
             rowsHtml += `
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                  <td style="padding: 8px; font-family: monospace; font-weight: bold;">${k}</td>
+                  <td style="padding: 8px; font-family: monospace; font-weight: bold;">${m.model || k.split('/').slice(1).join('/') || k}</td>
                   <td style="padding: 8px; color: #2979ff;">${m.provider}</td>
                   <td style="padding: 8px;">${m.calls}</td>
                   <td style="padding: 8px;">${m.tokens.toLocaleString()}</td>
@@ -9974,10 +9960,139 @@ function setupStatsAutoRefresh() {
     triggerInterval();
 }
 
+function statsTokenValue(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function resolveStatsLogTimestamp(log) {
+    const direct = Number(log && log.timestamp);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const raw = String(log && log.time || '').trim();
+    if (!raw) return 0;
+    const parsed = Date.parse(raw.includes('T') || raw.includes('-') ? raw : `${new Date().toISOString().slice(0, 10)}T${raw}`);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function renderStatsUsageTrend(logs, selectedTime) {
+    const waveBox = document.getElementById('stats-wave-chart-box');
+    if (!waveBox) return;
+    const validLogs = (Array.isArray(logs) ? logs : []).filter((log) => resolveStatsLogTimestamp(log) > 0);
+    const labels = [];
+    const buckets = new Map();
+    const ensureBucket = (key, label) => {
+        if (!buckets.has(key)) {
+            buckets.set(key, { input: 0, output: 0, cacheHit: 0 });
+            labels.push({ key, label });
+        }
+    };
+
+    if (selectedTime === 'today') {
+        for (let hour = 0; hour < 24; hour += 2) {
+            const label = `${String(hour).padStart(2, '0')}:00`;
+            ensureBucket(label, label);
+        }
+        validLogs.forEach((log) => {
+            const dt = new Date(resolveStatsLogTimestamp(log));
+            const key = `${String(Math.floor(dt.getHours() / 2) * 2).padStart(2, '0')}:00`;
+            const bucket = buckets.get(key);
+            if (!bucket) return;
+            bucket.input += statsTokenValue(log.input);
+            bucket.output += statsTokenValue(log.output);
+            bucket.cacheHit += statsTokenValue(log.hit);
+        });
+    } else {
+        const dayKeys = [...new Set(validLogs.map((log) => {
+            const dt = new Date(resolveStatsLogTimestamp(log));
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }))].sort();
+        dayKeys.forEach((key) => ensureBucket(key, key.slice(5)));
+        validLogs.forEach((log) => {
+            const dt = new Date(resolveStatsLogTimestamp(log));
+            const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+            const bucket = buckets.get(key);
+            if (!bucket) return;
+            bucket.input += statsTokenValue(log.input);
+            bucket.output += statsTokenValue(log.output);
+            bucket.cacheHit += statsTokenValue(log.hit);
+        });
+    }
+
+    if (!labels.length) ensureBucket('empty', selectedTime === 'today' ? '00:00' : '--');
+    const series = {
+        cacheHit: labels.map(({ key }) => buckets.get(key).cacheHit),
+        input: labels.map(({ key }) => buckets.get(key).input),
+        output: labels.map(({ key }) => buckets.get(key).output)
+    };
+    const rawMax = Math.max(0, ...series.cacheHit, ...series.input, ...series.output);
+    const magnitude = rawMax > 0 ? Math.pow(10, Math.floor(Math.log10(rawMax))) : 1;
+    const scaled = rawMax / magnitude;
+    const niceMax = rawMax <= 0 ? 1 : (scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10) * magnitude;
+    const formatAxis = (value) => value >= 1000000 ? `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}m`
+        : value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k` : `${Math.round(value)}`;
+
+    const width = 600;
+    const height = 200;
+    const paddingLeft = 46;
+    const paddingRight = 20;
+    const paddingTop = 20;
+    const paddingBottom = 30;
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
+    const xAt = (idx) => paddingLeft + (labels.length <= 1 ? plotWidth / 2 : (plotWidth / (labels.length - 1)) * idx);
+    let gridHtml = '';
+    for (let i = 0; i <= 4; i++) {
+        const y = paddingTop + (plotHeight / 4) * i;
+        const value = niceMax * (1 - i / 4);
+        gridHtml += `<line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="rgba(255,255,255,0.04)" />`;
+        gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${formatAxis(value)}</text>`;
+    }
+    const labelStep = Math.max(1, Math.ceil(labels.length / 12));
+    labels.forEach((item, idx) => {
+        const x = xAt(idx);
+        if (idx % labelStep === 0 || idx === labels.length - 1) {
+            gridHtml += `<text x="${x}" y="${height - 10}" fill="var(--text-secondary)" font-size="9" text-anchor="middle">${escapeHtml(item.label)}</text>`;
+        }
+        gridHtml += `<line x1="${x}" y1="${paddingTop}" x2="${x}" y2="${height - paddingBottom}" stroke="rgba(255,255,255,0.02)" stroke-dasharray="2,2" />`;
+    });
+    const getCurvePath = (values) => {
+        const coords = values.map((value, idx) => ({ x: xAt(idx), y: paddingTop + plotHeight * (1 - value / niceMax) }));
+        if (coords.length === 1) return { path: `M ${coords[0].x} ${coords[0].y}`, coords };
+        let path = `M ${coords[0].x} ${coords[0].y}`;
+        for (let i = 0; i < coords.length - 1; i++) {
+            const p1 = coords[i];
+            const p2 = coords[i + 1];
+            const mid = (p2.x - p1.x) / 2;
+            path += ` C ${p1.x + mid} ${p1.y}, ${p2.x - mid} ${p2.y}, ${p2.x} ${p2.y}`;
+        }
+        return { path, coords };
+    };
+    const curves = [
+        { key: 'cacheHit', color: '#2979ff', width: 2.5, fillOpacity: 0.08 },
+        { key: 'input', color: '#00e676', width: 3, fillOpacity: 0.1 },
+        { key: 'output', color: 'var(--accent-color)', width: 2.5, fillOpacity: 0.08 }
+    ];
+    let pathsHtml = '';
+    curves.forEach((curve) => {
+        const { path, coords } = getCurvePath(series[curve.key]);
+        const gradId = `grad-${curve.key}`;
+        pathsHtml += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${curve.color}" stop-opacity="${curve.fillOpacity}"/><stop offset="100%" stop-color="${curve.color}" stop-opacity="0"/></linearGradient></defs>`;
+        pathsHtml += `<path d="${path} L ${coords[coords.length - 1].x} ${height - paddingBottom} L ${coords[0].x} ${height - paddingBottom} Z" fill="url(#${gradId})" />`;
+        pathsHtml += `<path d="${path}" fill="none" stroke="${curve.color}" stroke-width="${curve.width}" stroke-linecap="round" />`;
+    });
+    waveBox.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${gridHtml}${pathsHtml}</svg>`;
+    const desc = document.getElementById('stats-chart-desc');
+    if (desc) desc.textContent = selectedTime === 'today' ? '当前展示：当天 24 小时走势（Tokens）'
+        : selectedTime === '7days' ? '当前展示：最近 7 天按日走势（Tokens）' : '当前展示：全部记录按日走势（Tokens）';
+}
+
 // 核心：用量监控看板全维度超级联动筛选
 function applyStatsFilters() {
     const rawData = window.lastFetchedStats;
     if (!rawData) return;
+
+    const tokenValue = statsTokenValue;
+    const logTimestamp = resolveStatsLogTimestamp;
 
     const sourceSelect = document.getElementById('stats-source-select');
     const modelSelect = document.getElementById('stats-model-select');
@@ -9997,10 +10112,10 @@ function applyStatsFilters() {
     const now = Date.now();
     if (selectedTime === 'today') {
         const startOfToday = new Date().setHours(0, 0, 0, 0);
-        logs = logs.filter(log => log.timestamp >= startOfToday);
+        logs = logs.filter(log => logTimestamp(log) >= startOfToday);
     } else if (selectedTime === '7days') {
         const startOf7Days = now - 7 * 24 * 60 * 60 * 1000;
-        logs = logs.filter(log => log.timestamp >= startOf7Days);
+        logs = logs.filter(log => logTimestamp(log) >= startOf7Days);
     }
 
     // 2. 快捷提供商按钮过滤
@@ -10011,9 +10126,10 @@ function applyStatsFilters() {
     // 3. 下拉来源过滤
     if (selectedSource !== 'all') {
         if (selectedSource === 'gateway') {
-            // 目前全部算作Nexora Agent入口日志，不作进一步过滤
+            logs = logs.filter(log => !log.source || log.source === 'gateway');
+        } else if (selectedSource === 'client') {
+            logs = logs.filter(log => log.source === 'client');
         } else if (selectedSource === 'plugins') {
-            // 目前没有插件管道日志，直接过滤为空
             logs = logs.filter(log => log.isPlugin === true);
         }
     }
@@ -10022,27 +10138,33 @@ function applyStatsFilters() {
     if (selectedModel !== 'all') {
         if (selectedModel === 'primary') {
             const primaryModel = document.getElementById('model-primary').value || '';
-            const modelId = primaryModel.includes('/') ? primaryModel.split('/')[1] : primaryModel;
-            logs = logs.filter(log => log.model.includes(modelId));
+            const parsed = typeof parseModelRef === 'function' ? parseModelRef(primaryModel) : null;
+            const modelId = parsed && parsed.id ? parsed.id : primaryModel;
+            logs = logs.filter(log => (!parsed?.provider || log.provider === parsed.provider) && String(log.model || '').includes(modelId));
         } else if (selectedModel === 'fallback') {
             const fallbackModel = document.getElementById('model-fallback').value || '';
-            const modelId = fallbackModel.includes('/') ? fallbackModel.split('/')[1] : fallbackModel;
-            logs = logs.filter(log => log.model.includes(modelId));
+            const parsed = typeof parseModelRef === 'function' ? parseModelRef(fallbackModel) : null;
+            const modelId = parsed && parsed.id ? parsed.id : fallbackModel;
+            logs = logs.filter(log => (!parsed?.provider || log.provider === parsed.provider) && String(log.model || '').includes(modelId));
         } else {
-            logs = logs.filter(log => log.model === selectedModel);
+            const parsed = selectedModel.includes('/') && typeof parseModelRef === 'function' ? parseModelRef(selectedModel) : null;
+            logs = logs.filter(log => parsed && parsed.id
+                ? log.provider === parsed.provider && String(log.model || '') === parsed.id
+                : String(log.model || '') === selectedModel);
         }
     }
 
     // 5. 基于过滤后的 logs 重算汇总卡片指标
-    const total_tokens = logs.reduce((sum, log) => sum + log.input + log.output, 0);
+    const total_tokens = logs.reduce((sum, log) => sum + tokenValue(log.input) + tokenValue(log.output), 0);
     const total_requests = logs.length;
-    const sub_input_tokens = logs.reduce((sum, log) => sum + log.input, 0);
-    const sub_output_tokens = logs.reduce((sum, log) => sum + log.output, 0);
-    const sub_hit_tokens = logs.reduce((sum, log) => sum + (log.hit || 0), 0);
+    const sub_input_tokens = logs.reduce((sum, log) => sum + tokenValue(log.input), 0);
+    const sub_output_tokens = logs.reduce((sum, log) => sum + tokenValue(log.output), 0);
+    const sub_hit_tokens = logs.reduce((sum, log) => sum + tokenValue(log.hit), 0);
     const hit_rate = total_tokens > 0 ? (sub_hit_tokens / total_tokens) * 100 : 0;
     
-    // 输入 $0.002/1k, 输出 $0.008/1k 粗略估算成本
-    const total_cost = logs.reduce((sum, log) => sum + (log.input * 0.000002 + log.output * 0.000008), 0);
+    // 仅在日志含真实成本或模型配置声明定价时显示成本。
+    const cost_known = logs.every((log) => log.cost != null && Number.isFinite(Number(log.cost)) && Number(log.cost) >= 0);
+    const total_cost = cost_known ? logs.reduce((sum, log) => sum + Number(log.cost), 0) : null;
 
     // 更新指标卡片
     document.getElementById('summary-tokens').innerText = total_tokens.toLocaleString();
@@ -10056,7 +10178,7 @@ function applyStatsFilters() {
         }
     }
     document.getElementById('summary-requests').innerText = total_requests.toLocaleString();
-    document.getElementById('summary-cost').innerText = `$${total_cost.toFixed(4)}`;
+    document.getElementById('summary-cost').innerText = cost_known ? `$${total_cost.toFixed(4)}` : 'N/A';
     document.getElementById('sub-input').innerText = formatNumberWithUnit(sub_input_tokens);
     document.getElementById('sub-output').innerText = formatNumberWithUnit(sub_output_tokens);
     document.getElementById('sub-hit').innerText = formatNumberWithUnit(sub_hit_tokens);
@@ -10082,14 +10204,14 @@ function applyStatsFilters() {
             const hourStr = (roundedHr < 10 ? '0' : '') + roundedHr + ':00';
             const idx = hours.indexOf(hourStr);
             if (idx !== -1) {
-                lineData.input[idx] += log.input;
-                lineData.output[idx] += log.output;
-                lineData.cacheHit[idx] += (log.hit || 0);
+                lineData.input[idx] += tokenValue(log.input);
+                lineData.output[idx] += tokenValue(log.output);
+                lineData.cacheHit[idx] += tokenValue(log.hit);
             }
         }
     });
 
-    const norm = (v) => Math.min(100, Math.max(2, (v / 20000.0) * 100));
+    const norm = (v) => Math.min(100, Math.max(0, (v / 20000.0) * 100));
     const processedLineData = {
         cost: lineData.input.map((v, i) => norm(v * 0.000002 + lineData.output[i] * 0.000008)),
         cacheCreate: lineData.input.map(v => norm(v * 0.15)),
@@ -10116,7 +10238,8 @@ function applyStatsFilters() {
             const y = paddingTop + (plotHeight / yLines) * i;
             gridHtml += `<line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="rgba(255,255,255,0.04)" />`;
             const labelVal = Math.round(20000 * (1 - i / yLines));
-            gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${labelVal}k</text>`;
+            const label = labelVal >= 1000 ? `${Math.round(labelVal / 1000)}k` : String(labelVal);
+            gridHtml += `<text x="${paddingLeft - 8}" y="${y + 4}" fill="var(--text-secondary)" font-size="9" text-anchor="end">${label}</text>`;
         }
 
         hours.forEach((h, idx) => {
@@ -10178,6 +10301,9 @@ function applyStatsFilters() {
             </svg>
         `;
     }
+    // Final chart renderer uses the selected range, a dynamic token scale and
+    // only metrics that share the token unit (input/output/cache hit).
+    renderStatsUsageTrend(logs, selectedTime);
 
     // 7. 生成过滤后的统计快照并覆盖刷新数据表格
     const mockFilteredStats = {
@@ -10191,19 +10317,20 @@ function applyStatsFilters() {
         if (!mockFilteredStats.providers[log.provider]) {
             mockFilteredStats.providers[log.provider] = { tokens: 0, requests: 0, hit: 0 };
         }
-        mockFilteredStats.providers[log.provider].tokens += log.input + log.output;
+        mockFilteredStats.providers[log.provider].tokens += tokenValue(log.input) + tokenValue(log.output);
         mockFilteredStats.providers[log.provider].requests += 1;
-        mockFilteredStats.providers[log.provider].hit += (log.hit || 0);
+        mockFilteredStats.providers[log.provider].hit += tokenValue(log.hit);
 
-        if (!mockFilteredStats.models[log.model]) {
-            mockFilteredStats.models[log.model] = { tokens: 0, provider: log.provider, calls: 0, duration: 0, hit: 0 };
+        const modelKey = `${log.provider || 'gateway'}/${log.model || 'unknown-model'}`;
+        if (!mockFilteredStats.models[modelKey]) {
+            mockFilteredStats.models[modelKey] = { model: log.model, tokens: 0, provider: log.provider, calls: 0, duration: 0, hit: 0 };
         }
-        mockFilteredStats.models[log.model].tokens += log.input + log.output;
-        mockFilteredStats.models[log.model].calls += 1;
-        mockFilteredStats.models[log.model].hit += (log.hit || 0);
+        mockFilteredStats.models[modelKey].tokens += tokenValue(log.input) + tokenValue(log.output);
+        mockFilteredStats.models[modelKey].calls += 1;
+        mockFilteredStats.models[modelKey].hit += tokenValue(log.hit);
         
         const sec = parseFloat(log.duration.replace('s',''));
-        mockFilteredStats.models[log.model].duration += isNaN(sec) ? 1.0 : sec;
+        mockFilteredStats.models[modelKey].duration += isNaN(sec) ? 1.0 : sec;
     });
 
     // 临时侵入并渲染底层表格后恢复
@@ -12875,6 +13002,7 @@ async function handleSendMessage() {
         chatSendAbortController = controller;
         timeoutId = setTimeout(() => controller.abort(), 120000);
 
+        const requestStartedAt = Date.now();
         const response = isAgnesBuiltIn
             ? await requestBuiltInAgnes('chat', reqBody)
             : await fetch(chatUrl, {
@@ -12910,8 +13038,25 @@ async function handleSendMessage() {
             persistChatSessionHistory();
 
             // 计入会话用量
-            const usage = result.usage || { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 };
-            addSessionLog('dialog-test', modelId, usage.prompt_tokens, usage.completion_tokens, 0, 1200);
+            // Only record provider-reported usage. Fabricated token defaults
+            // make the statistics look precise while being materially wrong.
+            const usage = result && (result.usage || result.usageMetadata);
+            if (usage && typeof usage === 'object') {
+                const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.input ?? usage.promptTokenCount ?? usage.prompt_eval_count);
+                const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.output ?? usage.candidatesTokenCount ?? usage.eval_count);
+                const cachedTokens = Number(
+                    usage.cached_tokens
+                    ?? usage.cache_read_input_tokens
+                    ?? usage.cache_read_tokens
+                    ?? usage.prompt_tokens_details?.cached_tokens
+                    ?? usage.input_tokens_details?.cached_tokens
+                    ?? 0
+                );
+                const reportedCost = usage.cost == null ? Number.NaN : Number(usage.cost);
+                if (Number.isFinite(inputTokens) && Number.isFinite(outputTokens) && inputTokens >= 0 && outputTokens >= 0) {
+                    addSessionLog(providerKey, modelId, inputTokens, outputTokens, Number.isFinite(cachedTokens) ? Math.max(0, cachedTokens) : 0, Math.max(0, Date.now() - requestStartedAt), Number.isFinite(reportedCost) && reportedCost >= 0 ? reportedCost : null);
+                }
+            }
 
             // 本地离线语音：桌面聊天回复朗读
             if (typeof maybeSpeakDesktopReply === 'function') {
@@ -13108,7 +13253,6 @@ async function handleActionGenerate(type) {
                     </div>
                 `;
             }
-            addSessionLog('image-gen', modelId, 500, 0, 0, 3000);
             mediaGenerationInFlight = false;
         } else {
             // 视频生成 API（官方参数：width/height/num_frames/frame_rate）
@@ -13164,7 +13308,6 @@ async function handleActionGenerate(type) {
                 } else {
                     aiBubble.innerHTML = `<pre style="font-size: 11px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(safeDebugJson(result))}</pre>`;
                 }
-                addSessionLog('video-gen', modelId, 1000, 0, 0, 8000);
                 mediaGenerationInFlight = false;
                 return;
             }
@@ -13260,7 +13403,6 @@ async function handleActionGenerate(type) {
                                 </div>
                             `;
                         }
-                        addSessionLog('video-gen', modelId, 1000, 0, 0, pollCount * 15000);
                     } else if (status === 'failed' || status === 'error') {
                         clearInterval(pollInterval);
                         mediaGenerationInFlight = false;
@@ -13289,7 +13431,7 @@ async function handleActionGenerate(type) {
 }
 
 // 在当前会话中新增一笔模型交互记录，并刷新联动大屏
-function addSessionLog(provider, model, input, output, hit, durationMs) {
+function addSessionLog(provider, model, input, output, hit, durationMs, cost = null) {
     const total = input + output;
     sessionStats.total_tokens += total;
     sessionStats.total_requests += 1;
@@ -13301,8 +13443,12 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
         sessionStats.hit_rate = (sessionStats.sub_hit_tokens / sessionStats.total_tokens) * 100;
     }
     
-    // 粗略算成本 (输入 $1.5/M, 输出 $6/M)
-    sessionStats.total_cost = (sessionStats.sub_input_tokens / 1000000.0) * 1.5 + (sessionStats.sub_output_tokens / 1000000.0) * 6.0;
+    if (cost == null) {
+        sessionStats.cost_known = false;
+        sessionStats.total_cost = null;
+    } else if (sessionStats.cost_known !== false) {
+        sessionStats.total_cost = Number(sessionStats.total_cost || 0) + cost;
+    }
 
     const dt = new Date();
     const hourStr = (dt.getHours() < 10 ? '0' : '') + dt.getHours() + ':00';
@@ -13327,13 +13473,14 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
     sessionStats.providers[provider].hit += hit;
 
     // 更新 models 分组
-    if (!sessionStats.models[model]) {
-        sessionStats.models[model] = { provider: provider, calls: 0, tokens: 0, duration: 0.0, hit: 0 };
+    const modelKey = `${provider}/${model}`;
+    if (!sessionStats.models[modelKey]) {
+        sessionStats.models[modelKey] = { provider: provider, model: model, calls: 0, tokens: 0, duration: 0.0, hit: 0 };
     }
-    sessionStats.models[model].calls += 1;
-    sessionStats.models[model].tokens += total;
-    sessionStats.models[model].duration += (durationMs / 1000.0);
-    sessionStats.models[model].hit += hit;
+    sessionStats.models[modelKey].calls += 1;
+    sessionStats.models[modelKey].tokens += total;
+    sessionStats.models[modelKey].duration += (durationMs / 1000.0);
+    sessionStats.models[modelKey].hit += hit;
 
     // 追加日志明细
     const newLog = {
@@ -13345,7 +13492,9 @@ function addSessionLog(provider, model, input, output, hit, durationMs) {
         hit: hit,
         duration: `${(durationMs / 1000.0).toFixed(1)}s`,
         status: "成功",
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        source: 'client',
+        cost
     };
     
     sessionStats.logs.unshift(newLog);
@@ -13391,7 +13540,7 @@ function updateFilterOptions() {
             if (provider && Array.isArray(provider.models)) {
                 provider.models.forEach(model => {
                     if (model && model.id) {
-                        models.add(model.id.trim());
+                        models.add(`${providerKey}/${String(model.id).trim()}`);
                     }
                 });
             }
@@ -13400,7 +13549,7 @@ function updateFilterOptions() {
 
     // 2. 辅以当前请求日志中产生过调用记录的其他模型
     (sessionStats.logs || []).forEach(log => {
-        if (log.model) models.add(log.model.trim());
+        if (log.model) models.add(`${log.provider || 'gateway'}/${String(log.model).trim()}`);
     });
 
     const sorted = Array.from(models).filter(Boolean).sort((a, b) => a.localeCompare(b));
