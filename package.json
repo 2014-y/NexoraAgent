@@ -21,16 +21,19 @@
   },
   "main": "main.js",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "start": "node start-gateway.js",
+    "test": "node scripts/run-guard-tests.js",
     "setup": "npm run install:deps && npm run init:config",
-    "install:deps": "npm install -g openclaw@2026.7.1-2 open-computer-use@0.1.54",
+    "install:deps": "npm install -g openclaw@2026.9.1 open-computer-use@0.1.54",
     "init:config": "node -e \"const fs=require('fs');if(!fs.existsSync('openclaw.json'))fs.copyFileSync('config/openclaw.json.example','openclaw.json')\"",
     "doctor": "openclaw mcp doctor",
     "probe": "openclaw mcp probe",
     "logs": "node -e \"const fs=require('fs'),p=require('path');const d='logs';const f=fs.existsSync(d)?fs.readdirSync(d).filter(x=>x.startsWith('openclaw-')).sort():[];process.stdout.write(f.length?fs.readFileSync(p.join(d,f[f.length-1]),'utf8'):'no logs found');\"",
+    "postinstall": "node scripts/patch-bundled-security-deps.js",
+    "preapp:start": "node scripts/ensure-data-center-deps.js && node scripts/patch-bundled-security-deps.js",
     "app:start": "electron .",
     "preapp:dist": "node scripts/clean-dist.js && node scripts/ensure-asr-release-asset.js && node scripts/ensure-builtin-asr.js && node scripts/ensure-voice-release-asset.js && node scripts/pack-gateway-runtime.js && node scripts/prepare-acceleration-core.js && node patch_nsis.js && node scripts/ensure-data-center-deps.js",
     "clean:dist": "node scripts/clean-dist.js",
@@ -40,7 +43,8 @@
     "asr:copy-dist": "node scripts/copy-asr-to-dist.js",
     "voice:ensure": "node scripts/ensure-voice-release-asset.js",
     "voice:copy-dist": "node scripts/copy-voice-to-dist.js",
-    "app:pack": "electron-packager . \"Nexora Agent\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "preapp:pack": "node scripts/prepare-dist.js",
+    "app:pack": "electron-builder --dir",
     "dist:prepare": "node scripts/prepare-dist.js",
     "app:dist:mac": "npm run clean:dist && npm run dist:prepare && electron-builder --mac",
     "app:dist:linux": "npm run clean:dist && npm run dist:prepare && electron-builder --linux",
@@ -49,18 +53,17 @@
     "data-center:install": "npm --prefix data-center install --omit=dev"
   },
   "dependencies": {
-    "@openclaw/feishu": "2026.7.1",
-    "@openclaw/matrix": "^2026.7.1",
-    "@openclaw/qqbot": "^2026.7.1",
-    "@openclaw/slack": "^2026.7.1",
-    "@openclaw/voice-call": "^2026.7.1",
-    "@openclaw/whatsapp": "^2026.7.1",
-    "@tencent-weixin/openclaw-weixin": "2.4.6",
-    "jsdom": "29.1.1",
-    "msedge-tts": "^1.3.4",
+    "@openclaw/feishu": "2026.9.1",
+    "@openclaw/matrix": "2026.9.1",
+    "@openclaw/qqbot": "2026.7.1",
+    "@openclaw/slack": "2026.9.1",
+    "@openclaw/voice-call": "2026.9.1",
+    "@openclaw/whatsapp": "2026.9.1",
+    "@tencent-weixin/openclaw-weixin": "2.4.8",
+    "msedge-tts": "2.0.7",
     "node-pty": "^1.1.0",
     "open-computer-use": "0.1.54",
-    "openclaw": "2026.7.1-2",
+    "openclaw": "2026.9.1",
     "sherpa-onnx-node": "^1.13.4",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0"
@@ -72,10 +75,15 @@
     "sherpa-onnx-linux-x64": "^1.13.4",
     "sherpa-onnx-win-x64": "^1.13.4"
   },
+  "overrides": {
+    "axios": "1.20.0",
+    "protobufjs": "7.6.5",
+    "qs": "6.16.0"
+  },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.3",
-    "electron-packager": "^17.1.2"
+    "electron": "44.1.1",
+    "electron-builder": "26.15.3",
+    "unbzip2-stream": "1.4.3"
   },
   "build": {
     "appId": "com.2014y.aigateway",
@@ -93,7 +101,7 @@
       "**/node_modules/sherpa-onnx-darwin-x64/**",
       "**/node_modules/sherpa-onnx-linux-x64/**",
       "**/node_modules/sherpa-onnx-linux-arm64/**",
-      "**/data-center/node_modules/**",
+      "**/data-center/**",
       "**/tts-worker.js",
       "**/*.node",
       "**/*.dll",
@@ -123,15 +131,8 @@
     },
     "win": {
       "icon": "config/icon.ico",
-      "publisherName": "Nexora Agent",
       "target": [
         "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "build-resources/acceleration-core",
-          "to": "acceleration-core"
-        }
       ]
     },
     "nsis": {
@@ -147,6 +148,10 @@
       "deleteAppDataOnUninstall": true
     },
     "extraResources": [
+      {
+        "from": "build-resources/acceleration-core",
+        "to": "acceleration-core"
+      },
       {
         "from": "build-resources/gateway-runtime.tar",
         "to": "gateway-runtime.tar"
@@ -170,7 +175,9 @@
       "plugin-adapt.js",
       "openclaw-state.js",
       "gateway-auth.js",
-      "openclaw-model-sync.js",
+    "openclaw-model-sync.js",
+    "openclaw-auth-sync.js",
+      "openclaw-update-policy.js",
       "latency-tune.js",
       "channel-config-sanitize.js",
       "token-usage-parse.js",

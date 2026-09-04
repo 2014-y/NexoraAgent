@@ -9,7 +9,7 @@
  * 2) 回退 sql.js 文件快照（带重试）；查询失败抛错，不再伪装成空表
  */
 const express = require('express');
-const cors = require('cors');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -55,19 +55,6 @@ function resolveDbPaths(stateRoot) {
   };
 }
 
-function sleepSync(ms) {
-  const n = Math.max(0, Number(ms) || 0);
-  if (!n) return;
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, n);
-  } catch (_) {
-    const end = Date.now() + n;
-    while (Date.now() < end) {
-      /* spin */
-    }
-  }
-}
-
 function tryLoadNativeSqlite() {
   try {
     const mod = require('node:sqlite');
@@ -80,7 +67,28 @@ function createApp(options = {}) {
   const stateRoot = resolveStateRoot(options.stateDir);
   const DB_PATHS = resolveDbPaths(stateRoot);
   const app = express();
-  app.use(cors());
+  const accessToken = String(options.accessToken || '');
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    // This isolated loopback UI uses Vue's runtime template compiler, which
+    // requires Function(). Keep that exception scoped to this child service;
+    // the privileged Electron renderer retains its stricter CSP.
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' file:");
+    next();
+  });
+  app.use('/api', (req, res, next) => {
+    const supplied = String(req.get('x-nexora-token') || '');
+    const expected = Buffer.from(accessToken);
+    const actual = Buffer.from(supplied);
+    if (!accessToken || expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+      return res.status(401).json({ ok: false, error: 'unauthorized' });
+    }
+    next();
+  });
   app.use(express.static(path.join(__dirname, 'public')));
 
   let SQL = options.SQL || null;
@@ -89,22 +97,13 @@ function createApp(options = {}) {
 
   function openNativeDb(file) {
     // 不用 readOnly：WAL 库在只读时可能因无法映射 -shm 而失败
-    return new NativeDatabaseSync(file, { timeout: 5000 });
+    return new NativeDatabaseSync(file, { timeout: 250 });
   }
 
   function openSqlJsDb(file) {
     if (!SQL) throw new Error('sql.js not initialized');
-    let lastErr = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const buf = fs.readFileSync(file);
-        return new SQL.Database(buf);
-      } catch (e) {
-        lastErr = e;
-        sleepSync(40 * (attempt + 1));
-      }
-    }
-    throw lastErr || new Error('failed to open database via sql.js');
+    const buf = fs.readFileSync(file);
+    return new SQL.Database(buf);
   }
 
   function openDb(key) {
@@ -113,37 +112,9 @@ function createApp(options = {}) {
       throw new Error('database missing: ' + (file || key));
     }
     if (NativeDatabaseSync) {
-      let lastErr = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        try {
-          return { engine: 'native', db: openNativeDb(file) };
-        } catch (e) {
-          lastErr = e;
-          sleepSync(40 * (attempt + 1));
-        }
-      }
-      throw lastErr || new Error('failed to open database via node:sqlite');
+      return { engine: 'native', db: openNativeDb(file) };
     }
     return { engine: 'sqljs', db: openSqlJsDb(file) };
-  }
-
-  function isTransientDbError(error) {
-    const msg = String((error && (error.code || error.message)) || error || '').toLowerCase();
-    return (
-      msg.includes('disk i/o') ||
-      msg.includes('sqlite_ioerr') ||
-      msg.includes('unable to open database') ||
-      msg.includes('database is locked') ||
-      msg.includes('database is busy') ||
-      msg.includes('resource busy') ||
-      msg.includes('ebusy') ||
-      msg.includes('eio')
-    );
-  }
-
-  function retryDelayFor(attempt) {
-    const delays = [80, 180, 400, 800, 1400, 2400];
-    return delays[Math.min(attempt, delays.length - 1)];
   }
 
   function closeHandle(handle) {
@@ -201,17 +172,136 @@ function createApp(options = {}) {
   }
 
   function query(dbKey, sql, params) {
-    let lastErr = null;
-    for (let attempt = 0; attempt < 7; attempt++) {
-      try {
-        return queryOnce(dbKey, sql, params);
-      } catch (e) {
-        lastErr = e;
-        if (!isTransientDbError(e) || attempt >= 6) break;
-        sleepSync(retryDelayFor(attempt));
+    return queryOnce(dbKey, sql, params);
+  }
+
+  function tableColumns(dbKey, table) {
+    if (!/^[a-zA-Z0-9_]+$/.test(String(table || ''))) return [];
+    try {
+      return query(dbKey, `PRAGMA table_info(${table})`).map((row) => String(row.name || ''));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function hasTable(dbKey, table) {
+    return tableColumns(dbKey, table).length > 0;
+  }
+
+  function parseJsonObject(raw) {
+    try {
+      const value = JSON.parse(String(raw || '{}'));
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function readCronJobs() {
+    const columns = tableColumns('state', 'cron_jobs');
+    if (!columns.length) return [];
+    if (columns.includes('schedule_kind')) {
+      return query(
+        'state',
+        `SELECT job_id, name, enabled, schedule_kind, schedule_expr, every_ms,
+                next_run_at_ms, last_run_at_ms, last_run_status, last_duration_ms,
+                consecutive_errors, delivery_channel, delivery_to
+         FROM cron_jobs ORDER BY name`
+      );
+    }
+    return query(
+      'state',
+      `SELECT job_id, name, enabled, payload_kind, job_json, state_json
+       FROM cron_jobs ORDER BY sort_order, name`
+    ).map((row) => {
+      const job = parseJsonObject(row.job_json);
+      const state = parseJsonObject(row.state_json);
+      const schedule = job.schedule && typeof job.schedule === 'object' ? job.schedule : {};
+      const delivery = job.delivery && typeof job.delivery === 'object' ? job.delivery : {};
+      return {
+        job_id: row.job_id,
+        name: row.name || job.name || job.displayName || row.job_id,
+        enabled: row.enabled,
+        schedule_kind: schedule.kind || row.payload_kind || '',
+        schedule_expr: schedule.expr || schedule.cron || null,
+        every_ms: schedule.everyMs || null,
+        next_run_at_ms: state.nextRunAtMs || null,
+        last_run_at_ms: state.lastRunAtMs || null,
+        last_run_status: state.lastRunStatus || state.lastStatus || null,
+        last_duration_ms: state.lastDurationMs || null,
+        consecutive_errors: state.consecutiveErrors || 0,
+        delivery_channel: delivery.channel || null,
+        delivery_to: delivery.to || null,
+      };
+    });
+  }
+
+  function readCronRuns(limit) {
+    if (hasTable('state', 'cron_run_logs')) {
+      return query(
+        'state',
+        `SELECT job_id, seq, ts, status, error, summary, delivery_status,
+                model, provider, total_tokens, duration_ms
+         FROM cron_run_logs ORDER BY ts DESC LIMIT ?`,
+        [limit]
+      );
+    }
+    if (!hasTable('state', 'task_runs')) return [];
+    return query(
+      'state',
+      `SELECT source_id, task_id, created_at, started_at, ended_at, status, error,
+              terminal_summary, delivery_status, detail_json
+       FROM task_runs WHERE runtime='cron' ORDER BY created_at DESC LIMIT ?`,
+      [limit]
+    ).map((row) => {
+      const detail = parseJsonObject(row.detail_json);
+      const usage = detail.usage && typeof detail.usage === 'object' ? detail.usage : {};
+      return {
+        job_id: row.source_id,
+        seq: row.task_id,
+        ts: row.created_at,
+        status: detail.status || row.status,
+        error: row.error,
+        summary: row.terminal_summary || detail.summary || null,
+        delivery_status: row.delivery_status,
+        model: detail.model || usage.model || null,
+        provider: detail.provider || usage.provider || null,
+        total_tokens: Number(detail.totalTokens ?? detail.total_tokens ?? usage.totalTokens ?? usage.total_tokens) || 0,
+        duration_ms: Number(detail.durationMs) || (row.ended_at && row.started_at ? row.ended_at - row.started_at : 0),
+      };
+    });
+  }
+
+  function readModelCatalog() {
+    if (hasTable('state', 'agent_model_catalogs')) {
+      const rows = query('state', `SELECT raw_json FROM agent_model_catalogs LIMIT 1`);
+      if (rows.length && rows[0].raw_json) {
+        const catalog = parseJsonObject(rows[0].raw_json);
+        if (Array.isArray(catalog.entries)) return catalog.entries;
       }
     }
-    throw lastErr || new Error('database query failed');
+    try {
+      const configPath = process.env.OPENCLAW_CONFIG_PATH || path.join(stateRoot, 'openclaw.json');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
+      const providers = config && config.models && config.models.providers;
+      if (!providers || typeof providers !== 'object') return [];
+      const entries = [];
+      for (const [provider, definition] of Object.entries(providers)) {
+        const models = definition && Array.isArray(definition.models) ? definition.models : [];
+        for (const model of models) {
+          if (!model || typeof model !== 'object') continue;
+          entries.push({
+            id: model.id || model.name || '',
+            name: model.name || model.id || '',
+            provider,
+            api: model.api || definition.api || '',
+          });
+        }
+      }
+      return entries;
+    } catch (_) {
+      return [];
+    }
   }
 
   function sendRows(res, run) {
@@ -219,10 +309,9 @@ function createApp(options = {}) {
       const rows = run();
       res.json(Array.isArray(rows) ? rows : []);
     } catch (e) {
-      console.error('[DataCenter] Query error:', e && e.message ? e.message : e);
       res.status(503).json({
         ok: false,
-        error: e && e.message ? String(e.message) : String(e),
+        error: 'database temporarily unavailable',
       });
     }
   }
@@ -239,12 +328,11 @@ function createApp(options = {}) {
     res.json({
       ok: true,
       dbReadable,
-      dbError,
+      dbError: dbReadable ? null : 'database temporarily unavailable',
       dbEngine,
-      stateRoot,
       databases: {
-        state: { path: DB_PATHS.state, exists: fs.existsSync(DB_PATHS.state) },
-        agent: { path: DB_PATHS.agent, exists: fs.existsSync(DB_PATHS.agent) },
+        state: { exists: fs.existsSync(DB_PATHS.state) },
+        agent: { exists: fs.existsSync(DB_PATHS.agent) },
       },
     });
   });
@@ -260,32 +348,16 @@ function createApp(options = {}) {
   });
 
   app.get('/api/cron/jobs', (_req, res) => {
-    sendRows(res, () =>
-      query(
-        'state',
-        `SELECT job_id, name, enabled, schedule_kind, schedule_expr, every_ms,
-                next_run_at_ms, last_run_at_ms, last_run_status, last_duration_ms,
-                consecutive_errors, delivery_channel, delivery_to
-         FROM cron_jobs ORDER BY name`
-      )
-    );
+    sendRows(res, readCronJobs);
   });
 
   app.get('/api/cron/runs', (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-    sendRows(res, () =>
-      query(
-        'state',
-        `SELECT job_id, seq, ts, status, error, summary, delivery_status,
-                model, provider, total_tokens, duration_ms
-         FROM cron_run_logs ORDER BY ts DESC LIMIT ?`,
-        [limit]
-      )
-    );
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 200, 1000));
+    sendRows(res, () => readCronRuns(limit));
   });
 
   app.get('/api/audit/events', (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 500, 2000));
     sendRows(res, () =>
       query(
         'state',
@@ -330,36 +402,24 @@ function createApp(options = {}) {
   });
 
   app.get('/api/models/catalog', (_req, res) => {
-    sendRows(res, () => {
-      const rows = query('state', `SELECT raw_json FROM agent_model_catalogs LIMIT 1`);
-      if (rows.length && rows[0].raw_json) {
-        try {
-          const catalog = JSON.parse(rows[0].raw_json);
-          return catalog.entries || [];
-        } catch {
-          return [];
-        }
-      }
-      return [];
-    });
+    sendRows(res, readModelCatalog);
   });
 
   app.get('/api/tokens/trend', (_req, res) => {
-    sendRows(res, () =>
-      query(
-        'state',
-        `SELECT 
-           CAST((ts / 3600000) * 3600000 AS INTEGER) as hour_ms,
-           SUM(total_tokens) as tokens,
-           COUNT(*) as runs,
-           model
-         FROM cron_run_logs
-         WHERE total_tokens > 0
-         GROUP BY hour_ms, model
-         ORDER BY hour_ms DESC
-         LIMIT 500`
-      )
-    );
+    sendRows(res, () => {
+      const runs = readCronRuns(2000).filter((row) => Number(row.total_tokens) > 0);
+      const grouped = new Map();
+      for (const row of runs) {
+        const hour = Math.floor(Number(row.ts || 0) / 3600000) * 3600000;
+        const model = row.model || '';
+        const key = `${hour}\u0000${model}`;
+        const current = grouped.get(key) || { hour_ms: hour, tokens: 0, runs: 0, model };
+        current.tokens += Number(row.total_tokens) || 0;
+        current.runs += 1;
+        grouped.set(key, current);
+      }
+      return Array.from(grouped.values()).sort((a, b) => b.hour_ms - a.hour_ms).slice(0, 500);
+    });
   });
 
   app.get('/api/audit/trend', (_req, res) => {
@@ -381,8 +441,8 @@ function createApp(options = {}) {
     sendRows(res, () =>
       query(
         'state',
-        `SELECT plugin_id, name, count(*) as entry_count
-         FROM plugin_state_entries GROUP BY plugin_id, name`
+        `SELECT plugin_id, namespace, count(*) as entry_count
+         FROM plugin_state_entries GROUP BY plugin_id, namespace`
       )
     );
   });
@@ -391,15 +451,10 @@ function createApp(options = {}) {
     try {
       const auditCount = query('state', `SELECT count(*) as cnt FROM audit_events`);
       const cronJobs = query('state', `SELECT count(*) as cnt FROM cron_jobs WHERE enabled=1`);
-      const cronRuns = query('state', `SELECT count(*) as cnt FROM cron_run_logs`);
-      const cronErrors = query('state', `SELECT count(*) as cnt FROM cron_run_logs WHERE status != 'ok'`);
+      const cronRunRows = readCronRuns(10000);
       const deliveryFailed = query(
         'state',
         `SELECT count(*) as cnt FROM delivery_queue_entries WHERE status='failed'`
-      );
-      const totalTokens = query(
-        'state',
-        `SELECT SUM(total_tokens) as total FROM cron_run_logs WHERE total_tokens > 0`
       );
       const gatewayBoots = query('state', `SELECT count(*) as cnt FROM gateway_boot_lifecycle`);
       const toolCalls = query(
@@ -411,18 +466,17 @@ function createApp(options = {}) {
         ok: true,
         auditEvents: (auditCount[0] && auditCount[0].cnt) || 0,
         cronJobsActive: (cronJobs[0] && cronJobs[0].cnt) || 0,
-        cronRunsTotal: (cronRuns[0] && cronRuns[0].cnt) || 0,
-        cronErrors: (cronErrors[0] && cronErrors[0].cnt) || 0,
+        cronRunsTotal: cronRunRows.length,
+        cronErrors: cronRunRows.filter((row) => ['failed', 'error', 'timed_out', 'timeout'].includes(String(row.status || '').toLowerCase())).length,
         deliveryFailed: (deliveryFailed[0] && deliveryFailed[0].cnt) || 0,
-        totalTokens: (totalTokens[0] && totalTokens[0].total) || 0,
+        totalTokens: cronRunRows.reduce((sum, row) => sum + (Number(row.total_tokens) || 0), 0),
         gatewayBoots: (gatewayBoots[0] && gatewayBoots[0].cnt) || 0,
         toolCalls: (toolCalls[0] && toolCalls[0].cnt) || 0,
       });
     } catch (e) {
-      console.error('[DataCenter] Overview error:', e && e.message ? e.message : e);
       res.status(503).json({
         ok: false,
-        error: e && e.message ? String(e.message) : String(e),
+        error: 'database temporarily unavailable',
       });
     }
   });
@@ -446,7 +500,6 @@ function createApp(options = {}) {
       cpuCount: cpus.length,
       cpuModel: (cpus[0] && cpus[0].model) || 'unknown',
       timestamp: Date.now(),
-      stateRoot,
       dbEngine,
     });
   });
@@ -489,7 +542,7 @@ async function pickPort(preferred) {
 }
 
 /**
- * @param {{ stateDir?: string, preferredPort?: number }} [options]
+ * @param {{ stateDir?: string, preferredPort?: number, accessToken?: string }} [options]
  * @returns {Promise<{ server: import('http').Server, port: number, url: string, stateRoot: string }>}
  */
 async function start(options = {}) {
@@ -526,8 +579,25 @@ module.exports = {
 };
 
 if (require.main === module) {
-  start({ preferredPort: 3210 }).catch((e) => {
-    console.error(e);
+  start({
+    preferredPort: Number(process.env.NEXORA_DATA_CENTER_PORT) || 3210,
+    stateDir: process.env.NEXORA_DATA_CENTER_STATE_DIR,
+    accessToken: process.env.NEXORA_DATA_CENTER_TOKEN,
+  }).then((runtime) => {
+    if (typeof process.send === 'function') {
+      process.send({ type: 'ready', port: runtime.port, url: runtime.url, dbEngine: runtime.dbEngine });
+    }
+    process.on('message', (message) => {
+      if (!message || message.type !== 'shutdown') return;
+      runtime.server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    });
+    process.on('disconnect', () => {
+      runtime.server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    });
+  }).catch((e) => {
+    if (typeof process.send === 'function') process.send({ type: 'error', error: e && e.message ? e.message : String(e) });
     process.exit(1);
   });
 }

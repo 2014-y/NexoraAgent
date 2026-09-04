@@ -119,6 +119,23 @@ function buildControlUiUrl(port, token) {
 }
 
 /**
+ * WebView/iframe 只允许访问显式列出的本机 HTTP 端口。
+ * 把判定做成纯函数，主进程的 will-attach-webview 与测试共用，避免异常被吞后
+ * 把正常的 OpenClaw 控制台也误判为外部页面。
+ */
+function isAllowedLoopbackHttpUrl(value, allowedPorts) {
+    try {
+        const parsed = new URL(String(value || ''));
+        if (parsed.protocol !== 'http:') return false;
+        if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) return false;
+        const ports = new Set(Array.from(allowedPorts || [], (port) => String(port)));
+        return ports.has(String(parsed.port || '80'));
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
  * 把鉴权字段同步进其它可能被旧版 patch 读到的状态目录（消除双目录分叉）。
  * 只改 gateway.auth / controlUi.basePath / port，不覆盖其它业务配置。
  */
@@ -202,6 +219,7 @@ module.exports = {
     getOrCreateInstallToken,
     normalizeGatewayAuthConfig,
     buildControlUiUrl,
+    isAllowedLoopbackHttpUrl,
     syncGatewayAuthToStateDirs,
     buildGatewayChildEnv
 };

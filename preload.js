@@ -2,9 +2,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-    // 内置 agnes key：启动时从主进程同步取一次（key 不再硬编码在 renderer 源码/asar 里）
-    builtinAgnesKey: (() => { try { return ipcRenderer.sendSync('get-builtin-agnes-key') || ''; } catch (_) { return ''; } })(),
-
     // 窗口控制
     windowAction: (action) => ipcRenderer.send('window-action', action),
     
@@ -25,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
     probeModelContext: (provider, model, target) => ipcRenderer.invoke('model-probe-context', provider, model, target),
     persistMediaPrefs: (payload) => ipcRenderer.invoke('persist-media-prefs', payload),
     verifyBuiltInAgnes: (payload) => ipcRenderer.invoke('verify-builtin-agnes', payload || {}),
+    requestBuiltInAgnes: (payload) => ipcRenderer.invoke('builtin-agnes-request', payload || {}),
     readRoleConfig: () => ipcRenderer.invoke('role-config-read'),
     saveRoleConfig: (payload) => ipcRenderer.invoke('role-config-save', payload),
     onRoleConfigUpdated: (callback) => {
@@ -124,6 +122,7 @@ contextBridge.exposeInMainWorld('api', {
     onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (event, progress) => callback(progress)),
     
     // 内置网关核心包热更新
+    checkOpenclawStableUpdate: () => ipcRenderer.invoke('check-openclaw-stable-update'),
     updateOpenclawPackage: (opts) => ipcRenderer.invoke('update-openclaw-package', opts || {}),
     onGatewayUpdateProgress: (callback) => ipcRenderer.on('gateway-update-progress', (event, data) => callback(data)),
     onSandboxUpdateProgress: (callback) => ipcRenderer.on('sandbox-upgrade-progress', (event, data) => callback(data)),

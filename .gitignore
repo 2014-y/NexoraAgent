@@ -24,6 +24,7 @@ __pycache__/
 /dist-final/
 /dist-final-v2/
 /dist-final-v3/
+/output/
 /build-resources/
 
 # Scratch and runtime version files

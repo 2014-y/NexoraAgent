@@ -131,8 +131,12 @@ function createSkillCenter(deps) {
             cfg.skills.workshop.autonomous = {};
             changed = true;
         }
-        if (cfg.skills.workshop.autonomous.enabled !== false) {
-            cfg.skills.workshop.autonomous.enabled = false;
+        if (Object.prototype.hasOwnProperty.call(cfg.skills.workshop.autonomous, 'enabled')) {
+            delete cfg.skills.workshop.autonomous.enabled;
+            changed = true;
+        }
+        if (cfg.skills.workshop.autonomous.mode !== 'off') {
+            cfg.skills.workshop.autonomous.mode = 'off';
             changed = true;
         }
         if (!cfg.skills.entries || typeof cfg.skills.entries !== 'object') {
@@ -658,8 +662,12 @@ function createSkillCenter(deps) {
         };
     }
 
+    let popularClawHubCache = { expiresAt: 0, results: [] };
     async function fetchPopularClawHubSkills(limit = 24) {
         const lim = Math.min(50, Math.max(1, Number(limit) || 24));
+        if (popularClawHubCache.expiresAt > Date.now() && popularClawHubCache.results.length >= lim) {
+            return popularClawHubCache.results.slice(0, lim);
+        }
         const urls = [
             `https://clawhub.ai/api/v1/skills?sort=downloads&limit=${lim}`,
             `https://clawhub.ai/api/v1/skills?sort=installs&limit=${lim}`,
@@ -678,7 +686,10 @@ function createSkillCenter(deps) {
                     ? parsed.items
                     : (Array.isArray(parsed.results) ? parsed.results : []);
                 const mapped = items.map(mapClawHubSkillEntry).filter((x) => x.slug && x.summary.length >= 8);
-                if (mapped.length) return mapped;
+                if (mapped.length) {
+                    popularClawHubCache = { expiresAt: Date.now() + 5 * 60 * 1000, results: mapped };
+                    return mapped;
+                }
             } catch (e) {
                 lastErr = e;
             }
@@ -702,9 +713,11 @@ function createSkillCenter(deps) {
             }
         }
         if (merged.size) {
-            return Array.from(merged.values())
+            const results = Array.from(merged.values())
                 .sort((a, b) => (b.downloads || 0) - (a.downloads || 0))
                 .slice(0, lim);
+            popularClawHubCache = { expiresAt: Date.now() + 5 * 60 * 1000, results };
+            return results;
         }
         throw lastErr || new Error('popular fetch failed');
     }

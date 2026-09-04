@@ -19,7 +19,9 @@ const accelerationCoreConfig = require('./config/acceleration-core.json');
 let MIXED_PORT = 17890;
 const CONTROLLER_HOST = '127.0.0.1';
 let CONTROLLER_PORT = 19090;
-const CONTROLLER_SECRET = 'nexora-acc-secret';
+// Per-process high-entropy controller credential. It is injected into every
+// generated mihomo profile and never shared across installations.
+const CONTROLLER_SECRET = crypto.randomBytes(32).toString('hex');
 const MIHOMO_VERSION = accelerationCoreConfig.mihomoVersion;
 
 const NO_PROXY_LIST = [

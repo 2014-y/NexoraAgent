@@ -25,7 +25,7 @@ try {
   execSync("openclaw --version", { stdio: "pipe" });
   console.log("OK OpenClaw is installed\n");
 } catch (e) {
-  console.error("ERROR: OpenClaw not found. Install: npm install -g openclaw@2026.6.11\n");
+  console.error("ERROR: OpenClaw not found. Install: npm install -g openclaw@2026.9.1\n");
   process.exit(1);
 }
 

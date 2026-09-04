@@ -184,7 +184,22 @@ function ensureMediaImageTools(cfg, visionRef) {
   const parsed = parseModelRef(visionRef);
   if (!parsed) return changed;
 
-  const models = Array.isArray(imageCfg.models) ? imageCfg.models : [];
+  const legacyModels = Array.isArray(imageCfg.models)
+    ? imageCfg.models.map((entry) => isObject(entry) ? ({
+        ...entry,
+        capabilities: Array.from(new Set([
+          'image',
+          ...(Array.isArray(entry.capabilities) ? entry.capabilities.map(String) : [])
+        ]))
+      }) : entry)
+    : [];
+  const models = Array.isArray(cfg.tools.media.models)
+    ? [...cfg.tools.media.models, ...legacyModels]
+    : legacyModels.slice();
+  if (Object.prototype.hasOwnProperty.call(imageCfg, 'models')) {
+    delete imageCfg.models;
+    changed = true;
+  }
   const matching = models.find(
     (entry) =>
       isObject(entry) &&
@@ -194,7 +209,11 @@ function ensureMediaImageTools(cfg, visionRef) {
   const selected = {
     prompt: matching && matching.prompt ? matching.prompt : DEFAULT_MEDIA_PROMPT,
     provider: parsed.provider,
-    model: parsed.model
+    model: parsed.model,
+    capabilities: Array.from(new Set([
+      'image',
+      ...(matching && Array.isArray(matching.capabilities) ? matching.capabilities.map(String) : [])
+    ]))
   };
   const rest = models.filter(
     (entry) =>
@@ -205,8 +224,8 @@ function ensureMediaImageTools(cfg, visionRef) {
       )
   );
   const nextModels = [selected, ...rest];
-  if (JSON.stringify(nextModels) !== JSON.stringify(models)) {
-    imageCfg.models = nextModels;
+  if (JSON.stringify(nextModels) !== JSON.stringify(cfg.tools.media.models || [])) {
+    cfg.tools.media.models = nextModels;
     changed = true;
   }
 

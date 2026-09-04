@@ -38,4 +38,3 @@
 
     return { name: '@openclaw/channel-router', version: '1.0.0', handler, classifyMessage };
 }
-export { init };

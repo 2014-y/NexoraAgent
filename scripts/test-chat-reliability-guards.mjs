@@ -9,6 +9,12 @@ function expectNoMatch(text, pattern, message) {
 }
 
 const renderer = fs.readFileSync(new URL('../renderer.js', import.meta.url), 'utf8');
+
+expectMatch(
+  renderer,
+  /\.agent-chat__composer-shell::before \{ content: none !important; display: none !important;/,
+  'embedded OpenClaw composer must not render the oversized 2026.9 top shadow'
+);
 const gatewayPatch = fs.readFileSync(new URL('../patch_gateway.js', import.meta.url), 'utf8');
 const rollover = fs.readFileSync(new URL('../plugins/session-overflow-rollover/index.js', import.meta.url), 'utf8');
 const main = fs.readFileSync(new URL('../main.js', import.meta.url), 'utf8');

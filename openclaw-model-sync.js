@@ -116,6 +116,41 @@ function applyDefaultModelToSessions(stateDir, primaryModel) {
     return { changed: updated > 0, updated, path: sessionsPath };
 }
 
+/**
+ * OpenClaw keeps a per-agent provider snapshot in agents/main/agent/models.json.
+ * It has higher runtime priority than openclaw.json, so leaving it stale can make
+ * the UI show the new model while the first real request still uses an old key.
+ */
+function syncAgentModelCatalog(stateDir, sourceConfig) {
+    const sourceProviders = sourceConfig
+        && sourceConfig.models
+        && sourceConfig.models.providers;
+    const modelsPath = path.join(stateDir || '', 'agents', 'main', 'agent', 'models.json');
+    if (!sourceProviders || typeof sourceProviders !== 'object' || !fs.existsSync(modelsPath)) {
+        return { changed: false, updated: 0, path: modelsPath };
+    }
+
+    const data = readJsonLenient(modelsPath);
+    if (!data.providers || typeof data.providers !== 'object') data.providers = {};
+    let updated = 0;
+    for (const [providerId, provider] of Object.entries(sourceProviders)) {
+        if (!provider || typeof provider !== 'object') continue;
+        const next = cloneJson(provider);
+        if (!jsonChanged(data.providers[providerId], next)) {
+            continue;
+        }
+        data.providers[providerId] = next;
+        updated += 1;
+    }
+
+    if (updated > 0) {
+        const temp = `${modelsPath}.tmp-${process.pid}-${Date.now()}`;
+        fs.writeFileSync(temp, JSON.stringify(data, null, 2) + '\n', 'utf8');
+        fs.renameSync(temp, modelsPath);
+    }
+    return { changed: updated > 0, updated, path: modelsPath };
+}
+
 function syncAgentDefaults(cfg, sourceConfig) {
     let changed = false;
     if (!cfg.agents) { cfg.agents = {}; changed = true; }
@@ -170,6 +205,7 @@ function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
         const cf = path.join(dir, 'openclaw.json');
         try {
             if (!fs.existsSync(cf)) continue;
+            let stateChanged = false;
 
             if (dir !== primaryResolved) {
                 const cfg = readJsonLenient(cf);
@@ -206,13 +242,15 @@ function syncModelConfigToStateDirs(stateDirs, sourceConfig, primaryStateDir) {
 
                 if (changed) {
                     fs.writeFileSync(cf, JSON.stringify(vision.config, null, 2) + '\n', 'utf8');
-                    synced.push(dir);
+                    stateChanged = true;
                 }
             }
 
             if (primary) {
-                applyDefaultModelToSessions(dir, primary);
+                if (applyDefaultModelToSessions(dir, primary).changed) stateChanged = true;
             }
+            if (syncAgentModelCatalog(dir, preparedSource).changed) stateChanged = true;
+            if (stateChanged && !synced.includes(dir)) synced.push(dir);
         } catch (e) {
             // Ignore a single broken state directory and keep syncing the rest.
         }
@@ -225,5 +263,6 @@ module.exports = {
     parseProviderModel,
     shouldUpdateSessionKey,
     applyDefaultModelToSessions,
+    syncAgentModelCatalog,
     syncModelConfigToStateDirs
 };

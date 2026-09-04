@@ -207,14 +207,15 @@ function ensureLatencySafeConfig(config, opts = {}) {
   // choose OpenClaw's deterministic FTS-only mode. This keeps memory_search
   // usable for keyword recall instead of returning "unavailable" and aborting
   // the assistant turn. An explicit user provider is always respected.
-  const memorySearch = isObject(ad.memorySearch) ? ad.memorySearch : null;
+  if (!isObject(cfg.memory)) cfg.memory = {};
+  const memorySearch = isObject(cfg.memory.search) ? cfg.memory.search : null;
   const hasOpenAiEmbeddingKey = Boolean(
     String(process.env.OPENAI_API_KEY || '').trim() ||
     (isObject(providers.openai) && String(providers.openai.apiKey || '').trim())
   );
   if (!memorySearch && !hasOpenAiEmbeddingKey) {
-    ad.memorySearch = { provider: 'none' };
-    changes.push('agents.defaults.memorySearch.provider: unset -> none (FTS fallback)');
+    cfg.memory.search = { provider: 'none' };
+    changes.push('memory.search.provider: unset -> none (FTS fallback)');
   }
 
   // A fallback identical to the primary is not failover: it repeats the same
@@ -334,37 +335,21 @@ function ensureLatencySafeConfig(config, opts = {}) {
     if (prev !== bootTotal) changes.push(`bootstrapTotalMaxChars: ${prev ?? 'unset'} -> ${bootTotal}${smallCtx ? ' (small-ctx)' : ''}`);
   }
 
-  // 压缩预留：按窗口自适应（绝不能对 8k 模型写 20000）
+  // OpenClaw 2026.9 retired reserveTokensFloor/maxHistoryShare/maxContextTokens
+  // in favor of built-in tier-aware planning. Keep only supported compaction
+  // controls; stale numeric knobs now make the entire Gateway config invalid.
   if (!ad.compaction || typeof ad.compaction !== 'object') ad.compaction = {};
-  const safeFloor = computeSafeReserveTokensFloor(effectiveCtx);
-  const floor = Number(ad.compaction.reserveTokensFloor);
-  // 过小或过大（相对窗口）都纠正
-  const tooSmall = !Number.isFinite(floor) || floor < Math.min(512, safeFloor);
-  const tooLargeForWindow = Number.isFinite(floor) && floor > safeFloor && smallCtx;
-  const largeCloudCtx = cloudPrimary || (Number.isFinite(effectiveCtx) && effectiveCtx >= 100000);
-  // 云端大窗：抬到 cloudReserveTokensFloor，禁止再压回 8000（否则易拖到 overflow 超时）
-  if (largeCloudCtx) {
-    const target = Math.max(safeFloor, DEFAULTS.cloudReserveTokensFloor);
-    if (!Number.isFinite(floor) || floor < target) {
-      const prev = ad.compaction.reserveTokensFloor;
-      ad.compaction.reserveTokensFloor = target;
-      changes.push(`compaction.reserveTokensFloor: ${prev ?? 'unset'} -> ${target} (cloud-ctx=${effectiveCtx})`);
+  for (const retired of ['reserveTokensFloor', 'maxHistoryShare', 'maxContextTokens']) {
+    if (Object.prototype.hasOwnProperty.call(ad.compaction, retired)) {
+      delete ad.compaction[retired];
+      changes.push(`compaction.${retired}: retired -> unset`);
     }
-  } else if (smallCtx) {
-    if (!Number.isFinite(floor) || floor !== safeFloor) {
-      const prev = ad.compaction.reserveTokensFloor;
-      ad.compaction.reserveTokensFloor = safeFloor;
-      changes.push(`compaction.reserveTokensFloor: ${prev ?? 'unset'} -> ${safeFloor} (ctx=${effectiveCtx})`);
-    }
-    if (ad.compaction.maxHistoryShare == null || Number(ad.compaction.maxHistoryShare) > 0.45) {
-      const prev = ad.compaction.maxHistoryShare;
-      ad.compaction.maxHistoryShare = 0.4;
-      changes.push(`compaction.maxHistoryShare: ${prev ?? 'unset'} -> 0.4`);
-    }
-    if (ad.compaction.mode !== 'safeguard') {
-      ad.compaction.mode = 'safeguard';
-      changes.push('compaction.mode: -> safeguard');
-    }
+  }
+  if (ad.compaction.mode !== 'safeguard') {
+    ad.compaction.mode = 'safeguard';
+    changes.push('compaction.mode: -> safeguard');
+  }
+  if (smallCtx) {
     if (!isObject(ad.compaction.qualityGuard)) ad.compaction.qualityGuard = {};
     if (ad.compaction.qualityGuard.enabled !== true) {
       ad.compaction.qualityGuard.enabled = true;
@@ -375,46 +360,20 @@ function ensureLatencySafeConfig(config, opts = {}) {
       ad.compaction.qualityGuard.maxRetries = 2;
       changes.push('compaction.qualityGuard.maxRetries: -> 2');
     }
-  } else if (tooSmall || !Number.isFinite(floor)) {
-    const prev = ad.compaction.reserveTokensFloor;
-    ad.compaction.reserveTokensFloor = DEFAULTS.reserveTokensFloor;
-    changes.push(`compaction.reserveTokensFloor: ${prev ?? 'unset'} -> ${DEFAULTS.reserveTokensFloor}`);
-  } else if (tooLargeForWindow) {
-    // unreachable when !smallCtx, kept for clarity
   }
 
-  // 压缩超时：长会话摘要至少给 240s；并收紧历史占比，减小单次摘要体积
+  // 压缩超时：长会话摘要至少给 240s。
   if (!(Number(ad.compaction.timeoutSeconds) >= 240)) {
     const prev = ad.compaction.timeoutSeconds;
     ad.compaction.timeoutSeconds = 240;
     changes.push(`compaction.timeoutSeconds: ${prev ?? 'unset'} -> 240`);
   }
-  if (!smallCtx || cloudPrimary) {
-    const share = Number(ad.compaction.maxHistoryShare);
-    if (!Number.isFinite(share) || share > 0.35) {
-      const prev = ad.compaction.maxHistoryShare;
-      ad.compaction.maxHistoryShare = 0.35;
-      changes.push(`compaction.maxHistoryShare: ${prev ?? 'unset'} -> 0.35`);
-    }
-  }
-  // 云端：清掉过小的 maxContextTokens（例如 6000），否则会假溢出 + 压缩超时
-  if (!smallCtx || cloudPrimary) {
-    const maxCtx = Number(ad.compaction.maxContextTokens);
-    if (Number.isFinite(maxCtx) && maxCtx > 0 && maxCtx < 32000) {
-      const prev = ad.compaction.maxContextTokens;
-      delete ad.compaction.maxContextTokens;
-      changes.push(`compaction.maxContextTokens: ${prev} -> unset (cloud)`);
-    }
-  }
 
-  // contextPruning：云端也裁工具长输出，避免历史里堆满截图/命令结果
+  // contextPruning.softTrim was retired in 2026.9; hardClear remains valid.
   if (!ad.contextPruning || typeof ad.contextPruning !== 'object') ad.contextPruning = {};
-  if (!isObject(ad.contextPruning.softTrim)) ad.contextPruning.softTrim = {};
-  const st = ad.contextPruning.softTrim;
-  const softCap = smallCtx ? 3000 : 6000;
-  if (!Number.isFinite(Number(st.maxChars)) || Number(st.maxChars) > softCap) {
-    st.maxChars = softCap;
-    changes.push(`contextPruning.softTrim.maxChars: -> ${softCap}`);
+  if (Object.prototype.hasOwnProperty.call(ad.contextPruning, 'softTrim')) {
+    delete ad.contextPruning.softTrim;
+    changes.push('contextPruning.softTrim: retired -> unset');
   }
   if (!isObject(ad.contextPruning.hardClear)) ad.contextPruning.hardClear = {};
   if (ad.contextPruning.hardClear.enabled !== true) {
@@ -532,18 +491,16 @@ function ensureLatencySafeConfig(config, opts = {}) {
     changes.push('agents.defaults.timeoutSeconds: -> 600');
   }
 
-  // 生视频轮询最长约 10 分钟；默认 stuckSessionAbort≈6min 会误杀 draw_video
-  if (!isObject(cfg.diagnostics)) cfg.diagnostics = {};
-  const diag = cfg.diagnostics;
-  const stuckWarnMs = Number(diag.stuckSessionWarnMs);
-  if (!Number.isFinite(stuckWarnMs) || stuckWarnMs < 300000) {
-    diag.stuckSessionWarnMs = 300000;
-    changes.push('diagnostics.stuckSessionWarnMs: -> 300000');
-  }
-  const stuckAbortMs = Number(diag.stuckSessionAbortMs);
-  if (!Number.isFinite(stuckAbortMs) || stuckAbortMs < 900000) {
-    diag.stuckSessionAbortMs = 900000;
-    changes.push('diagnostics.stuckSessionAbortMs: -> 900000');
+  // These session timeout knobs were retired in OpenClaw 2026.9. Keep the
+  // supported agent/provider request timeouts above and remove stale values.
+  if (isObject(cfg.diagnostics)) {
+    for (const retired of ['stuckSessionWarnMs', 'stuckSessionAbortMs']) {
+      if (Object.prototype.hasOwnProperty.call(cfg.diagnostics, retired)) {
+        delete cfg.diagnostics[retired];
+        changes.push(`diagnostics.${retired}: retired -> unset`);
+      }
+    }
+    if (Object.keys(cfg.diagnostics).length === 0) delete cfg.diagnostics;
   }
   // 内网中转：短超时，避免 socket 挂死拖很久才 failover
   ensurePrivateProviderTimeouts(cfg, changes);

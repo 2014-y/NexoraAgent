@@ -12,7 +12,6 @@ const root = path.join(__dirname, '..');
 const dcRoot = path.join(root, 'data-center');
 const markers = [
   path.join(dcRoot, 'node_modules', 'express', 'package.json'),
-  path.join(dcRoot, 'node_modules', 'cors', 'package.json'),
   path.join(dcRoot, 'node_modules', 'sql.js', 'package.json'),
 ];
 

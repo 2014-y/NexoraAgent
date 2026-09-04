@@ -8,6 +8,7 @@
 <script src="./vendor/echarts.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
+html, body { cursor:default !important; }
 @font-face { font-family:'DIN'; src:local('DIN Alternate'); }
 :root {
   --bg-base: radial-gradient(circle at 50% 50%, #0f1535 0%, #0a0e27 100%);
@@ -400,6 +401,7 @@ tr:hover td { background: rgba(var(--accent-rgb), 0.04); }
 
 <script>
 const API = (window.location.origin || 'http://127.0.0.1:3210') + '/api';
+const ACCESS_TOKEN = new URLSearchParams(String(window.location.hash || '').replace(/^#/, '')).get('token') || '';
 
 const app = Vue.createApp({
   data() {
@@ -428,16 +430,26 @@ const app = Vue.createApp({
       return n == null || Number(n) === 0 || Number.isNaN(Number(n));
     },
     async fetchJson(url) {
-      const r = await fetch(url, { cache: 'no-store' });
-      let body = null;
-      try { body = await r.json(); } catch (_) { body = null; }
-      if (!r.ok || (body && body.ok === false && body.error)) {
-        const msg = (body && body.error) ? String(body.error) : (`HTTP ${r.status}`);
-        const err = new Error(msg);
-        err.status = r.status;
-        throw err;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      try {
+        const r = await fetch(url, {
+          cache: 'no-store',
+          headers: { 'X-Nexora-Token': ACCESS_TOKEN },
+          signal: controller.signal,
+        });
+        let body = null;
+        try { body = await r.json(); } catch (_) { body = null; }
+        if (!r.ok || (body && body.ok === false && body.error)) {
+          const msg = (body && body.error) ? String(body.error) : (`HTTP ${r.status}`);
+          const err = new Error(msg);
+          err.status = r.status;
+          throw err;
+        }
+        return body;
+      } finally {
+        clearTimeout(timeout);
       }
-      return body;
     },
     clearVisibleRetries() {
       (this._visibleRetryTimers || []).forEach((id) => clearTimeout(id));
@@ -869,7 +881,7 @@ const app = Vue.createApp({
       this._pollTimer = setInterval(() => {
         if (document.visibilityState === 'hidden') return;
         this.fetchAll('interval');
-      }, 5000);
+      }, 15000);
     },
     stopPolling() {
       if (this._pollTimer) {
@@ -902,6 +914,7 @@ const app = Vue.createApp({
     });
     window.addEventListener('focus', () => this.onVisibleRefresh());
     window.addEventListener('message', (evt) => {
+      if (evt.source !== window.parent) return;
       const data = evt && evt.data;
       if (!data) return;
       if (data.type === 'nexora-data-center-refresh' || data.type === 'nexora-theme') {

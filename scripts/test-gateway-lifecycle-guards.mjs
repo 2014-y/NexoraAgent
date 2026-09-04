@@ -1,5 +1,7 @@
 import assert from 'assert';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const main = fs.readFileSync(new URL('../main.js', import.meta.url), 'utf8');
@@ -37,10 +39,13 @@ assert.match(
 );
 assert.match(
   main,
-  /bundledDiscovery !== 'allowlist'[\s\S]*bundledDiscovery = 'allowlist'/s,
-  'startup must prefer explicit plugin allowlisting to avoid duplicate auto-discovery'
+  /hasOwnProperty\.call\(config\.plugins, 'bundledDiscovery'\)[\s\S]*delete config\.plugins\.bundledDiscovery/s,
+  'startup must remove the discovery key retired by OpenClaw 2026.9'
 );
 const bootHarden = fs.readFileSync(new URL('../gateway-boot-harden.js', import.meta.url), 'utf8');
+const gatewayPatch = fs.readFileSync(new URL('../patch_gateway.js', import.meta.url), 'utf8');
+assert.doesNotMatch(gatewayPatch, /selectedKey\.substring\(/, 'gateway logs must never expose API key prefixes');
+assert.match(gatewayPatch, /fingerprint=\$\{safeKeyFingerprint\(selectedKey\)\}/, 'gateway key rotation logs must use one-way fingerprints');
 assert.match(
   bootHarden,
   /STALE_PLUGIN_IDS = \[[\s\S]*key-rotator-proxy[\s\S]*system-control/s,
@@ -48,6 +53,49 @@ assert.match(
 );
 
 const require = createRequire(import.meta.url);
+const { isAllowedLoopbackHttpUrl } = require('../gateway-auth.js');
+assert.equal(isAllowedLoopbackHttpUrl('http://127.0.0.1:18789/acp/?token=x#token=x', [18789]), true);
+assert.equal(isAllowedLoopbackHttpUrl('http://localhost:3210/', new Set(['3210'])), true);
+assert.equal(isAllowedLoopbackHttpUrl('http://127.0.0.1:18790/acp/', [18789]), false);
+assert.equal(isAllowedLoopbackHttpUrl('https://127.0.0.1:18789/acp/', [18789]), false);
+assert.equal(isAllowedLoopbackHttpUrl('http://example.com:18789/acp/', [18789]), false);
+assert.doesNotMatch(main, /getGatewayPort\(\)/, 'webview allowlist must not call an undefined gateway port helper');
+const { syncAgentModelCatalog } = require('../openclaw-model-sync.js');
+const { ensureAgnesAuthProfileConfig, repairAuthPayloads } = require('../openclaw-auth-sync.js');
+const authConfig = {
+  env: { vars: { AGNES_AI_API_KEY: 'valid-restored-key-value-1234567890' } },
+  models: { providers: { 'agnes-ai': { apiKey: 'valid-restored-key-value-1234567890' } } }
+};
+const preparedAuthConfig = ensureAgnesAuthProfileConfig(authConfig);
+assert.equal(preparedAuthConfig.changed, true);
+assert.deepEqual(authConfig.auth.profiles['agnes-ai:default'], { provider: 'agnes-ai', mode: 'api_key' });
+assert.equal(authConfig.env, undefined, 'duplicate Agnes env credentials must be removed');
+const repairedAuth = repairAuthPayloads(
+  { version: 1, profiles: { 'agnes-ai:default': { type: 'api_key', provider: 'agnes-ai', key: 'YOUR_AGNES_API_KEY_HERE' } } },
+  { version: 1, usageStats: { 'agnes-ai:default': { cooldownUntil: Date.now() + 30_000 }, 'inline-api-key:agnes-ai': { cooldownUntil: Date.now() + 30_000 } } },
+  'valid-restored-key-value-1234567890'
+);
+assert.equal(repairedAuth.credentialChanged, true);
+assert.equal(repairedAuth.store.profiles['agnes-ai:default'].key, 'valid-restored-key-value-1234567890');
+assert.equal(repairedAuth.state.usageStats, undefined, 'stale Agnes cooldowns must be cleared with a replaced credential');
+const modelSyncTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'nexora-model-sync-'));
+try {
+  const agentDir = path.join(modelSyncTemp, 'agents', 'main', 'agent');
+  fs.mkdirSync(agentDir, { recursive: true });
+  const modelsPath = path.join(agentDir, 'models.json');
+  fs.writeFileSync(modelsPath, JSON.stringify({
+    providers: { 'agnes-ai': { apiKey: 'YOUR_AGNES_API_KEY_HERE', models: [] } }
+  }));
+  const result = syncAgentModelCatalog(modelSyncTemp, {
+    models: { providers: { 'agnes-ai': { apiKey: 'valid-restored-key-value-1234567890', models: [{ id: 'agnes-2.0-flash' }] } } }
+  });
+  const synced = JSON.parse(fs.readFileSync(modelsPath, 'utf8'));
+  assert.equal(result.changed, true);
+  assert.equal(synced.providers['agnes-ai'].apiKey, 'valid-restored-key-value-1234567890');
+  assert.equal(synced.providers['agnes-ai'].models[0].id, 'agnes-2.0-flash');
+} finally {
+  fs.rmSync(modelSyncTemp, { recursive: true, force: true });
+}
 const { forceDisableUninstalledChannelPlugins } = require('../gateway-boot-harden.js');
 const pluginConfig = {
   browser: { enabled: true },
@@ -67,7 +115,8 @@ const pluginConfig = {
   },
 };
 forceDisableUninstalledChannelPlugins(pluginConfig, { runtimeRoot: '' });
-assert.equal(pluginConfig.plugins.bundledDiscovery, 'allowlist');
+assert.equal(Object.prototype.hasOwnProperty.call(pluginConfig.plugins, 'bundledDiscovery'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(pluginConfig.plugins, 'installs'), false);
 assert.equal(pluginConfig.plugins.entries['key-rotator-proxy'], undefined);
 assert.equal(pluginConfig.plugins.entries['system-control'], undefined);
 assert.ok(pluginConfig.plugins.allow.includes('browser'));

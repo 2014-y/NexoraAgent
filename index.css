@@ -25,6 +25,15 @@
   --font-mono: 'JetBrains Mono', Consolas, 'Microsoft YaHei', monospace;
 }
 
+/* Electron/iframe focus changes must never leave the shell without a native
+   pointer. Interactive controls keep their more specific pointer/text styles. */
+html,
+body,
+.app-container,
+.titlebar {
+  cursor: default !important;
+}
+
 /* 暗黑流光（可选预设；系统默认已改为 theme-abyss） */
 .theme-dark {
   --bg-base: radial-gradient(circle at 50% 50%, #151226 0%, #0d0b18 100%);
@@ -6595,8 +6604,9 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 14px;
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.24), inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* 此页有 Canvas 和实时数据；大面积毛玻璃会强制持续离屏合成。 */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   transition: border-color 0.25s ease, 
               box-shadow 0.25s ease,
               background 0.25s ease;
@@ -7189,7 +7199,15 @@ input:focus, select:focus, textarea:focus {
 .acc-dash-mini-conn-card .flash-icon {
   color: var(--accent-color, #8c52ff);
   font-size: 12px;
-  animation: acc-pulse-glow 2s infinite alternate;
+  animation: none;
+}
+
+/* 网络中转页保持静态状态表达，避免无限动画在窗口空闲时仍持续重排/合成。 */
+#acceleration-view .topo-connector-line::after,
+#acceleration-view .topo-node.active .topo-card-icon,
+#acceleration-view .topo-node.active .node-icon,
+#acceleration-view .acc-dash-status-indicator.enabled .acc-dash-status-dot {
+  animation: none !important;
 }
 
 .acc-dash-mini-conn-card .count-badge {

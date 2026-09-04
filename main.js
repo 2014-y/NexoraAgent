@@ -2,10 +2,11 @@
 // [FIX] 清理外部 NODE_OPTIONS 污染，防止 --require 等参数干扰 Electron 主进程启动
 // 打包后的应用不应依赖任何外部 NODE_OPTIONS 设置
 delete process.env.NODE_OPTIONS;
-const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session, dialog, clipboard, protocol, crashReporter } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, session, dialog, clipboard, protocol, crashReporter, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const { fileURLToPath } = require('url');
 const { fork } = require('child_process');
 const {
     isTempLikePath,
@@ -43,14 +44,28 @@ const {
     DEFAULT_GATEWAY_TOKEN,
     normalizeGatewayAuthConfig,
     buildControlUiUrl,
+    isAllowedLoopbackHttpUrl,
     syncGatewayAuthToStateDirs,
     buildGatewayChildEnv
 } = require('./gateway-auth');
 const { syncModelConfigToStateDirs } = require('./openclaw-model-sync');
 const {
+    getConfiguredAgnesApiKey,
+    ensureAgnesAuthProfileConfig,
+    syncAgnesAuthProfileToState
+} = require('./openclaw-auth-sync');
+const {
     getGatewayRuntimeRoot,
     ensureGatewayRuntime
 } = require('./gateway-runtime');
+const {
+    OFFICIAL_NPM_REGISTRY,
+    normalizeVersion: normalizeOpenClawVersion,
+    isStableVersion: isStableOpenClawVersion,
+    resolveStableTarget,
+    normalizeIntegrity,
+    buildGatewayRuntimeManifest
+} = require('./openclaw-update-policy');
 const acceleration = require('./acceleration');
 const roleConfig = require('./role-config');
 const { voiceRuntime } = require('./voice-runtime');
@@ -179,6 +194,17 @@ function emergencyNetworkCleanupSync() {
 
 process.on('exit', () => { emergencyNetworkCleanupSync(); });
 
+// 从终端、自动化工具或父进程启动时，父进程可能先关闭 stdout/stderr。
+// Node 的 Socket 默认没有 error 监听，后续任意 console.log 都会把 EPIPE
+// 抛成 uncaughtException，并形成高 CPU 的“记录异常 -> 再输出 -> 再异常”循环。
+for (const [name, stream] of [['stdout', process.stdout], ['stderr', process.stderr]]) {
+    if (!stream || typeof stream.on !== 'function') continue;
+    stream.on('error', (error) => {
+        if (error && error.code === 'EPIPE') return;
+        appendMainDiagnostic(`${name}-stream-error`, error);
+    });
+}
+
 process.on('uncaughtException', (err) => {
     appendMainDiagnostic('uncaughtException', err);
     emergencyNetworkCleanupSync();
@@ -187,11 +213,26 @@ process.on('unhandledRejection', (reason) => {
     appendMainDiagnostic('unhandledRejection', reason);
 });
 
+// 默认保留硬件加速。强制软件合成会让 Chromium 的 GPU 进程长期吃满一个 CPU 核，
+// 页面动画/Canvas 较多时反而更容易出现“卡死”。仅在显卡驱动确有问题时显式降级。
+const forceSoftwareRendering = process.argv.includes('--nexora-software-rendering')
+    || /^(1|true|yes)$/i.test(String(process.env.NEXORA_DISABLE_GPU || ''));
+if (process.platform === 'win32' && forceSoftwareRendering) {
+    app.disableHardwareAcceleration();
+}
+
 app.on('render-process-gone', (event, webContents, details) => {
     appendMainDiagnostic('render-process-gone', null, details || {});
 });
 app.on('child-process-gone', (event, details) => {
     appendMainDiagnostic('child-process-gone', null, details || {});
+    if (details && details.type === 'GPU') {
+        setTimeout(() => {
+            try {
+                if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache();
+            } catch (_) {}
+        }, 500);
+    }
 });
 app.on('gpu-process-crashed', (event, killed) => {
     appendMainDiagnostic('gpu-process-crashed', null, { killed: !!killed });
@@ -788,6 +829,41 @@ let normalBounds = null;
 const appStartTime = Date.now();
 global.latestAcpDashboardUrl = '';
 
+const TRUSTED_RENDERER_ENTRY = path.resolve(__dirname, 'index.html');
+
+function isTrustedRendererIpcEvent(event) {
+    try {
+        if (!event || !event.sender || !mainWindow || mainWindow.isDestroyed()) return false;
+        if (event.sender.id !== mainWindow.webContents.id) return false;
+        const senderFrame = event.senderFrame;
+        if (!senderFrame || senderFrame !== event.sender.mainFrame) return false;
+        const senderUrl = senderFrame.url || event.sender.getURL();
+        if (!String(senderUrl || '').startsWith('file:')) return false;
+        return path.resolve(fileURLToPath(senderUrl)) === TRUSTED_RENDERER_ENTRY;
+    } catch (_) {
+        return false;
+    }
+}
+
+// All renderer-callable IPC channels are privileged. Keep their existing handlers,
+// but reject calls from embedded frames/webviews or a navigated main document.
+const registerTrustedIpcHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) => registerTrustedIpcHandle(channel, (event, ...args) => {
+    if (!isTrustedRendererIpcEvent(event)) throw new Error('Blocked untrusted IPC sender');
+    return listener(event, ...args);
+});
+
+const registerTrustedIpcListener = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, listener) => registerTrustedIpcListener(channel, (event, ...args) => {
+    // Internal main-process emits have no WebContents sender and are not renderer IPC.
+    if (!event || !event.sender) return listener(event, ...args);
+    if (!isTrustedRendererIpcEvent(event)) {
+        try { event.returnValue = null; } catch (_) {}
+        return undefined;
+    }
+    return listener(event, ...args);
+});
+
 function stopGatewayHttpReadyWatch() {
     if (gatewayHttpReadyTimer) {
         clearInterval(gatewayHttpReadyTimer);
@@ -1056,9 +1132,126 @@ function applyProviderUiMetaToConfig(config) {
     return config;
 }
 
+function redactBuiltInAgnesCredentials(config) {
+    const copy = JSON.parse(JSON.stringify(config || {}));
+    const builtInKeys = new Set(BUILTIN_AGNES_API_KEYS);
+    const provider = copy.models && copy.models.providers && copy.models.providers['agnes-ai'];
+    if (provider && builtInKeys.has(String(provider.apiKey || ''))) provider.apiKey = '';
+    if (copy.env && builtInKeys.has(String(copy.env.AGNES_AI_API_KEY || ''))) delete copy.env.AGNES_AI_API_KEY;
+    if (copy.env && copy.env.vars && builtInKeys.has(String(copy.env.vars.AGNES_AI_API_KEY || ''))) {
+        delete copy.env.vars.AGNES_AI_API_KEY;
+        if (Object.keys(copy.env.vars).length === 0) delete copy.env.vars;
+        if (Object.keys(copy.env).length === 0) delete copy.env;
+    }
+    return copy;
+}
+
 function stripNonSchemaOpenClawConfig(config, options = {}) {
     let changed = false;
     if (!config || typeof config !== 'object') return false;
+
+    // OpenClaw 2026.9 moved/retired several previously accepted settings.
+    // Migrate values that still have a supported equivalent and remove only
+    // retired runtime tuning metadata that the new built-in defaults replace.
+    if (config.agents && config.agents.defaults) {
+        const defaults = config.agents.defaults;
+        if (defaults.memorySearch && typeof defaults.memorySearch === 'object') {
+            if (!config.memory || typeof config.memory !== 'object') config.memory = {};
+            const current = config.memory.search && typeof config.memory.search === 'object'
+                ? config.memory.search
+                : {};
+            config.memory.search = { ...defaults.memorySearch, ...current };
+            delete defaults.memorySearch;
+            changed = true;
+        }
+        if (defaults.compaction && typeof defaults.compaction === 'object') {
+            for (const key of ['reserveTokensFloor', 'maxHistoryShare', 'maxContextTokens']) {
+                if (Object.prototype.hasOwnProperty.call(defaults.compaction, key)) {
+                    delete defaults.compaction[key];
+                    changed = true;
+                }
+            }
+        }
+        if (defaults.contextPruning && typeof defaults.contextPruning === 'object'
+            && Object.prototype.hasOwnProperty.call(defaults.contextPruning, 'softTrim')) {
+            delete defaults.contextPruning.softTrim;
+            changed = true;
+        }
+    }
+    if (config.ui && typeof config.ui === 'object'
+        && Object.prototype.hasOwnProperty.call(config.ui, 'assistant')) {
+        delete config.ui.assistant;
+        changed = true;
+    }
+    if (config.auth && typeof config.auth === 'object'
+        && Object.prototype.hasOwnProperty.call(config.auth, 'cooldowns')) {
+        delete config.auth.cooldowns;
+        changed = true;
+    }
+    if (config.diagnostics && typeof config.diagnostics === 'object') {
+        for (const key of ['stuckSessionWarnMs', 'stuckSessionAbortMs']) {
+            if (Object.prototype.hasOwnProperty.call(config.diagnostics, key)) {
+                delete config.diagnostics[key];
+                changed = true;
+            }
+        }
+        if (Object.keys(config.diagnostics).length === 0) {
+            delete config.diagnostics;
+            changed = true;
+        }
+    }
+    if (config.skills && config.skills.workshop && typeof config.skills.workshop === 'object') {
+        const autonomous = config.skills.workshop.autonomous;
+        if (autonomous && typeof autonomous === 'object'
+            && Object.prototype.hasOwnProperty.call(autonomous, 'enabled')) {
+            if (!autonomous.mode) autonomous.mode = autonomous.enabled === false ? 'off' : 'auto';
+            delete autonomous.enabled;
+            changed = true;
+        }
+    }
+    if (config.plugins && typeof config.plugins === 'object') {
+        for (const key of ['bundledDiscovery', 'installs']) {
+            if (Object.prototype.hasOwnProperty.call(config.plugins, key)) {
+                delete config.plugins[key];
+                changed = true;
+            }
+        }
+    }
+    if (config.tools && config.tools.media && typeof config.tools.media === 'object') {
+        const media = config.tools.media;
+        const canonical = Array.isArray(media.models) ? media.models.slice() : [];
+        for (const capability of ['image', 'audio', 'video']) {
+            const section = media[capability];
+            if (!section || typeof section !== 'object' || !Array.isArray(section.models)) continue;
+            for (const legacy of section.models) {
+                if (!legacy || typeof legacy !== 'object') continue;
+                const entry = { ...legacy };
+                const caps = Array.isArray(entry.capabilities) ? entry.capabilities.map(String) : [];
+                entry.capabilities = Array.from(new Set([...caps, capability]));
+                const idx = canonical.findIndex((item) => item && typeof item === 'object'
+                    && String(item.provider || '') === String(entry.provider || '')
+                    && String(item.model || '') === String(entry.model || ''));
+                if (idx >= 0) {
+                    canonical[idx] = {
+                        ...entry,
+                        ...canonical[idx],
+                        capabilities: Array.from(new Set([
+                            ...entry.capabilities,
+                            ...(Array.isArray(canonical[idx].capabilities) ? canonical[idx].capabilities.map(String) : [])
+                        ]))
+                    };
+                } else {
+                    canonical.push(entry);
+                }
+            }
+            delete section.models;
+            changed = true;
+        }
+        if (canonical.length > 0 && JSON.stringify(media.models || []) !== JSON.stringify(canonical)) {
+            media.models = canonical;
+            changed = true;
+        }
+    }
     if (config.channels && typeof config.channels === 'object') {
         if (config.channels.feishu && typeof config.channels.feishu === 'object') {
             const mode = config.channels.feishu.connectionMode;
@@ -1591,15 +1784,9 @@ function pruneStalePluginConfigEntries(config) {
         }
     }
 
-    // With an explicit allow list, disable legacy compatibility discovery so
-    // ~/.openclaw/npm/projects cannot shadow the bundled channel packages.
-    // A wildcard allow list intentionally keeps legacy behavior for advanced
-    // user setups.
-    if (Array.isArray(config.plugins.allow)
-        && config.plugins.allow.length > 0
-        && !config.plugins.allow.includes('*')
-        && config.plugins.bundledDiscovery !== 'allowlist') {
-        config.plugins.bundledDiscovery = 'allowlist';
+    // OpenClaw 2026.9 removed this compatibility-discovery switch.
+    if (Object.prototype.hasOwnProperty.call(config.plugins, 'bundledDiscovery')) {
+        delete config.plugins.bundledDiscovery;
         changed = true;
     }
 
@@ -1679,12 +1866,6 @@ function loadAgnesApiKeys() {
 }
 const BUILTIN_AGNES_API_KEYS = loadAgnesApiKeys();
 const _AGNES_PRIMARY_KEY = BUILTIN_AGNES_API_KEYS[0] || _COMPROMISED_AGNES_KEYS[0];
-// 供渲染层同步取内置 key（不再把 key 字面量打进 renderer.js 源码/asar）
-try {
-    ipcMain.on('get-builtin-agnes-key', (e) => {
-        try { e.returnValue = _AGNES_PRIMARY_KEY || ''; } catch (_) { e.returnValue = ''; }
-    });
-} catch (_) {}
 const DEFAULT_MEDIA_IMAGE_PREFS = {
     apiBase: 'https://apihub.agnes-ai.com/v1/images/generations',
     apiKey: _AGNES_PRIMARY_KEY,
@@ -1734,7 +1915,7 @@ function resolveAccelerationProxyPort() {
     return 0;
 }
 
-function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeout = 12000 } = {}) {
+function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeout = 12000, maxResponseBytes = 40 * 1024 * 1024 } = {}) {
     const https = require('https');
     const http = require('http');
     const tls = require('tls');
@@ -1754,8 +1935,20 @@ function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeou
 
         const handleResponse = (res) => {
             const chunks = [];
-            res.on('data', (c) => chunks.push(c));
+            let received = 0;
+            let rejectedForSize = false;
+            res.on('data', (c) => {
+                received += c.length;
+                if (received > maxResponseBytes) {
+                    rejectedForSize = true;
+                    res.destroy(new Error('Response body too large'));
+                    return;
+                }
+                chunks.push(c);
+            });
+            res.on('error', reject);
             res.on('end', () => {
+                if (rejectedForSize) return;
                 const text = Buffer.concat(chunks).toString('utf8');
                 let json = null;
                 try { json = text ? JSON.parse(text) : null; } catch (e) {}
@@ -1843,6 +2036,65 @@ function requestJson(urlStr, { method = 'GET', headers = {}, body = null, timeou
         if (body) req.write(body);
         req.end();
     });
+}
+
+const BUILTIN_AGNES_ENDPOINTS = Object.freeze({
+    models: { method: 'GET', path: '/v1/models', timeout: 25000 },
+    chat: { method: 'POST', path: '/v1/chat/completions', timeout: 120000 },
+    image: { method: 'POST', path: '/v1/images/generations', timeout: 180000 },
+    video: { method: 'POST', path: '/v1/videos', timeout: 180000 },
+    videoStatus: { method: 'GET', path: '/agnesapi', timeout: 30000 }
+});
+
+/** Keep built-in credentials in the main process behind a fixed endpoint allowlist. */
+async function requestBuiltInAgnes(payload) {
+    const action = String(payload && payload.action || '');
+    const endpoint = BUILTIN_AGNES_ENDPOINTS[action];
+    if (!endpoint) return { success: false, error: 'Unsupported built-in Agnes action' };
+    if (!BUILTIN_AGNES_API_KEYS.length) return { success: false, error: 'Built-in Agnes API key is not configured' };
+
+    let body = null;
+    if (endpoint.method === 'POST') {
+        const data = payload && payload.body;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            return { success: false, error: 'Invalid request body' };
+        }
+        body = JSON.stringify(data);
+        if (Buffer.byteLength(body, 'utf8') > 20 * 1024 * 1024) {
+            return { success: false, error: 'Request body too large' };
+        }
+    }
+
+    let url = `https://apihub.agnes-ai.com${endpoint.path}`;
+    if (action === 'videoStatus') {
+        const taskId = String(payload && payload.taskId || '').trim();
+        const modelName = String(payload && payload.modelName || '').trim();
+        if (!/^[A-Za-z0-9._:-]{1,160}$/.test(taskId)) return { success: false, error: 'Invalid video task id' };
+        const query = new URLSearchParams({ video_id: taskId });
+        if (modelName && /^[A-Za-z0-9._:+/-]{1,160}$/.test(modelName)) query.set('model_name', modelName);
+        url += `?${query.toString()}`;
+    }
+
+    let lastError = null;
+    for (let i = 0; i < BUILTIN_AGNES_API_KEYS.length; i++) {
+        try {
+            const response = await requestJson(url, {
+                method: endpoint.method,
+                headers: {
+                    ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+                    Authorization: `Bearer ${BUILTIN_AGNES_API_KEYS[i]}`
+                },
+                body,
+                timeout: endpoint.timeout
+            });
+            if ([401, 403, 429].includes(response.status) && i + 1 < BUILTIN_AGNES_API_KEYS.length) continue;
+            return { success: true, status: response.status, statusText: response.statusText, text: response.text };
+        } catch (e) {
+            lastError = e;
+            if (isNetworkProbeError(e && e.message)) break;
+        }
+    }
+    return { success: false, error: (lastError && lastError.message) || 'Built-in Agnes request failed' };
 }
 
 function isNetworkProbeError(errOrMsg) {
@@ -3716,13 +3968,6 @@ function prepareChannelPluginsBeforeGateway() {
         needsSave = true;
     }
 
-    const wantById = {};
-    for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
-        if (entry.viaLoadPaths === false) continue;
-        const abs = resolveBundledNpmPluginPath(entry);
-        if (abs) wantById[entry.id] = path.resolve(abs);
-    }
-
     const channelPathMatchers = [
         { id: 'openclaw-weixin', re: /(?:^|[\\/])openclaw-weixin(?:[\\/]|$)/i },
         { id: 'feishu', re: /[\\/]@openclaw[\\/]feishu(?:[\\/]|$)/i },
@@ -3744,17 +3989,10 @@ function prepareChannelPluginsBeforeGateway() {
         let drop = false;
         for (const m of channelPathMatchers) {
             if (!m.re.test(p)) continue;
-            const entry = BUNDLED_NPM_CHANNEL_PLUGINS.find((e) => e.id === m.id);
-            if (entry && entry.viaLoadPaths === false) {
-                drop = true;
-                needsSave = true;
-                break;
-            }
-            const want = wantById[m.id];
-            if (!want || path.resolve(p) !== want) {
-                drop = true;
-                needsSave = true;
-            }
+            // OpenClaw 2026.9 discovers runtime channel packages globally.
+            // Keeping their package roots in load.paths loads each id twice.
+            drop = true;
+            needsSave = true;
             break;
         }
         if (drop) continue;
@@ -3776,11 +4014,6 @@ function prepareChannelPluginsBeforeGateway() {
         if (!pluginPathUsableOnThisMachine(abs) || isForeignUserPath(abs)) {
             console.warn(`[PluginSeed] Skip foreign/missing load path for ${entry.id}: ${abs}`);
             continue;
-        }
-        const resolvedPath = path.resolve(abs);
-        if (!filteredPaths.some((p) => path.resolve(p) === resolvedPath)) {
-            filteredPaths.push(abs);
-            needsSave = true;
         }
         if (!config.plugins.entries[entry.id]) {
             config.plugins.entries[entry.id] = { enabled: true };
@@ -4032,7 +4265,9 @@ function prepareChannelPluginsBeforeGateway() {
             }
         }
     } catch (e) {}
-
+    // Preparation can consume legacy installs metadata, but OpenClaw 2026.9
+    // must never receive those retired keys in the persisted document.
+    if (stripNonSchemaOpenClawConfig(config)) needsSave = true;
 
     if (needsSave) {
         writeConfigFileAtomic(JSON.stringify(config, null, 2));
@@ -4146,7 +4381,9 @@ function acquireNexoraInstanceSlot() {
 
 const nexoraInstance = nexoraSingleInstanceLock ? acquireNexoraInstanceSlot() : null;
 if (!nexoraInstance) {
-    console.error('[Instance] 已达到最大多开数量（8），退出');
+    if (nexoraSingleInstanceLock) {
+        console.error('[Instance] 已达到最大多开数量（8），退出');
+    }
     app.quit();
 } else {
     global.nexoraInstance = nexoraInstance;
@@ -4167,7 +4404,7 @@ function createSplashWindow() {
         alwaysOnTop: true,
         resizable: false,
         center: true,
-        show: true,
+        show: false,
         backgroundColor: '#00000000'
     });
     splash.loadFile('splash.html').catch((err) => {
@@ -4211,9 +4448,7 @@ function createWindow(existingSplash) {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            // webSecurity 仍为 false：内置 <webview> 需跨源加载本地控制台(127.0.0.1)与 file:// 媒体。
-            // 已用「XSS 入口关闭 + 导航守卫 + 源级权限 + 仅本地放行响应头」做补偿控制。
-            webSecurity: false,
+            webSecurity: true,
             // 关闭「HTTPS 上下文加载 HTTP 子资源」——主页面是 file://，关掉不影响本地/localhost 加载，
             // 但能减少被嵌 webview 加载明文子资源被 MITM 注入的面。
             allowRunningInsecureContent: false,
@@ -4231,11 +4466,17 @@ function createWindow(existingSplash) {
     // 语音：仅对「应用自身页面」(file:// 的 index.html) 授权麦克风；
     // webview 里加载的第三方/远端内容不得静默拿麦克风（原实现对任意源都放行）。
     const isOwnAppOrigin = (url) => {
-        const u = String(url || '');
-        if (u.startsWith('file://')) return true;
         try {
-            const h = new URL(u).hostname;
-            return h === '127.0.0.1' || h === 'localhost';
+            return String(url || '').startsWith('file:')
+                && path.resolve(fileURLToPath(url)) === TRUSTED_RENDERER_ENTRY;
+        } catch (_) { return false; }
+    };
+    const isAllowedEmbeddedLocalUrl = (url) => {
+        try {
+            const dashboardPort = new URL(buildGatewayDashboardUrl()).port || '80';
+            const allowedPorts = new Set([String(dashboardPort)]);
+            if (dataCenterRuntime && dataCenterRuntime.port) allowedPorts.add(String(dataCenterRuntime.port));
+            return isAllowedLoopbackHttpUrl(url, allowedPorts);
         } catch (_) { return false; }
     };
     const isMediaPermission = (p) => p === 'media' || p === 'microphone' || p === 'audioCapture';
@@ -4310,7 +4551,13 @@ function createWindow(existingSplash) {
         }
     };
     mainWindow.once('ready-to-show', revealWindow);
-    setTimeout(revealWindow, 1200);
+    // 极慢磁盘上 ready-to-show 可能延迟，但绝不能在主文档仍加载时提前展示空白窗口。
+    setTimeout(() => {
+        try {
+            if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoadingMainFrame()) return;
+            revealWindow();
+        } catch (_) {}
+    }, 8000);
 
     // 最小化/托盘还原时再刷一次底色，压住 Windows 白闪
     const paintDarkBg = () => {
@@ -4391,8 +4638,7 @@ function createWindow(existingSplash) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         let isLocal = false;
         try {
-            const h = new URL(details.url).hostname;
-            isLocal = (h === '127.0.0.1' || h === 'localhost' || h === '::1');
+            isLocal = isAllowedEmbeddedLocalUrl(details.url);
         } catch (_) {}
         if (!isLocal) {
             return callback({ cancel: false, responseHeaders: details.responseHeaders });
@@ -4406,14 +4652,7 @@ function createWindow(existingSplash) {
     // 导航守卫：禁止主框架被导航到外部源、禁止 window.open 打开新窗口、净化 webview 权限。
     // 配合 webSecurity:false，防止被注入内容把主页面导去攻击者站点后再放大权限。
     try {
-        const allowNavigate = (url) => {
-            const u = String(url || '');
-            if (u.startsWith('file://')) return true;
-            try {
-                const h = new URL(u).hostname;
-                return h === '127.0.0.1' || h === 'localhost' || h === '::1';
-            } catch (_) { return false; }
-        };
+        const allowNavigate = (url) => isOwnAppOrigin(url);
         mainWindow.webContents.on('will-navigate', (ev, url) => {
             if (!allowNavigate(url)) { ev.preventDefault(); try { require('electron').shell.openExternal(url); } catch (_) {} }
         });
@@ -4422,10 +4661,17 @@ function createWindow(existingSplash) {
             if (/^https?:\/\//i.test(String(url || ''))) { try { require('electron').shell.openExternal(url); } catch (_) {} }
             return { action: 'deny' };
         });
-        mainWindow.webContents.on('will-attach-webview', (ev, webPreferences) => {
+        mainWindow.webContents.on('will-attach-webview', (ev, webPreferences, params) => {
+            if (params && params.src && !isAllowedEmbeddedLocalUrl(params.src)) {
+                appendMainDiagnostic('webview-navigation-blocked', null, { url: String(params.src) });
+                ev.preventDefault();
+                return;
+            }
             // 净化 webview 的进程权限：禁 nodeIntegration、强制隔离，去掉可能被传入的 preload
             webPreferences.nodeIntegration = false;
             webPreferences.contextIsolation = true;
+            webPreferences.webSecurity = true;
+            webPreferences.allowRunningInsecureContent = false;
             delete webPreferences.preload;
             delete webPreferences.preloadURL;
         });
@@ -5142,7 +5388,7 @@ async function startGatewayProcess(opts = {}) {
             }
 
             // 最终锁定鉴权（写主配置 + 同步历史双目录）；必须在 fork 之前
-            const lockedAuth = lockGatewayAuthBeforeStart();
+            let lockedAuth = lockGatewayAuthBeforeStart();
 
             // 部署补丁/截图脚本到可写运行时目录（云电脑不用固定 Public）
             let patchPath = resolveAppFsPath('patch_gateway.js').replace(/\\/g, '/');
@@ -5170,6 +5416,57 @@ async function startGatewayProcess(opts = {}) {
             
             // 优先使用打包内置的或系统全局符合版本要求的 Node 运行时
             const nodeExePath = getAvailableNodePath();
+            // 2026.9+ 的共享状态库要求显式 Doctor 迁移；每个内核版本只跑一次，
+            // 且始终使用与随后 Gateway 完全相同的 home/state/config 环境。
+            if (nodeExePath) {
+                const migrationEnv = buildGatewayChildEnv(process.env, {
+                    homePath: lockedAuth.homePath,
+                    stateDir: lockedAuth.stateDir,
+                    token: lockedAuth.token
+                });
+                const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+                migrationEnv[pathKey] = `${path.dirname(nodeExePath)}${path.delimiter}${process.env[pathKey] || ''}`;
+                const migration = await withStartupTimeout(
+                    ensureOpenClawPostUpgradeMigration({
+                        nodeExePath,
+                        openclawEntry,
+                        stateDir: lockedAuth.stateDir,
+                        env: migrationEnv
+                    }),
+                    180_000,
+                    '迁移 OpenClaw 配置与状态'
+                );
+                if (migration && migration.migrated) {
+                    ensureOpenClawConfigInitialized();
+                    lockedAuth = lockGatewayAuthBeforeStart();
+                    markStartupPhase('openclaw-post-upgrade-migrated');
+                }
+            }
+            // OpenClaw 2026.9 将共享认证档案迁入 state/openclaw.sqlite。
+            // 历史 models.json 中的占位 key 可能已经被迁成 agnes-ai:default，且其
+            // 优先级高于当前 provider key；每次 fork 前快速对齐，避免首发 401 后重试。
+            try {
+                if (fs.existsSync(CONFIG_PATH)) {
+                    const authConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+                    const prepared = ensureAgnesAuthProfileConfig(authConfig);
+                    if (prepared.changed) {
+                        writeConfigFileAtomic(JSON.stringify(authConfig, null, 2));
+                        lockedAuth = lockGatewayAuthBeforeStart();
+                    }
+                    if (prepared.apiKey) {
+                        const authSync = syncAgnesAuthProfileToState({
+                            stateDir: lockedAuth.stateDir,
+                            apiKey: prepared.apiKey
+                        });
+                        if (authSync.changed) {
+                            console.log(`[AgnesAuth] Repaired ${authSync.mode || 'auth-store'} profile fingerprint=${authSync.fingerprint}`);
+                            markStartupPhase('agnes-auth-profile-ready');
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[AgnesAuth] Pre-gateway profile sync skipped:', e.message);
+            }
             // 强制子进程继承与主进程完全一致的 OPENCLAW_* + OPENCLAW_GATEWAY_TOKEN，杜绝补丁重算家目录后丢 token
             const childEnv = buildGatewayChildEnv(process.env, {
                 homePath: lockedAuth.homePath,
@@ -5881,17 +6178,6 @@ function ensureOpenClawConfigInitialized() {
             }
         } catch (e) {}
 
-        // 自动补全 ui.assistant 头像配置，以及 gateway.controlUi.basePath (修复面板侧边栏破图问题)
-        if (!config.ui) { config.ui = {}; needsSave = true; }
-        if (!config.ui.assistant) { config.ui.assistant = {}; needsSave = true; }
-        if (!config.ui.assistant.avatar) {
-            config.ui.assistant.avatar = '🤖';
-            needsSave = true;
-        }
-        if (config.ui.assistant.name !== 'Nexora Agent') {
-            config.ui.assistant.name = 'Nexora Agent';
-            needsSave = true;
-        }
         // 统一规范化 gateway.auth / controlUi / port（禁止 SecretRef/空值/随机令牌导致面板永登不上）
         {
             const norm = normalizeGatewayAuthConfig(config, NEXORA_AGENT_DEFAULT_GATEWAY_TOKEN);
@@ -6031,7 +6317,8 @@ function ensureOpenClawConfigInitialized() {
             }
         }
 
-        // 压缩缓冲拉高，尽量在真正溢出前触发压缩；失败仍由 session-overflow-rollover 兜底
+        // OpenClaw 2026.9 只保留正式压缩策略和超时；失败仍由
+        // session-overflow-rollover 兜底。
         {
             if (!config.agents) config.agents = {};
             if (!config.agents.defaults) config.agents.defaults = {};
@@ -6040,49 +6327,12 @@ function ensureOpenClawConfigInitialized() {
                 needsSave = true;
             }
             const compact = config.agents.defaults.compaction;
-            if (!(Number(compact.reserveTokensFloor) >= 35000)) {
-                compact.reserveTokensFloor = 35000;
-                needsSave = true;
-            }
             if (compact.mode == null) {
                 compact.mode = 'safeguard';
                 needsSave = true;
             }
             if (!(Number(compact.timeoutSeconds) >= 240)) {
                 compact.timeoutSeconds = 240;
-                needsSave = true;
-            }
-            // 更早、更小块压缩，降低一次摘要超时概率
-            if (!(Number(compact.maxHistoryShare) > 0) || Number(compact.maxHistoryShare) > 0.35) {
-                compact.maxHistoryShare = 0.35;
-                needsSave = true;
-            }
-            // 云端大窗误留的极小 maxContextTokens 会反复触发溢出压缩
-            const maxCtx = Number(compact.maxContextTokens);
-            if (Number.isFinite(maxCtx) && maxCtx > 0 && maxCtx < 32000) {
-                delete compact.maxContextTokens;
-                needsSave = true;
-            }
-        }
-
-        // 限流/过载：主模型连续重试 30 次后才切备援（OpenClaw 默认约 1 次就切）
-        {
-            if (!config.auth) config.auth = {};
-            if (!config.auth.cooldowns || typeof config.auth.cooldowns !== 'object') {
-                config.auth.cooldowns = {};
-                needsSave = true;
-            }
-            const cd = config.auth.cooldowns;
-            if (!(Number(cd.rateLimitedProfileRotations) >= 30)) {
-                cd.rateLimitedProfileRotations = 30;
-                needsSave = true;
-            }
-            if (!(Number(cd.overloadedProfileRotations) >= 30)) {
-                cd.overloadedProfileRotations = 30;
-                needsSave = true;
-            }
-            if (!(Number(cd.overloadedBackoffMs) >= 800)) {
-                cd.overloadedBackoffMs = 800;
                 needsSave = true;
             }
         }
@@ -6251,14 +6501,6 @@ function ensureOpenClawConfigInitialized() {
             if (sanitized.changed) needsSave = true;
         } catch (e) {}
 
-        const weixinPluginPath = resolveAppFsPath('node_modules', '@tencent-weixin', 'openclaw-weixin');
-        // 当前安装目录下「允许进 load.paths」的渠道插件权威路径（仅微信等非官方）
-        const bundledChannelAbsById = {};
-        for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
-            if (entry.viaLoadPaths === false) continue;
-            const abs = resolveBundledNpmPluginPath(entry);
-            if (abs) bundledChannelAbsById[entry.id] = path.resolve(abs);
-        }
         const originalPaths = config.plugins.load.paths || [];
         const filteredPaths = originalPaths.filter(p => {
             if (typeof p !== 'string') return false;
@@ -6274,11 +6516,8 @@ function ensureOpenClawConfigInitialized() {
             }
             // 过滤掉所有不一致的微信插件旧路径
             if (/(?:^|[\\/])openclaw-weixin(?:[\\/]|$)/i.test(p) || p.endsWith('openclaw-weixin')) {
-                const want = bundledChannelAbsById['openclaw-weixin'] || path.resolve(weixinPluginPath);
-                if (path.resolve(p) !== want) {
-                    needsSave = true;
-                    return false;
-                }
+                needsSave = true;
+                return false;
             }
             // 丢弃明显不可用的死路径（换机后最常见）
             try {
@@ -6314,12 +6553,6 @@ function ensureOpenClawConfigInitialized() {
                 console.warn(`[PluginSeed] Bundled npm plugin missing/unusable: ${entry.id}`);
                 // Do not silently close configured communication channels.
                 continue;
-            }
-            const resolvedPath = path.resolve(abs);
-            const hasPath = filteredPaths.some(p => typeof p === 'string' && path.resolve(p) === resolvedPath);
-            if (!hasPath) {
-                filteredPaths.push(abs);
-                needsSave = true;
             }
             if (!config.plugins.entries[entry.id]) {
                 config.plugins.entries[entry.id] = { enabled: true };
@@ -6426,10 +6659,6 @@ function ensureOpenClawConfigInitialized() {
                 && primaryRaw.includes('/')
                 && primaryRaw.slice(0, primaryRaw.indexOf('/')).toLowerCase() !== 'ollama';
             if (cloudPrimary) {
-                if (!(Number(compact.reserveTokensFloor) >= 35000)) {
-                    compact.reserveTokensFloor = 35000;
-                    needsSave = true;
-                }
                 if (!(Number(compact.timeoutSeconds) >= 240)) {
                     compact.timeoutSeconds = 240;
                     needsSave = true;
@@ -6717,15 +6946,15 @@ ipcMain.handle('config-read', async () => {
         if (fs.existsSync(CONFIG_PATH)) {
             try {
                 const content = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
-                return applyProviderUiMetaToConfig(JSON.parse(content));
+                return redactBuiltInAgnesCredentials(applyProviderUiMetaToConfig(JSON.parse(content)));
             } catch (parseErr) {
                 const repaired = ensureOpenClawConfigInitialized();
-                if (repaired) return applyProviderUiMetaToConfig(repaired);
+                if (repaired) return redactBuiltInAgnesCredentials(applyProviderUiMetaToConfig(repaired));
                 return null;
             }
         }
         const config = ensureOpenClawConfigInitialized();
-        if (config) return applyProviderUiMetaToConfig(config);
+        if (config) return redactBuiltInAgnesCredentials(applyProviderUiMetaToConfig(config));
         return null;
     } catch (e) {
         console.error('Failed to read config:', e);
@@ -6836,6 +7065,9 @@ ipcMain.handle('skills-clawhub-search', async (_e, payload) => {
 
 ipcMain.handle('skills-clawhub-install', async (_e, payload) => {
     try {
+        if (!payload || payload.acknowledgedRisk !== true) {
+            return { success: false, error: '安装已取消：必须明确确认第三方技能可执行本地代码的风险' };
+        }
         const ref = payload && (payload.ref || payload.skillRef || payload.slug);
         return await getSkillCenter().installFromClawHub(ref, {
             force: !!(payload && payload.force),
@@ -7098,16 +7330,41 @@ ipcMain.handle('verify-builtin-agnes', async (event, payload) => {
     }
 });
 
+ipcMain.handle('builtin-agnes-request', async (event, payload) => {
+    try {
+        return await requestBuiltInAgnes(payload || {});
+    } catch (e) {
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
 ipcMain.handle('config-save', async (event, newConfig) => {
     try {
         let cleanConfig = JSON.parse(JSON.stringify(newConfig));
+        const useBuiltInAgnes = cleanConfig.__nexoraUseBuiltIn === true;
+        delete cleanConfig.__nexoraUseBuiltIn;
         // 图片/视频配置写入侧车文件，供 media-cli 与插件读取（openclaw.json 不接受这些顶层字段）
         try {
-            persistMediaGeneratorPrefs(newConfig.imageGenerator, newConfig.videoGenerator);
+            const imagePrefs = JSON.parse(JSON.stringify(newConfig.imageGenerator || {}));
+            const videoPrefs = JSON.parse(JSON.stringify(newConfig.videoGenerator || {}));
+            if (useBuiltInAgnes && _AGNES_PRIMARY_KEY) {
+                imagePrefs.apiKey = _AGNES_PRIMARY_KEY;
+                videoPrefs.apiKey = _AGNES_PRIMARY_KEY;
+            }
+            persistMediaGeneratorPrefs(imagePrefs, videoPrefs);
         } catch (e) {}
         // 关键防护：移除不在 OpenClaw 网关根 Schema 中的扩展字段，防止网关启动抛出 Unrecognized keys
         delete cleanConfig.videoGenerator;
         delete cleanConfig.imageGenerator;
+        if (useBuiltInAgnes && _AGNES_PRIMARY_KEY) {
+            if (!cleanConfig.models) cleanConfig.models = {};
+            if (!cleanConfig.models.providers) cleanConfig.models.providers = {};
+            if (!cleanConfig.models.providers['agnes-ai']) cleanConfig.models.providers['agnes-ai'] = {};
+            cleanConfig.models.providers['agnes-ai'].apiKey = _AGNES_PRIMARY_KEY;
+        }
+        // OpenClaw 2026.9 的 profile 凭据优先于 models.json。把 Agnes 固定为
+        // 单一 profile 权威源，并去掉同值 env 副本，避免首发先撞旧 profile 401。
+        const agnesAuthConfig = ensureAgnesAuthProfileConfig(cleanConfig);
         // replaceMeta：按本次保存的显示名/备注全量重写侧车（支持随意改、清空、删厂家）
         stripNonSchemaOpenClawConfig(cleanConfig, { replaceProviderUiMeta: true });
 
@@ -7160,6 +7417,20 @@ ipcMain.handle('config-save', async (event, newConfig) => {
 
         writeConfigFileAtomic(newJson);
 
+        if (agnesAuthConfig.apiKey) {
+            try {
+                const authSync = syncAgnesAuthProfileToState({
+                    stateDir: CONFIG_DIR,
+                    apiKey: agnesAuthConfig.apiKey
+                });
+                if (authSync.changed) {
+                    console.log(`[AgnesAuth] Synced ${authSync.mode || 'auth-store'} profile fingerprint=${authSync.fingerprint}`);
+                }
+            } catch (e) {
+                console.warn('[AgnesAuth] Profile sync on config-save skipped:', e.message);
+            }
+        }
+
         // 沙箱 OpenClaw 会话会粘住旧 model/modelOverride；只改 openclaw.json 不会换网关对话模型。
         // 保存时把默认主/备模型同步进 sessions + 旁路状态目录，避免面板仍用上一模型。
         try {
@@ -7173,7 +7444,7 @@ ipcMain.handle('config-save', async (event, newConfig) => {
         }
 
         // 返回给面板时合回显示名/备注（侧车），避免保存后 UI 立刻丢 label
-        return { success: true, config: applyProviderUiMetaToConfig(JSON.parse(JSON.stringify(cleanConfig))) };
+        return { success: true, config: redactBuiltInAgnesCredentials(applyProviderUiMetaToConfig(JSON.parse(JSON.stringify(cleanConfig)))) };
     } catch (e) {
         console.error('Failed to save config:', e);
         return { success: false, error: e.message };
@@ -8535,7 +8806,18 @@ function getGoogleAuthPath() {
 function readGoogleAuthData() {
     try {
         const p = getGoogleAuthPath();
-        if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (fs.existsSync(p)) {
+            const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (data && data.tokensEncrypted) {
+                if (!safeStorage.isEncryptionAvailable()) return { loggedIn: false };
+                data.tokens = JSON.parse(safeStorage.decryptString(Buffer.from(String(data.tokensEncrypted), 'base64')));
+                delete data.tokensEncrypted;
+            } else if (data && data.tokens && safeStorage.isEncryptionAvailable()) {
+                // One-time migration from the legacy plaintext token file.
+                writeGoogleAuthData(data);
+            }
+            return data;
+        }
     } catch (_) {}
     return { loggedIn: false };
 }
@@ -8543,10 +8825,31 @@ function readGoogleAuthData() {
 function writeGoogleAuthData(data) {
     try {
         if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-        fs.writeFileSync(getGoogleAuthPath(), JSON.stringify(data, null, 2), 'utf8');
+        const stored = JSON.parse(JSON.stringify(data || {}));
+        if (stored.tokens) {
+            if (!safeStorage.isEncryptionAvailable()) throw new Error('System credential encryption is unavailable');
+            stored.tokensEncrypted = safeStorage.encryptString(JSON.stringify(stored.tokens)).toString('base64');
+            delete stored.tokens;
+        }
+        fs.writeFileSync(getGoogleAuthPath(), JSON.stringify(stored, null, 2), { encoding: 'utf8', mode: 0o600 });
+        try { fs.chmodSync(getGoogleAuthPath(), 0o600); } catch (_) {}
+        return true;
     } catch (e) {
         console.error('Failed to write google-auth.json:', e);
+        return false;
     }
+}
+
+function redactCloudConfigSecrets(value) {
+    if (Array.isArray(value)) return value.map(redactCloudConfigSecrets);
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [key, child] of Object.entries(value)) {
+        if (/^(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|client[-_]?secret|app[-_]?secret|password|authorization)$/i.test(key)
+            || /(?:ApiKey|AccessToken|RefreshToken|ClientSecret|AppSecret)$/i.test(key)) continue;
+        out[key] = redactCloudConfigSecrets(child);
+    }
+    return out;
 }
 
 // ========== Google OAuth 登录与云同步 ==========
@@ -8611,7 +8914,7 @@ ipcMain.handle('google-sync-upload', async () => {
     try {
         const accessToken = await getValidGoogleAccessToken();
         if (!fs.existsSync(CONFIG_PATH)) throw new Error('本地配置文件不存在');
-        let configObj = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, ''));
+        let configObj = redactCloudConfigSecrets(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, '')));
         // 确保清除可能存在的非法根节点 google 键
         delete configObj.google;
 
@@ -8670,6 +8973,9 @@ ipcMain.handle('google-sync-download', async () => {
         if (!result || !result.content) {
             return { success: false, error: 'Google 云盘中暂无配置备份' };
         }
+        if (Buffer.byteLength(String(result.content), 'utf8') > 25 * 1024 * 1024) {
+            throw new Error('云端备份超过 25MB 安全上限');
+        }
         // 校验 JSON 格式
         const remoteData = JSON.parse(result.content);
         let remoteConfig = remoteData;
@@ -8701,13 +9007,19 @@ ipcMain.handle('google-sync-download', async () => {
                     const targetSessionsDir = path.join(CONFIG_DIR, 'agents', 'main', 'sessions');
                     if (!fs.existsSync(targetSessionsDir)) fs.mkdirSync(targetSessionsDir, { recursive: true });
 
-                    if (remoteData.sessionHistory['sessions.json']) {
+                    if (typeof remoteData.sessionHistory['sessions.json'] === 'string'
+                        && Buffer.byteLength(remoteData.sessionHistory['sessions.json'], 'utf8') <= 5 * 1024 * 1024) {
                         fs.writeFileSync(path.join(targetSessionsDir, 'sessions.json'), remoteData.sessionHistory['sessions.json'], 'utf8');
                     }
                     if (remoteData.sessionHistory.files && typeof remoteData.sessionHistory.files === 'object') {
                         Object.entries(remoteData.sessionHistory.files).forEach(([fileName, fileContent]) => {
                             try {
-                                fs.writeFileSync(path.join(targetSessionsDir, fileName), fileContent, 'utf8');
+                                if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.jsonl$/i.test(fileName)) return;
+                                if (typeof fileContent !== 'string' || Buffer.byteLength(fileContent, 'utf8') > 2 * 1024 * 1024) return;
+                                const targetPath = path.resolve(targetSessionsDir, fileName);
+                                const sessionsRoot = path.resolve(targetSessionsDir) + path.sep;
+                                if (!targetPath.startsWith(sessionsRoot)) return;
+                                fs.writeFileSync(targetPath, fileContent, 'utf8');
                             } catch (_) {}
                         });
                     }
@@ -8729,6 +9041,9 @@ ipcMain.handle('google-sync-download', async () => {
             }
             delete remoteConfig.google;
         }
+        // Never re-import secrets from legacy/tampered cloud backups. Account
+        // credentials remain local and must be re-entered on a new device.
+        remoteConfig = redactCloudConfigSecrets(remoteConfig);
         // 保存规范化后的云端配置到 openclaw.json
         writeOpenClawConfigObject(remoteConfig);
         return { success: true, config: remoteConfig };
@@ -9475,20 +9790,20 @@ let dataCenterRuntime = null;
 let dataCenterStartPromise = null;
 
 function getDataCenterServerPath() {
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar.unpacked', 'data-center', 'server.js');
+    }
     return path.join(__dirname, 'data-center', 'server.js');
 }
 
 async function ensureDataCenterServer() {
-    try {
-        if (dataCenterRuntime && dataCenterRuntime.server && dataCenterRuntime.server.listening) {
-            return {
-                ok: true,
-                url: dataCenterRuntime.url,
-                port: dataCenterRuntime.port,
-                stateRoot: dataCenterRuntime.stateRoot,
-            };
-        }
-    } catch (_) {}
+    if (dataCenterRuntime && dataCenterRuntime.process && !dataCenterRuntime.process.killed) {
+        return {
+            ok: true,
+            url: `${dataCenterRuntime.url}#token=${encodeURIComponent(dataCenterRuntime.accessToken)}`,
+            port: dataCenterRuntime.port,
+        };
+    }
 
     if (dataCenterStartPromise) return dataCenterStartPromise;
 
@@ -9497,17 +9812,57 @@ async function ensureDataCenterServer() {
         if (!fs.existsSync(serverPath)) {
             throw new Error('data-center/server.js missing');
         }
-        const { start } = require(serverPath);
-        const runtime = await start({
-            stateDir: CONFIG_DIR,
-            preferredPort: 3210,
+        const nodePath = getAvailableNodePath();
+        if (!nodePath) throw new Error('未找到 Node.js 22+，无法启动数据中心隔离进程');
+        const accessToken = require('crypto').randomBytes(32).toString('hex');
+        const child = fork(serverPath, [], {
+            execPath: nodePath,
+            cwd: path.dirname(serverPath),
+            windowsHide: true,
+            env: {
+                ...process.env,
+                NEXORA_DATA_CENTER_STATE_DIR: CONFIG_DIR,
+                NEXORA_DATA_CENTER_PORT: '3210',
+                NEXORA_DATA_CENTER_TOKEN: accessToken,
+            },
+            stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        });
+        const runtime = await new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (fn, value) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                child.removeAllListeners('message');
+                child.removeAllListeners('error');
+                child.removeAllListeners('exit');
+                fn(value);
+            };
+            const timeout = setTimeout(() => finish(reject, new Error('数据中心启动超时')), 15000);
+            child.on('message', (message) => {
+                if (message && message.type === 'ready') {
+                    finish(resolve, {
+                        process: child,
+                        port: Number(message.port),
+                        url: String(message.url),
+                        dbEngine: message.dbEngine,
+                        accessToken,
+                    });
+                } else if (message && message.type === 'error') {
+                    finish(reject, new Error(String(message.error || '数据中心启动失败')));
+                }
+            });
+            child.once('error', (error) => finish(reject, error));
+            child.once('exit', (code) => finish(reject, new Error(`数据中心进程提前退出 (${code})`)));
+        });
+        child.once('exit', () => {
+            if (dataCenterRuntime && dataCenterRuntime.process === child) dataCenterRuntime = null;
         });
         dataCenterRuntime = runtime;
         return {
             ok: true,
-            url: runtime.url,
+            url: `${runtime.url}#token=${encodeURIComponent(accessToken)}`,
             port: runtime.port,
-            stateRoot: runtime.stateRoot,
         };
     })().catch((err) => {
         dataCenterStartPromise = null;
@@ -9522,13 +9877,24 @@ async function stopDataCenterServer() {
     const runtime = dataCenterRuntime;
     dataCenterRuntime = null;
     dataCenterStartPromise = null;
-    if (!runtime || !runtime.server) return;
+    if (!runtime || !runtime.process) return;
     await new Promise((resolve) => {
-        try {
-            runtime.server.close(() => resolve());
-            setTimeout(resolve, 800);
-        } catch (_) {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
             resolve();
+        };
+        const timeout = setTimeout(() => {
+            try { runtime.process.kill(); } catch (_) {}
+            finish();
+        }, 1500);
+        try {
+            runtime.process.once('exit', finish);
+            runtime.process.send({ type: 'shutdown' });
+        } catch (_) {
+            finish();
         }
     });
 }
@@ -9745,20 +10111,29 @@ ipcMain.handle('get-app-start-time', () => {
 const UPDATE_REPO = '2014-y/NexoraAgent';
 const UPDATE_RELEASES_PAGE = `https://github.com/${UPDATE_REPO}/releases`;
 const UPDATE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const TRUSTED_UPDATE_HOSTS = new Set([
+    'api.github.com', 'github.com', 'www.github.com',
+    'objects.githubusercontent.com', 'release-assets.githubusercontent.com',
+    'github-releases.githubusercontent.com'
+]);
+let pendingUpdateDownload = null;
+let verifiedDownloadedUpdate = null;
+
+function isTrustedUpdateUrl(url) {
+    try {
+        const parsed = new URL(String(url || ''));
+        return parsed.protocol === 'https:' && TRUSTED_UPDATE_HOSTS.has(parsed.hostname.toLowerCase());
+    } catch (_) {
+        return false;
+    }
+}
 
 function withGithubMirrors(url) {
-    // 国内常见 GitHub 加速前缀；直连放首位，失败后再依次尝试镜像
-    return [
-        url,
-        `https://ghproxy.net/${url}`,
-        `https://mirror.ghproxy.com/${url}`,
-        `https://gh.ddlc.top/${url}`
-    ];
+    return [url];
 }
 
 function httpsRequest(urlStr, { method = 'GET', headers = {}, timeout = 10000, maxRedirects = 5 } = {}) {
     const https = require('https');
-    const http = require('http');
     const { URL } = require('url');
 
     return new Promise((resolve, reject) => {
@@ -9768,12 +10143,12 @@ function httpsRequest(urlStr, { method = 'GET', headers = {}, timeout = 10000, m
             let parsed;
             try { parsed = new URL(currentUrl); }
             catch (e) { return reject(e); }
+            if (!isTrustedUpdateUrl(parsed.href)) return reject(new Error('更新源不受信任'));
 
-            const lib = parsed.protocol === 'http:' ? http : https;
-            const req = lib.request({
+            const req = https.request({
                 protocol: parsed.protocol,
                 hostname: parsed.hostname,
-                port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+                port: parsed.port || 443,
                 path: parsed.pathname + parsed.search,
                 method,
                 headers: { 'User-Agent': UPDATE_UA, ...headers },
@@ -9788,7 +10163,8 @@ function httpsRequest(urlStr, { method = 'GET', headers = {}, timeout = 10000, m
                 if (status >= 300 && status < 400 && location && redirects < maxRedirects) {
                     redirects++;
                     res.resume();
-                    const nextUrl = location.startsWith('http') ? location : `${parsed.protocol}//${parsed.host}${location}`;
+                    const nextUrl = new URL(location, parsed).href;
+                    if (!isTrustedUpdateUrl(nextUrl)) return reject(new Error('更新重定向目标不受信任'));
                     return doRequest(nextUrl);
                 }
 
@@ -9944,6 +10320,8 @@ async function fetchLatestReleaseData() {
 // 1. 检查更新
 ipcMain.handle('check-update', async (event, isManual) => {
     const currentVersion = app.getVersion();
+    pendingUpdateDownload = null;
+    verifiedDownloadedUpdate = null;
 
     try {
         const result = await fetchLatestReleaseData();
@@ -9955,6 +10333,7 @@ ipcMain.handle('check-update', async (event, isManual) => {
         let downloadUrl = '';
         let fileName = '';
         let releaseNotes = '';
+        let digest = '';
 
         if (data) {
             releaseNotes = data.body || '';
@@ -9963,6 +10342,7 @@ ipcMain.handle('check-update', async (event, isManual) => {
                 if (exeAsset) {
                     downloadUrl = exeAsset.browser_download_url;
                     fileName = exeAsset.name;
+                    digest = typeof exeAsset.digest === 'string' ? exeAsset.digest : '';
                 }
             }
             if (!downloadUrl) downloadUrl = data.html_url || UPDATE_RELEASES_PAGE;
@@ -9971,6 +10351,10 @@ ipcMain.handle('check-update', async (event, isManual) => {
             fileName = `Nexora Agent.Setup.${latestVersion}.exe`;
             const tag = redirectTag || `v${latestVersion}`;
             downloadUrl = `https://github.com/${UPDATE_REPO}/releases/download/${tag}/${fileName}`;
+        }
+
+        if (hasUpdate && downloadUrl && /\.exe($|\?)/i.test(downloadUrl) && isTrustedUpdateUrl(downloadUrl)) {
+            pendingUpdateDownload = { downloadUrl, fileName, digest };
         }
 
         return {
@@ -10006,10 +10390,14 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
     const fs = require('fs');
     const path = require('path');
     const https = require('https');
-    const http = require('http');
     const { URL } = require('url');
+    const crypto = require('crypto');
 
-    if (!downloadUrl) return { success: false, message: '无效的下载链接' };
+    if (!pendingUpdateDownload || downloadUrl !== pendingUpdateDownload.downloadUrl) {
+        return { success: false, message: '更新链接未经过本次官方检查，已拒绝下载' };
+    }
+    downloadUrl = pendingUpdateDownload.downloadUrl;
+    fileName = pendingUpdateDownload.fileName;
     // Releases 页面不是安装包，交给前端打开浏览器
     if (!/\.exe($|\?)/i.test(downloadUrl) && !/\/releases\/download\//i.test(downloadUrl)) {
         return { success: false, message: '当前链接不是可下载的安装包，请前往 Releases 页面手动下载' };
@@ -10018,24 +10406,14 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
     // 否则被入侵的渲染进程可传入 https://evil.com/x.exe，主进程下载后经 install-update 直接执行 → RCE。
     // 下面的国内镜像代理仅在基址为 github.com 时才由本进程拼接，属可信来源。
     try {
-        const host = new URL(downloadUrl).hostname.toLowerCase();
-        const ALLOWED_UPDATE_HOSTS = ['github.com', 'www.github.com', 'objects.githubusercontent.com', 'github-releases.githubusercontent.com', 'raw.githubusercontent.com', 'codeload.github.com'];
-        const allowed = ALLOWED_UPDATE_HOSTS.includes(host) || host.endsWith('.githubusercontent.com');
-        if (!allowed) {
+        if (!isTrustedUpdateUrl(downloadUrl)) {
             return { success: false, message: '下载源不受信任，已拒绝（仅允许 GitHub 官方发布源）' };
         }
     } catch (e) {
         return { success: false, message: '无效的下载链接' };
     }
 
-    const candidateUrls = [];
-    const pushUnique = (u) => { if (u && !candidateUrls.includes(u)) candidateUrls.push(u); };
-    if (downloadUrl.startsWith('https://github.com')) {
-        pushUnique('https://ghproxy.net/' + downloadUrl);
-        pushUnique('https://mirror.ghproxy.com/' + downloadUrl);
-        pushUnique('https://gh.ddlc.top/' + downloadUrl);
-    }
-    pushUnique(downloadUrl);
+    const candidateUrls = [downloadUrl];
 
     const tempDir = app.getPath('temp');
     // 净化渲染层传入的文件名：只取 basename、白名单字符、强制 .exe，防目录穿越写到 temp 之外
@@ -10048,6 +10426,9 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
         let totalBytes = 0;
         let settled = false;
         let redirectsLeft = 8;
+        const hash = crypto.createHash('sha256');
+        const expectedDigest = String(pendingUpdateDownload.digest || '').replace(/^sha256:/i, '').toLowerCase();
+        const maxDownloadBytes = 1024 * 1024 * 1024;
         const fileStream = fs.createWriteStream(savePath);
 
         const fail = (msg) => {
@@ -10060,20 +10441,24 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
 
         const succeed = () => {
             if (settled) return;
-            settled = true;
-            fileStream.end();
-            resolve({ success: true, savePath });
+            const actualDigest = hash.digest('hex').toLowerCase();
+            if (expectedDigest && actualDigest !== expectedDigest) return fail('安装包 SHA-256 校验失败');
+            fileStream.end(() => {
+                if (settled) return;
+                settled = true;
+                resolve({ success: true, savePath, sha256: actualDigest, digestVerified: !!expectedDigest });
+            });
         };
 
         const streamDownload = (currentUrl) => {
             let parsed;
             try { parsed = new URL(currentUrl); }
             catch (e) { return fail(e.message); }
-            const lib = parsed.protocol === 'http:' ? http : https;
-            const req = lib.get({
+            if (!isTrustedUpdateUrl(parsed.href)) return fail('更新源不受信任');
+            const req = https.get({
                 protocol: parsed.protocol,
                 hostname: parsed.hostname,
-                port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+                port: parsed.port || 443,
                 path: parsed.pathname + parsed.search,
                 headers: { 'User-Agent': 'NexoraAgent-Updater' },
                 timeout: 30000,
@@ -10083,8 +10468,8 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
             }, (res) => {
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft-- > 0) {
                     res.resume();
-                    let next = res.headers.location;
-                    if (!next.startsWith('http')) next = `${parsed.protocol}//${parsed.host}${next}`;
+                    const next = new URL(res.headers.location, parsed).href;
+                    if (!isTrustedUpdateUrl(next)) return fail('更新重定向目标不受信任');
                     return streamDownload(next);
                 }
                 if (res.statusCode !== 200) {
@@ -10092,8 +10477,17 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
                     return fail(`下载失败，状态码: ${res.statusCode}`);
                 }
                 totalBytes = parseInt(res.headers['content-length'], 10) || 0;
+                if (totalBytes > maxDownloadBytes) {
+                    res.resume();
+                    return fail('安装包超过 1GB 安全上限');
+                }
                 res.on('data', (chunk) => {
                     receivedBytes += chunk.length;
+                    if (receivedBytes > maxDownloadBytes) {
+                        res.destroy();
+                        return fail('安装包超过 1GB 安全上限');
+                    }
+                    hash.update(chunk);
                     fileStream.write(chunk);
                     if (totalBytes > 0 && mainWindow && !mainWindow.isDestroyed()) {
                         const progress = Math.round((receivedBytes / totalBytes) * 100);
@@ -10119,7 +10513,13 @@ ipcMain.handle('start-download-update', async (event, { downloadUrl, fileName })
             if (fs.existsSync(savePath)) {
                 try { fs.unlinkSync(savePath); } catch (e) {}
             }
-            return await downloadOnce(url);
+            const result = await downloadOnce(url);
+            verifiedDownloadedUpdate = {
+                savePath: path.resolve(result.savePath),
+                sha256: result.sha256,
+                digestVerified: result.digestVerified === true
+            };
+            return result;
         } catch (e) {
             lastError = e;
             console.error('[UpdateDownload] 通道失败:', url, e.message);
@@ -10143,24 +10543,39 @@ ipcMain.handle('install-update', async (event, savePath) => {
     if (!fs.existsSync(resolved)) {
         return { success: false, message: '未找到安装包文件' };
     }
-    // 尽力校验 Authenticode 签名：若安装包「已签名但签名无效（HashMismatch/被篡改）」则拒绝执行，
-    // 可挡下经中间人替换的已签名安装包。未签名（NotSigned）不阻断，避免误伤尚未配置签名证书的构建。
+    if (!verifiedDownloadedUpdate || verifiedDownloadedUpdate.savePath !== resolved) {
+        return { success: false, message: '安装包不是由本次受信任更新流程下载，已拒绝执行' };
+    }
+    // Accept either our expected Authenticode publisher or an unsigned asset
+    // whose SHA-256 digest was supplied by the checked GitHub release and
+    // matched during download. Invalid signatures are never accepted.
     try {
-        const sigStatus = await new Promise((resolve) => {
+        const signature = await new Promise((resolve) => {
             const ps = require('child_process').spawn('powershell.exe', [
                 '-NoProfile', '-NonInteractive', '-Command',
-                `(Get-AuthenticodeSignature -LiteralPath ${JSON.stringify(resolved)}).Status.ToString()`
+                '$s=Get-AuthenticodeSignature -LiteralPath $args[0]; [pscustomobject]@{Status=$s.Status.ToString();Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{\'\'}} | ConvertTo-Json -Compress',
+                resolved
             ], { windowsHide: true });
             let out = '';
             ps.stdout.on('data', (d) => { out += d.toString(); });
             ps.on('error', () => resolve(null));
-            ps.on('close', () => resolve(out.trim()));
+            ps.on('close', () => {
+                try { resolve(JSON.parse(out.trim())); } catch (_) { resolve(null); }
+            });
             setTimeout(() => { try { ps.kill(); } catch (e) {} resolve(null); }, 8000);
         });
-        if (sigStatus === 'HashMismatch' || sigStatus === 'NotTrusted') {
-            return { success: false, message: '安装包签名校验失败（可能已被篡改），已拒绝执行' };
+        const validPublisher = !!signature && signature.Status === 'Valid' && /(?:^|,)\s*CN=Nexora Agent(?:,|$)/i.test(String(signature.Subject || ''));
+        const verifiedUnsignedAsset = !!signature && signature.Status === 'NotSigned' && verifiedDownloadedUpdate.digestVerified === true;
+        if (!validPublisher && !verifiedUnsignedAsset) {
+            try { fs.unlinkSync(resolved); } catch (_) {}
+            verifiedDownloadedUpdate = null;
+            return { success: false, message: '安装包既无有效的 Nexora Agent 发布者签名，也无官方 SHA-256 校验，已拒绝执行' };
         }
-    } catch (e) { /* 校验本身出错不阻断正常更新 */ }
+    } catch (e) {
+        try { fs.unlinkSync(resolved); } catch (_) {}
+        verifiedDownloadedUpdate = null;
+        return { success: false, message: '安装包签名校验失败，已拒绝执行' };
+    }
     // 使用 Electron shell 拉起安装程序
     try {
         await shell.openPath(resolved);
@@ -10173,7 +10588,7 @@ ipcMain.handle('install-update', async (event, savePath) => {
 });
 
 // 4. 内置Nexora Agent核心包更新（openclaw npm 包热更新）
-ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
+async function legacyUpdateOpenclawPackageDisabled(event, { targetVersion }) {
     // 开启全兼容热更新支持：即便在无任何开发环境的电脑上打包运行，也允许通过沙箱进行 OpenClaw 包升级
 
     const { spawn } = require('child_process');
@@ -10450,6 +10865,476 @@ ipcMain.handle('update-openclaw-package', async (event, { targetVersion }) => {
             message: `更新失败: ${err.message}` + (rolledBack ? '（已自动回滚到旧版并重启）' : '')
         };
     }
+}
+
+// ─── OpenClaw 正式稳定版维护：官方 latest、事务式替换、启动健康检查、失败回滚 ───
+let openclawStableUpdateInFlight = null;
+
+function readJsonFileSafe(filePath, fallback = null) {
+    try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) { return fallback; }
+}
+
+function readInstalledOpenclawVersion(runtimeRoot = resolveAppFsRoot()) {
+    const pkg = readJsonFileSafe(path.join(runtimeRoot, 'node_modules', 'openclaw', 'package.json'), {});
+    return normalizeOpenClawVersion(pkg && pkg.version);
+}
+
+function parseNpmJson(stdout, label) {
+    const raw = String(stdout || '').trim();
+    if (!raw) throw new Error(`${label || 'npm'} 返回空数据`);
+    try { return JSON.parse(raw); } catch (_) {
+        throw new Error(`${label || 'npm'} 返回的数据不是有效 JSON`);
+    }
+}
+
+async function queryOpenclawStableRelease(requestedVersion = '') {
+    const runtimeRoot = resolveAppFsRoot();
+    const currentVersion = readInstalledOpenclawVersion(runtimeRoot);
+    const common = [
+        `--registry=${OFFICIAL_NPM_REGISTRY}`,
+        '--fetch-retries=2',
+        '--fetch-retry-mintimeout=1000',
+        '--fetch-timeout=20000'
+    ];
+    const tagsOut = await runNpmUpdateCommand(
+        ['view', 'openclaw', 'dist-tags', '--json', ...common],
+        { cwd: runtimeRoot, timeout: 45000 }
+    );
+    const policy = resolveStableTarget(parseNpmJson(tagsOut, 'npm dist-tags'), currentVersion, requestedVersion);
+    const target = policy.latestVersion;
+    const metaOut = await runNpmUpdateCommand(
+        ['view', `openclaw@${target}`, 'version', 'dist.integrity', 'engines.node', '--json', ...common],
+        { cwd: runtimeRoot, timeout: 45000 }
+    );
+    const meta = parseNpmJson(metaOut, 'npm release metadata');
+    const publishedVersion = normalizeOpenClawVersion(meta.version);
+    if (publishedVersion !== target || !isStableOpenClawVersion(publishedVersion)) {
+        throw new Error(`官方元数据版本不一致: latest=${target}, package=${publishedVersion || '(empty)'}`);
+    }
+    const integrity = normalizeIntegrity(meta['dist.integrity']);
+    return {
+        ...policy,
+        registry: OFFICIAL_NPM_REGISTRY,
+        integrity,
+        integrityLabel: integrity.slice(0, integrity.indexOf('-') + 1) + integrity.slice(-12),
+        nodeRange: String(meta['engines.node'] || '').trim(),
+        checkedAt: new Date().toISOString()
+    };
+}
+
+ipcMain.handle('check-openclaw-stable-update', async () => {
+    try {
+        await withStartupTimeout(waitForGatewayRuntimeReady(), 120000, '准备 OpenClaw 更新运行时');
+        const result = await queryOpenclawStableRelease();
+        return { success: true, ...result, integrity: undefined };
+    } catch (error) {
+        appendMainDiagnostic('openclaw-stable-update-check-failed', error);
+        return { success: false, message: `稳定版检查失败: ${error.message || error}` };
+    }
+});
+
+function collectInstalledRuntimeVersions(runtimeRoot, appPackage) {
+    const names = new Set([
+        ...Object.keys((appPackage && appPackage.dependencies) || {}),
+        ...Object.keys((appPackage && appPackage.optionalDependencies) || {})
+    ]);
+    const versions = {};
+    for (const name of names) {
+        const pkgPath = path.join(runtimeRoot, 'node_modules', ...name.split('/'), 'package.json');
+        const pkg = readJsonFileSafe(pkgPath, null);
+        if (pkg && pkg.version) versions[name] = String(pkg.version);
+    }
+    return versions;
+}
+
+function writeJsonAtomic(filePath, value) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const temp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    try { fs.renameSync(temp, filePath); } catch (error) {
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+        fs.renameSync(temp, filePath);
+    }
+}
+
+function pathIsInside(parent, candidate) {
+    const root = path.resolve(parent) + path.sep;
+    return path.resolve(candidate).startsWith(root);
+}
+
+function removeManagedUpdatePath(runtimeRoot, target) {
+    const resolved = path.resolve(target);
+    const base = path.basename(resolved);
+    const allowed = base.startsWith('.nexora-openclaw-stage-')
+        || base.startsWith('.openclaw.rollback-')
+        || base.startsWith('.openclaw.rollback-state-')
+        || base.startsWith('.node-sandbox.rollback-');
+    if (!allowed || !pathIsInside(runtimeRoot, resolved)) {
+        throw new Error(`拒绝清理非更新目录: ${resolved}`);
+    }
+    if (fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true });
+}
+
+function pruneOldOpenclawRollbackCopies(runtimeRoot, keepPaths = []) {
+    const keep = new Set(keepPaths.filter(Boolean).map((p) => path.resolve(p).toLowerCase()));
+    const entries = fs.readdirSync(runtimeRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && (
+            entry.name.startsWith('.openclaw.rollback-')
+            || entry.name.startsWith('.openclaw.rollback-state-')
+            || entry.name.startsWith('.node-sandbox.rollback-')
+            || entry.name.startsWith('.nexora-openclaw-stage-')
+        ))
+        .map((entry) => path.join(runtimeRoot, entry.name));
+    for (const entry of entries) {
+        if (keep.has(path.resolve(entry).toLowerCase())) continue;
+        try { removeManagedUpdatePath(runtimeRoot, entry); } catch (_) {}
+    }
+}
+
+function assertOpenclawUpdateDiskSpace(runtimeRoot) {
+    if (typeof fs.statfsSync !== 'function') return;
+    const stat = fs.statfsSync(runtimeRoot);
+    const free = Number(stat.bavail) * Number(stat.bsize);
+    const minimum = 900 * 1024 * 1024;
+    if (Number.isFinite(free) && free < minimum) {
+        throw new Error(`磁盘空间不足：稳定升级至少需要 900 MB 临时空间，当前约 ${Math.floor(free / 1048576)} MB`);
+    }
+}
+
+function createOpenclawStateSnapshot(runtimeRoot, targetVersion) {
+    const stamp = Date.now();
+    const snapshotDir = path.join(runtimeRoot, `.openclaw.rollback-state-${stamp}`);
+    fs.mkdirSync(snapshotDir, { recursive: true });
+    const stateDb = path.join(CONFIG_DIR, 'state', 'openclaw.sqlite');
+    const candidates = [
+        { name: 'openclaw.json', source: CONFIG_PATH },
+        { name: 'openclaw.sqlite', source: stateDb },
+        { name: 'openclaw.sqlite-wal', source: `${stateDb}-wal` },
+        { name: 'openclaw.sqlite-shm', source: `${stateDb}-shm` }
+    ];
+    const files = [];
+    for (const item of candidates) {
+        const existed = fs.existsSync(item.source);
+        const backup = path.join(snapshotDir, item.name);
+        if (existed) fs.copyFileSync(item.source, backup);
+        files.push({ ...item, backup, existed });
+    }
+    const manifest = {
+        targetVersion,
+        createdAt: new Date().toISOString(),
+        files
+    };
+    writeJsonAtomic(path.join(snapshotDir, 'snapshot.json'), manifest);
+    return { snapshotDir, manifest };
+}
+
+function restoreOpenclawStateSnapshot(snapshot) {
+    if (!snapshot || !snapshot.manifest) return;
+    for (const item of snapshot.manifest.files || []) {
+        if (item.existed && fs.existsSync(item.backup)) {
+            fs.mkdirSync(path.dirname(item.source), { recursive: true });
+            fs.copyFileSync(item.backup, item.source);
+        } else if (!item.existed && fs.existsSync(item.source)) {
+            fs.rmSync(item.source, { force: true });
+        }
+    }
+    const safeVersion = String(snapshot.manifest.targetVersion || '').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const migrationMarker = path.join(CONFIG_DIR, `.nexora-openclaw-migrated-${safeVersion}.json`);
+    try { if (fs.existsSync(migrationMarker)) fs.unlinkSync(migrationMarker); } catch (_) {}
+}
+
+function waitForGatewayControlUiReady(port = 18789, timeoutMs = 120000) {
+    const http = require('http');
+    const startedAt = Date.now();
+    return new Promise((resolve, reject) => {
+        const probe = () => {
+            if (Date.now() - startedAt >= timeoutMs) {
+                reject(new Error(`Gateway 在 ${Math.ceil(timeoutMs / 1000)} 秒内未通过 HTTP 健康检查`));
+                return;
+            }
+            let settled = false;
+            const retry = () => {
+                if (settled) return;
+                settled = true;
+                setTimeout(probe, 600);
+            };
+            try {
+                const req = http.get({
+                    hostname: '127.0.0.1',
+                    port,
+                    path: '/acp/',
+                    timeout: 1000,
+                    headers: { Accept: 'text/html,*/*' }
+                }, (res) => {
+                    if (settled) return;
+                    settled = true;
+                    try { res.resume(); } catch (_) {}
+                    resolve({ statusCode: res.statusCode || 0, elapsedMs: Date.now() - startedAt });
+                });
+                req.once('error', retry);
+                req.once('timeout', () => {
+                    try { req.destroy(); } catch (_) {}
+                    retry();
+                });
+            } catch (_) { retry(); }
+        };
+        probe();
+    });
+}
+
+async function performOpenclawStableUpdate(options = {}) {
+    await withStartupTimeout(waitForGatewayRuntimeReady(), 120000, '准备 OpenClaw 更新运行时');
+    const runtimeRoot = resolveAppFsRoot();
+    const liveModules = path.join(runtimeRoot, 'node_modules');
+    const stamp = Date.now();
+    const stageDir = path.join(runtimeRoot, `.nexora-openclaw-stage-${stamp}`);
+    const stageModules = path.join(stageDir, 'node_modules');
+    const rollbackModules = path.join(runtimeRoot, `.openclaw.rollback-${stamp}`);
+    const rollbackSandbox = path.join(runtimeRoot, `.node-sandbox.rollback-${stamp}`);
+    const runtimePackagePath = path.join(runtimeRoot, 'package.json');
+    const runtimeLockPath = path.join(runtimeRoot, 'package-lock.json');
+    let stateSnapshot = null;
+    let modulesSwapped = false;
+    let sandboxBackedUp = false;
+    let gatewayStopped = false;
+    const gatewayWasRunning = !!gatewayProcess;
+    const previousRuntimePackage = fs.existsSync(runtimePackagePath) ? fs.readFileSync(runtimePackagePath) : null;
+    const previousRuntimeLock = fs.existsSync(runtimeLockPath) ? fs.readFileSync(runtimeLockPath) : null;
+    const log = (message) => {
+        const msg = String(message || '').trim();
+        if (!msg) return;
+        console.log(`[GatewayUpdate] ${msg}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gateway-update-progress', { message: msg });
+        }
+    };
+
+    try {
+        log('正在从 npm 官方源查询 latest 正式稳定版...');
+        const release = await queryOpenclawStableRelease(options.targetVersion || '');
+        log(`当前版本: openclaw@${release.currentVersion || '未知'} | 正式稳定版: openclaw@${release.latestVersion}`);
+        log(`官方完整性摘要已确认: ${release.integrityLabel}`);
+        if (!release.requestedMatched) {
+            log(`已忽略页面传入的 v${release.requestedVersion}，统一采用官方 latest 稳定版 v${release.latestVersion}`);
+        }
+        if (!release.hasUpdate) {
+            return {
+                success: true,
+                alreadyLatest: true,
+                installedVersion: release.currentVersion,
+                latestVersion: release.latestVersion,
+                restarted: gatewayWasRunning,
+                message: `OpenClaw 已是最新正式稳定版 v${release.currentVersion}`
+            };
+        }
+
+        assertOpenclawUpdateDiskSpace(runtimeRoot);
+        pruneOldOpenclawRollbackCopies(runtimeRoot);
+        if (!fs.existsSync(liveModules)) throw new Error('当前 Gateway 运行时缺少 node_modules，无法执行安全升级');
+
+        let nodeUpgrade = null;
+        if (release.nodeRange) {
+            const nodeExe = getAvailableNodePath();
+            let currentNode = '';
+            if (nodeExe) {
+                try {
+                    currentNode = require('child_process').execFileSync(nodeExe, ['-v'], {
+                        encoding: 'utf8', timeout: 10000, windowsHide: true
+                    }).trim().replace(/^v/, '');
+                } catch (_) {}
+            }
+            log(`当前 Node: ${currentNode ? 'v' + currentNode : '未知'} | 新版要求: ${release.nodeRange}`);
+            if (!currentNode || !satisfiesNodeRange(currentNode, release.nodeRange)) {
+                const currentMajor = currentNode ? parseInt(currentNode.split('.')[0], 10) : 0;
+                const targetNode = await resolveBestNodeVersion(release.nodeRange, currentMajor);
+                if (!targetNode) throw new Error(`找不到满足 ${release.nodeRange} 的稳定 Node 运行时，已取消升级`);
+                nodeUpgrade = targetNode;
+                log(`将同步升级内置 Node 到 v${targetNode}`);
+            }
+        }
+
+        log('正在创建独立候选运行时（当前服务保持运行）...');
+        fs.mkdirSync(stageDir, { recursive: true });
+        const appPackage = readJsonFileSafe(path.join(__dirname, 'package.json'), {});
+        const installedVersions = collectInstalledRuntimeVersions(runtimeRoot, appPackage);
+        const runtimeManifest = buildGatewayRuntimeManifest(appPackage, installedVersions);
+        runtimeManifest.dependencies.openclaw = release.latestVersion;
+        writeJsonAtomic(path.join(stageDir, 'package.json'), runtimeManifest);
+        await fs.promises.cp(liveModules, stageModules, {
+            recursive: true,
+            force: true,
+            errorOnExist: false,
+            dereference: false
+        });
+
+        log(`正在候选环境安装 openclaw@${release.latestVersion}...`);
+        await runNpmUpdateCommand([
+            'install', `openclaw@${release.latestVersion}`,
+            '--save-exact', '--omit=dev', '--install-strategy=shallow',
+            '--no-audit', '--fund=false',
+            `--registry=${OFFICIAL_NPM_REGISTRY}`,
+            '--fetch-retries=2', '--fetch-timeout=30000'
+        ], {
+            cwd: stageDir,
+            timeout: 300000,
+            onStdout: (text) => { const line = String(text || '').trim(); if (line) log(line); },
+            onStderr: (text) => {
+                const line = String(text || '').trim();
+                if (line && !/^npm warn config global-style/i.test(line)) log(line);
+            }
+        });
+
+        const stagedPackage = readJsonFileSafe(path.join(stageModules, 'openclaw', 'package.json'), {});
+        const stagedVersion = normalizeOpenClawVersion(stagedPackage.version);
+        const stagedEntry = path.join(stageModules, 'openclaw', 'dist', 'index.js');
+        if (stagedVersion !== release.latestVersion || !fs.existsSync(stagedEntry)) {
+            throw new Error(`候选核心校验失败: expected=${release.latestVersion}, actual=${stagedVersion || 'missing'}`);
+        }
+        const stagedLock = readJsonFileSafe(path.join(stageDir, 'package-lock.json'), {});
+        const lockedOpenclaw = stagedLock && stagedLock.packages && stagedLock.packages['node_modules/openclaw'];
+        const lockedIntegrity = normalizeIntegrity(lockedOpenclaw && lockedOpenclaw.integrity);
+        if (lockedIntegrity !== release.integrity) {
+            throw new Error('候选核心完整性摘要与 npm 官方元数据不一致');
+        }
+        log('候选核心版本与完整性校验通过');
+
+        log('正在停止 Gateway，准备原子切换...');
+        stopGatewayProcess();
+        gatewayProcess = null;
+        gatewayStopped = true;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        if (nodeUpgrade) {
+            const sandboxDir = path.join(runtimeRoot, '.node-sandbox');
+            if (!fs.existsSync(sandboxDir)) throw new Error('内置 Node 目录不存在，无法安全升级运行时');
+            await fs.promises.cp(sandboxDir, rollbackSandbox, { recursive: true, force: true, dereference: false });
+            sandboxBackedUp = true;
+            log(`正在安装兼容的 Node v${nodeUpgrade}...`);
+            await downloadAndInstallSandboxNode(nodeUpgrade, () => {});
+        }
+
+        const smokeNode = getAvailableNodePath();
+        if (!smokeNode) throw new Error('内置 Node 运行时不可用');
+        require('child_process').execFileSync(
+            smokeNode,
+            ['-e', `require(${JSON.stringify(stagedEntry)}); process.exit(0);`],
+            { timeout: 45000, windowsHide: true, stdio: 'ignore' }
+        );
+        log('候选核心加载测试通过');
+
+        stateSnapshot = createOpenclawStateSnapshot(runtimeRoot, release.latestVersion);
+        log('配置与状态数据库快照已完成');
+
+        fs.renameSync(liveModules, rollbackModules);
+        try {
+            fs.renameSync(stageModules, liveModules);
+            modulesSwapped = true;
+        } catch (swapError) {
+            fs.renameSync(rollbackModules, liveModules);
+            throw swapError;
+        }
+        fs.copyFileSync(path.join(stageDir, 'package.json'), runtimePackagePath);
+        const stagedLockPath = path.join(stageDir, 'package-lock.json');
+        if (fs.existsSync(stagedLockPath)) fs.copyFileSync(stagedLockPath, runtimeLockPath);
+        log('新旧核心已原子切换，旧核心仍保留用于回滚');
+
+        log('正在运行升级迁移并启动 Gateway...');
+        await withGatewayRestartPermit(() => startGatewayProcess({ source: 'update' }));
+        const health = await waitForGatewayControlUiReady(resolveConfiguredGatewayPort(), 150000);
+        log(`HTTP 健康检查通过（${health.statusCode || 'response'}，${health.elapsedMs}ms）`);
+
+        const installedVersion = readInstalledOpenclawVersion(runtimeRoot);
+        if (installedVersion !== release.latestVersion) {
+            throw new Error(`启动后的核心版本不一致: ${installedVersion || 'missing'}`);
+        }
+        log(`OpenClaw v${installedVersion} 正式稳定版升级完成`);
+
+        if (!gatewayWasRunning) {
+            stopGatewayProcess();
+            gatewayProcess = null;
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            log('健康检查完成；已恢复升级前的“服务未启动”状态');
+        }
+
+        try { removeManagedUpdatePath(runtimeRoot, stageDir); } catch (_) {}
+        if (sandboxBackedUp) {
+            try { removeManagedUpdatePath(runtimeRoot, rollbackSandbox); } catch (_) {}
+            sandboxBackedUp = false;
+        }
+        pruneOldOpenclawRollbackCopies(runtimeRoot, [rollbackModules, stateSnapshot && stateSnapshot.snapshotDir]);
+        return {
+            success: true,
+            installedVersion,
+            latestVersion: release.latestVersion,
+            restarted: gatewayWasRunning,
+            validated: true,
+            rollbackProtected: true,
+            message: gatewayWasRunning
+                ? `OpenClaw 已稳定升级到 v${installedVersion}，健康检查通过并已恢复运行。`
+                : `OpenClaw 已稳定升级到 v${installedVersion}，健康检查通过。`
+        };
+    } catch (error) {
+        console.error('[GatewayUpdate] 稳定升级失败:', error);
+        let rolledBack = false;
+        try {
+            if (modulesSwapped) {
+                try { stopGatewayProcess(); } catch (_) {}
+                gatewayProcess = null;
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                if (fs.existsSync(liveModules)) fs.rmSync(liveModules, { recursive: true, force: true });
+                if (fs.existsSync(rollbackModules)) fs.renameSync(rollbackModules, liveModules);
+                restoreOpenclawStateSnapshot(stateSnapshot);
+                if (previousRuntimePackage) fs.writeFileSync(runtimePackagePath, previousRuntimePackage);
+                else if (fs.existsSync(runtimePackagePath)) fs.unlinkSync(runtimePackagePath);
+                if (previousRuntimeLock) fs.writeFileSync(runtimeLockPath, previousRuntimeLock);
+                else if (fs.existsSync(runtimeLockPath)) fs.unlinkSync(runtimeLockPath);
+                rolledBack = true;
+                log('升级未通过健康检查，已恢复旧核心、配置和状态数据库');
+            }
+            if (sandboxBackedUp && fs.existsSync(rollbackSandbox)) {
+                const sandboxDir = path.join(runtimeRoot, '.node-sandbox');
+                if (fs.existsSync(sandboxDir)) fs.rmSync(sandboxDir, { recursive: true, force: true });
+                fs.renameSync(rollbackSandbox, sandboxDir);
+                sandboxBackedUp = false;
+                rolledBack = true;
+                log('已恢复升级前的 Node 运行时');
+            }
+        } catch (rollbackError) {
+            appendMainDiagnostic('openclaw-stable-update-rollback-failed', rollbackError, {
+                originalError: String(error && (error.stack || error.message || error))
+            });
+            log(`自动回滚异常，保留备份等待人工恢复: ${rollbackError.message || rollbackError}`);
+        }
+
+        if ((gatewayWasRunning || gatewayStopped) && !gatewayProcess) {
+            try {
+                await withGatewayRestartPermit(() => startGatewayProcess({ source: 'update' }));
+                await waitForGatewayControlUiReady(resolveConfiguredGatewayPort(), 120000);
+                log(rolledBack ? '旧版 Gateway 已恢复运行' : 'Gateway 已恢复运行');
+            } catch (restartError) {
+                appendMainDiagnostic('openclaw-stable-update-restart-failed', restartError);
+            }
+        }
+        try { if (fs.existsSync(stageDir)) removeManagedUpdatePath(runtimeRoot, stageDir); } catch (_) {}
+        appendMainDiagnostic('openclaw-stable-update-failed', error, { rolledBack });
+        return {
+            success: false,
+            rolledBack,
+            message: `OpenClaw 稳定升级失败: ${error.message || error}${rolledBack ? '（已自动回滚并恢复旧版）' : ''}`
+        };
+    }
+}
+
+ipcMain.handle('update-openclaw-package', async (event, options = {}) => {
+    if (openclawStableUpdateInFlight) {
+        return { success: false, busy: true, message: 'OpenClaw 稳定升级正在进行，请勿重复操作。' };
+    }
+    openclawStableUpdateInFlight = performOpenclawStableUpdate(options);
+    try {
+        return await openclawStableUpdateInFlight;
+    } finally {
+        openclawStableUpdateInFlight = null;
+    }
 });
 
 // 自定义主题背景图 / 本地 MEDIA 预览协议（须在 ready 前声明）
@@ -10567,6 +11452,87 @@ function withStartupTimeout(promise, timeoutMs, label) {
             timer = setTimeout(() => reject(new Error(`${label || '启动步骤'}超时（${ms}ms）`)), ms);
         })
     ]);
+}
+
+/**
+ * OpenClaw can ship SQLite/config migrations that the Gateway intentionally
+ * refuses to run implicitly. Run the official repair once per bundled core
+ * version, against the same isolated home/state that the Gateway will use.
+ */
+async function ensureOpenClawPostUpgradeMigration(params) {
+    const nodeExePath = params && params.nodeExePath;
+    const openclawEntry = params && params.openclawEntry;
+    const stateDir = params && params.stateDir;
+    const env = { ...((params && params.env) || process.env) };
+    if (!nodeExePath || !openclawEntry || !stateDir) {
+        return { migrated: false, skipped: 'missing-runtime-paths' };
+    }
+
+    let version = 'unknown';
+    try {
+        version = JSON.parse(
+            fs.readFileSync(path.join(path.dirname(openclawEntry), '..', 'package.json'), 'utf8')
+        ).version || version;
+    } catch (_) {}
+    const safeVersion = String(version).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const marker = path.join(stateDir, `.nexora-openclaw-migrated-${safeVersion}.json`);
+    if (fs.existsSync(marker)) return { migrated: false, skipped: 'already-migrated', version };
+
+    fs.mkdirSync(stateDir, { recursive: true });
+    const sqlitePath = path.join(stateDir, 'state', 'openclaw.sqlite');
+    if (!fs.existsSync(sqlitePath)) {
+        fs.writeFileSync(marker, JSON.stringify({ version, migratedAt: new Date().toISOString(), reason: 'fresh-state' }));
+        return { migrated: false, skipped: 'fresh-state', version };
+    }
+
+    const backup = `${CONFIG_PATH}.nexora-pre-upgrade-${safeVersion}.bak`;
+    const sqliteBackup = `${sqlitePath}.nexora-pre-upgrade-${safeVersion}.bak`;
+    if (fs.existsSync(CONFIG_PATH) && !fs.existsSync(backup)) fs.copyFileSync(CONFIG_PATH, backup);
+    // The database migration is irreversible; refuse to continue if its
+    // pre-upgrade snapshot cannot be created.
+    if (!fs.existsSync(sqliteBackup)) fs.copyFileSync(sqlitePath, sqliteBackup);
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('gateway-log', `[System] 正在迁移 OpenClaw ${version} 配置与状态数据库（仅首次）...\n`);
+    }
+    delete env.NODE_OPTIONS;
+    delete env.NEXORA_AGENT_PATCH_PATH;
+    const { spawn } = require('child_process');
+    const result = await new Promise((resolve, reject) => {
+        const child = spawn(
+            nodeExePath,
+            [openclawEntry, 'doctor', '--fix', '--non-interactive', '--yes'],
+            { cwd: stateDir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+        );
+        let output = '';
+        const timer = setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch (_) {}
+            reject(new Error(`OpenClaw ${version} migration timed out`));
+        }, 170000);
+        const append = (data) => {
+            output += String(data || '');
+            if (output.length > 200000) output = output.slice(-160000);
+        };
+        child.stdout.on('data', append);
+        child.stderr.on('data', append);
+        child.once('error', (error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+        child.once('exit', (code, signal) => {
+            clearTimeout(timer);
+            resolve({ code, signal, output });
+        });
+    });
+    if (result.code !== 0) {
+        const tail = String(result.output || '').slice(-4000);
+        throw new Error(`OpenClaw ${version} migration failed (code=${result.code}, signal=${result.signal || 'none'}): ${tail}`);
+    }
+    fs.writeFileSync(marker, JSON.stringify({ version, migratedAt: new Date().toISOString() }, null, 2));
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('gateway-log', `[System] OpenClaw ${version} 配置与状态数据库迁移完成。\n`);
+    }
+    return { migrated: true, version, backup, sqliteBackup };
 }
 
 app.whenReady().then(async () => {

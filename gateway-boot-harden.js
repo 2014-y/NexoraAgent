@@ -199,8 +199,15 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
   if (!config || typeof config !== 'object') return { changed: false };
   if (!config.plugins) config.plugins = {};
   if (!config.plugins.entries) config.plugins.entries = {};
-  if (!config.plugins.installs) config.plugins.installs = {};
+  if (!config.plugins.load) config.plugins.load = {};
+  if (!Array.isArray(config.plugins.load.paths)) config.plugins.load.paths = [];
   if (!Array.isArray(config.plugins.allow)) config.plugins.allow = [];
+  // OpenClaw 2026.9 removed plugins.installs/bundledDiscovery from its public
+  // schema. Keep the old records only as a one-shot source for locating a
+  // package, then migrate every usable package to plugins.load.paths.
+  const legacyInstalls = config.plugins.installs && typeof config.plugins.installs === 'object'
+    ? config.plugins.installs
+    : {};
   const runtimeRoot = opts.runtimeRoot || '';
   let changed = false;
 
@@ -215,15 +222,6 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
     if (next.length !== config.plugins.allow.length) {
       config.plugins.allow = next;
       changed = true;
-    }
-  }
-
-  if (config.plugins.installs && typeof config.plugins.installs === 'object') {
-    for (const id of STALE_PLUGIN_IDS) {
-      if (config.plugins.installs[id]) {
-        delete config.plugins.installs[id];
-        changed = true;
-      }
     }
   }
 
@@ -247,19 +245,14 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
     }
   }
 
-  // Explicit plugin allow lists avoid scanning stale ~/.openclaw/npm/projects
-  // entries that shadow the bundled communication packages at startup.
-  if (Array.isArray(config.plugins.allow)
-    && config.plugins.allow.length > 0
-    && !config.plugins.allow.includes('*')
-    && config.plugins.bundledDiscovery !== 'allowlist') {
-    config.plugins.bundledDiscovery = 'allowlist';
+  if (Object.prototype.hasOwnProperty.call(config.plugins, 'bundledDiscovery')) {
+    delete config.plugins.bundledDiscovery;
     changed = true;
   }
 
   for (const id of CHANNEL_PLUGIN_IDS) {
     const bundled = resolveBundledChannelPackageDir(runtimeRoot, id);
-    const installPath = config.plugins.installs[id] && config.plugins.installs[id].installPath;
+    const installPath = legacyInstalls[id] && legacyInstalls[id].installPath;
     const installOk = installPath && exists(path.join(installPath, 'package.json'));
     const present = !!(bundled || installOk);
 
@@ -269,35 +262,21 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
         delete config.plugins.entries[id];
         changed = true;
       }
-      if (config.plugins.installs[id]) {
-        delete config.plugins.installs[id];
-        changed = true;
-      }
       continue;
     }
 
-    // 有包：种 installs + 启用（与本机「会显示启用」一致）
-    const pkgName = CHANNEL_PACKAGE_BY_ID[id];
+    // 有包：OpenClaw 2026.9 使用 load.paths + entries + allow。
     const usePath = bundled || installPath;
-    let ver = '0.0.0';
-    try {
-      ver = JSON.parse(fs.readFileSync(path.join(usePath, 'package.json'), 'utf8')).version || ver;
-    } catch (e) {}
-    if (pkgName && usePath) {
-      const nextInstall = {
-        ...(config.plugins.installs[id] || {}),
-        source: 'npm',
-        spec: `${pkgName}@${ver}`,
-        installPath: usePath,
-        resolvedName: pkgName,
-        resolvedVersion: ver,
-        resolvedSpec: `${pkgName}@${ver}`,
-        version: ver,
-        installedAt: (config.plugins.installs[id] && config.plugins.installs[id].installedAt)
-          || new Date().toISOString()
-      };
-      if (JSON.stringify(config.plugins.installs[id] || {}) !== JSON.stringify(nextInstall)) {
-        config.plugins.installs[id] = nextInstall;
+    // Packages inside the bundled runtime are global OpenClaw plugins and are
+    // discovered automatically. Only a legacy external install needs an
+    // explicit load path; registering bundled packages twice adds cold-start
+    // scans and duplicate-id warnings.
+    if (!bundled) {
+      const resolvedUsePath = path.resolve(usePath);
+      if (!config.plugins.load.paths.some((item) => {
+        try { return path.resolve(item) === resolvedUsePath; } catch (e) { return false; }
+      })) {
+        config.plugins.load.paths.push(usePath);
         changed = true;
       }
     }
@@ -312,6 +291,10 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
       config.plugins.allow.push(id);
       changed = true;
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(config.plugins, 'installs')) {
+    delete config.plugins.installs;
+    changed = true;
   }
   return { changed };
 }

@@ -6,11 +6,13 @@
  * - 幂等：builtin-asr/ 里已有 .onnx + tokens.txt 就跳过。
  * - 源压缩包由 scripts/ensure-asr-release-asset.js 保证存在。
  * - builtin-asr/ 是 gitignore 的构建产物（223MB，不入库）。
- * - 用系统 tar（Win10+ 自带 bsdtar，支持 .tar.bz2），与运行时 voice-runtime 解压方式一致。
+ * - bzip2 由纯 JS 解码，避免部分 Windows tar 额外依赖未安装的 bzip2.exe。
  */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { pipeline } = require('stream/promises');
+const unbzip2 = require('unbzip2-stream');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'release-assets', 'asr-models', 'sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2');
@@ -36,7 +38,7 @@ function hasValidModel(dir) {
   return false;
 }
 
-function main() {
+async function main() {
   if (hasValidModel(DEST)) {
     console.log('[ensure-builtin-asr] ok (reuse): builtin-asr already has model');
     return;
@@ -48,11 +50,20 @@ function main() {
   }
   fs.mkdirSync(DEST, { recursive: true });
   console.log('[ensure-builtin-asr] extracting', path.basename(SRC), '-> builtin-asr/ ...');
-  execFileSync('tar', ['-xjf', SRC, '-C', DEST], { stdio: 'inherit', windowsHide: true });
+  const tempTar = path.join(path.dirname(SRC), `.asr-${process.pid}-${Date.now()}.tar`);
+  try {
+    await pipeline(fs.createReadStream(SRC), unbzip2(), fs.createWriteStream(tempTar));
+    execFileSync('tar', ['-xf', tempTar, '-C', DEST], { stdio: 'inherit', windowsHide: true });
+  } finally {
+    try { fs.rmSync(tempTar, { force: true }); } catch (_) {}
+  }
   if (!hasValidModel(DEST)) {
     throw new Error('[ensure-builtin-asr] extracted but no .onnx + tokens.txt found');
   }
   console.log('[ensure-builtin-asr] done: builtin-asr populated');
 }
 
-main();
+main().catch((error) => {
+  console.error(error.stack || error.message || String(error));
+  process.exitCode = 1;
+});

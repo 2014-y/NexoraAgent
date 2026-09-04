@@ -69,7 +69,8 @@
       "bootstrapMaxChars": 2500,
       "bootstrapTotalMaxChars": 8000,
       "compaction": {
-        "reserveTokensFloor": 8000
+        "mode": "safeguard",
+        "timeoutSeconds": 240
       }
     }
   },
@@ -380,7 +381,7 @@
     "workshop": {
       "approvalPolicy": "pending",
       "autonomous": {
-        "enabled": false
+        "mode": "off"
       }
     },
     "entries": {}
@@ -438,14 +439,15 @@
       }
     },
     "media": {
+      "models": [
+        {
+          "prompt": "请用中文详细描述这张图片的内容，包括场景、物体、文字、颜色等。如果有多个物体，逐个描述。不超过300字。",
+          "provider": "agnes-ai",
+          "model": "agnes-2.0-flash",
+          "capabilities": ["image"]
+        }
+      ],
       "image": {
-        "models": [
-          {
-            "prompt": "请用中文详细描述这张图片的内容，包括场景、物体、文字、颜色等。如果有多个物体，逐个描述。不超过300字。",
-            "provider": "agnes-ai",
-            "model": "agnes-2.0-flash"
-          }
-        ],
         "attachments": {
           "mode": "all"
         },

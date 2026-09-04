@@ -14,6 +14,7 @@ const isWin = process.platform === 'win32';
 const steps = [];
 if (isWin) {
   steps.push('scripts/ensure-asr-release-asset.js');
+  steps.push('scripts/ensure-builtin-asr.js');
   steps.push('scripts/ensure-voice-release-asset.js');
 }
 steps.push('scripts/pack-gateway-runtime.js');

@@ -9,6 +9,48 @@ function escapeHtml(unsafe) {
          .replace(/'/g, '&#039;');
 }
 
+function normalizeModelId(value) {
+    const id = String(value || '').trim();
+    if (!id || id.length > 200) return '';
+    return /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/.test(id) ? id : '';
+}
+
+function sanitizeActivityLogHtml(value) {
+    const template = document.createElement('template');
+    template.innerHTML = String(value || '');
+    const allowedTags = new Set(['SPAN', 'BR']);
+    const allowedStyleProperties = new Set([
+        'color', 'font-weight', 'font-family', 'font-size', 'opacity',
+        'margin-left', 'margin-right', 'white-space'
+    ]);
+    const elements = Array.from(template.content.querySelectorAll('*'));
+    for (const element of elements) {
+        if (!allowedTags.has(element.tagName)) {
+            element.replaceWith(document.createTextNode(element.textContent || ''));
+            continue;
+        }
+        const rawStyle = element.getAttribute('style') || '';
+        for (const attribute of Array.from(element.attributes)) element.removeAttribute(attribute.name);
+        if (element.tagName !== 'SPAN' || !rawStyle) continue;
+        const safeStyle = rawStyle.split(';').map((part) => part.trim()).filter(Boolean).filter((part) => {
+            const separator = part.indexOf(':');
+            if (separator <= 0) return false;
+            const property = part.slice(0, separator).trim().toLowerCase();
+            const styleValue = part.slice(separator + 1).trim();
+            return allowedStyleProperties.has(property)
+                && /^[#(),.%\w\s-]+$/.test(styleValue)
+                && !/(?:url|expression|@import)/i.test(styleValue);
+        }).join('; ');
+        if (safeStyle) element.setAttribute('style', safeStyle);
+    }
+    return template.innerHTML;
+}
+
+function setSanitizedActivityLogHtml(element, value) {
+    if (!element) return;
+    element.innerHTML = sanitizeActivityLogHtml(value);
+}
+
 function safeDebugJson(value, limit = 4000) {
     let text = '';
     try {
@@ -1948,6 +1990,7 @@ async function init() {
     const settingNotifyToggle = document.getElementById('setting-notify-toggle');
     const settingLanguageSelect = document.getElementById('setting-language-select');
     const btnCheckUpdate = document.getElementById('btn-check-update');
+    const btnOpenclawStableUpdate = document.getElementById('btn-openclaw-stable-update');
 
     if (settingAutoGateway) {
         // 以 userData 文件为准（主进程启动也能读到）；并与 localStorage 双向同步；默认关闭
@@ -2158,12 +2201,28 @@ async function init() {
         });
     }
 
+    if (btnOpenclawStableUpdate) {
+        btnOpenclawStableUpdate.addEventListener('click', async () => {
+            btnOpenclawStableUpdate.disabled = true;
+            try { await maintainOpenclawStableVersion(true); } finally {
+                btnOpenclawStableUpdate.disabled = false;
+            }
+        });
+    }
+
     // 延迟 3 秒后台静默检测一次更新（无 Toast，有新版本才弹窗）
     setTimeout(() => {
         if (localStorage.getItem('setting_auto_update') !== 'false') {
             triggerUpdateCheck(false);
         }
     }, 3000);
+
+    // 客户端和 OpenClaw 分开检查；核心只跟 npm 官方 latest 正式版。
+    setTimeout(() => {
+        if (localStorage.getItem('setting_auto_update') !== 'false') {
+            maintainOpenclawStableVersion(false);
+        }
+    }, 9000);
 
     // 初始化 Tab 切换（先应用侧栏菜单自定义顺序，避免监听绑定后 DOM 位置错乱）
     try {
@@ -3307,7 +3366,7 @@ function restorePersistedActivityLogs(options = {}) {
     logs.slice(-150).forEach((lineHtml) => {
         const item = document.createElement('div');
         item.className = 'activity-log-line';
-        item.innerHTML = lineHtml;
+        setSanitizedActivityLogHtml(item, lineHtml);
         frag.appendChild(item);
     });
     streamList.appendChild(frag);
@@ -3430,7 +3489,7 @@ function appendActivityLogLinesInstant(lineHtmlList) {
         }
         const item = document.createElement('div');
         item.className = 'activity-log-line';
-        item.innerHTML = lineHtml;
+        setSanitizedActivityLogHtml(item, lineHtml);
         frag.appendChild(item);
     }
     streamList.appendChild(frag);
@@ -3451,7 +3510,8 @@ function flushDeferredConsoleLogsInstant() {
         const frag = document.createDocumentFragment();
         chunk.forEach((lineHtml) => {
             const s = document.createElement('span');
-            s.innerHTML = lineHtml + (String(lineHtml).endsWith('\n') ? '' : '<br/>');
+            setSanitizedActivityLogHtml(s, lineHtml);
+            if (!String(lineHtml).endsWith('\n')) s.appendChild(document.createElement('br'));
             frag.appendChild(s);
         });
         logTerminal.appendChild(frag);
@@ -3476,7 +3536,7 @@ function processActivityLogQueue() {
 
         const item = document.createElement('div');
         item.className = 'activity-log-line typing';
-        item.innerHTML = lineHtml;
+        setSanitizedActivityLogHtml(item, lineHtml);
         streamList.appendChild(item);
         persistActivityLogLine(lineHtml);
 
@@ -3496,7 +3556,7 @@ function processActivityLogQueue() {
 
         // 打字机渐显动画： clip-path 从左往右逐帧优雅平滑揭开
         const temp = document.createElement('span');
-        temp.innerHTML = lineHtml;
+        setSanitizedActivityLogHtml(temp, lineHtml);
         const textLen = (temp.textContent || '').length;
 
         const stepInterval = backlog > 5 ? 12 : 16;
@@ -3692,7 +3752,7 @@ function formatLogForUser(text) {
     // 大模型配置装载
     if (cleanLine.includes('agent model:')) {
         const match = cleanLine.match(/agent model:\s*([^\s]+)/i);
-        const modelName = match ? match[1] : 'Agnes-2.0';
+        const modelName = escapeHtml(match ? match[1] : 'Agnes-2.0');
         return `[⚙️ 系统核心] 成功接入大模型推理引擎：${modelName}`;
     }
 
@@ -3731,7 +3791,7 @@ function formatLogForUser(text) {
     // 计费凭证与 Token 消耗
     if (cleanLine.includes('[TokenGuard] Saved usage') || cleanLine.includes('Saved usage')) {
         const tokenMatch = cleanLine.match(/usage\s+([^\s]+):\s*([0-9+]+)/i);
-        const modelName = tokenMatch ? tokenMatch[1] : '';
+        const modelName = escapeHtml(tokenMatch ? tokenMatch[1] : '');
         const tokenUsage = tokenMatch ? tokenMatch[2] : '';
         if (tokenUsage) {
             const formattedUsage = formatTokenUsageLog(tokenUsage);
@@ -4277,7 +4337,8 @@ function setupIpcListeners() {
 
             // 写入隐藏的原大终端
             const span = document.createElement('span');
-            span.innerHTML = lineHtml + '<br/>';
+            setSanitizedActivityLogHtml(span, lineHtml);
+            span.appendChild(document.createElement('br'));
             if (logTerminal) {
                 logTerminal.appendChild(span);
                 __gatewayTerminalCharCount += (span.textContent || '').length;
@@ -4598,7 +4659,23 @@ function setupIpcListeners() {
 // 5. 动态大模型提供商与配置数据管理
 let localProviders = {};
 // 内置 key 不再硬编码：由 preload 启动时经 IPC 从主进程取（主进程按 env/config/密钥文件加载）
-const AGNES_BUILT_IN_KEY = (typeof window !== 'undefined' && window.api && window.api.builtinAgnesKey) || '';
+// Built-in credentials never enter the renderer. Requests use a constrained
+// main-process proxy and expose only a Response-like result here.
+async function requestBuiltInAgnes(action, body, extra = {}) {
+    if (!window.api || typeof window.api.requestBuiltInAgnes !== 'function') {
+        throw new Error('内置模型安全通道不可用');
+    }
+    const result = await window.api.requestBuiltInAgnes({ action, body, ...extra });
+    if (!result || !result.success) throw new Error((result && result.error) || '内置模型请求失败');
+    const text = String(result.text || '');
+    return {
+        ok: result.status >= 200 && result.status < 300,
+        status: Number(result.status) || 0,
+        statusText: String(result.statusText || ''),
+        text: async () => text,
+        json: async () => JSON.parse(text || 'null')
+    };
+}
 const KEY_MASK = '••••••••••••••••••••••••••••••••••••••••••••••••';
 
 async function syncMediaGeneratorPrefsToDisk(cfg) {
@@ -4733,19 +4810,7 @@ function applyBuiltInModelPolicy(cfg) {
         agnes.baseUrl = 'https://apihub.agnes-ai.com/v1';
         changed = true;
     }
-    // 仅在拿到有效内置 key 时才写；否则若 IPC 偶发返空会把真实 key 覆盖为空 → 401 静默不回复
-    if (AGNES_BUILT_IN_KEY) {
-        if (agnes.apiKey !== AGNES_BUILT_IN_KEY) {
-            agnes.apiKey = AGNES_BUILT_IN_KEY;
-            changed = true;
-        }
-        if (!cfg.env) cfg.env = {};
-        if (cfg.env.AGNES_AI_API_KEY !== AGNES_BUILT_IN_KEY) {
-            cfg.env.AGNES_AI_API_KEY = AGNES_BUILT_IN_KEY;
-            changed = true;
-        }
-    }
-
+    cfg.__nexoraUseBuiltIn = true;
     return changed;
 }
 
@@ -5156,9 +5221,10 @@ function renderProvidersList() {
         }[c]));
 
     const useBuiltIn = getUseBuiltIn();
+    configData.__nexoraUseBuiltIn = useBuiltIn;
 
     // 内置开启：厂家列表只展示 agnes-ai / ollama；关闭则全部展示
-    let keys = Object.keys(localProviders);
+    let keys = Object.keys(localProviders).filter((key) => /^[a-z0-9_-]{1,64}$/.test(key));
     if (useBuiltIn) {
         keys = BUILTIN_ALLOWED_PROVIDERS.filter((k) => !!localProviders[k]);
     } else {
@@ -5176,6 +5242,7 @@ function renderProvidersList() {
 
     for (const key of keys) {
         const provider = localProviders[key];
+        const safeKey = esc(key);
         const card = document.createElement('div');
         
         // 根据折叠状态设置 class 属性（默认折叠，只有 explicit expanded 才展开）
@@ -5188,19 +5255,19 @@ function renderProvidersList() {
         const displayRemark = getProviderRemark(key, provider);
         const deleteButtonHtml = !isCustom
             ? '' 
-            : `<button type="button" class="btn-delete-provider" data-provider="${key}">❌ ${t('删除此厂家', 'Delete Provider', '刪除此廠商')}</button>`;
+            : `<button type="button" class="btn-delete-provider" data-provider="${safeKey}">❌ ${t('删除此厂家', 'Delete Provider', '刪除此廠商')}</button>`;
 
         // 折叠按钮 HTML
         const foldButtonText = isCollapsed ? t('展开 🔽', 'Expand 🔽', '展開 🔽') : t('收起 🔼', 'Collapse 🔼', '收起 🔼');
-        const foldButtonHtml = `<button type="button" class="btn-fold-provider" data-provider="${key}" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; transition: all 0.2s ease;">${foldButtonText}</button>`;
+        const foldButtonHtml = `<button type="button" class="btn-fold-provider" data-provider="${safeKey}" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; transition: all 0.2s ease;">${foldButtonText}</button>`;
 
         const headerTitleHtml = isCustom
             ? `<div class="provider-title-wrap" style="display:flex; flex-direction:column; gap:4px; min-width:0; flex:1; padding-right:8px;">
                     <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                         <span style="flex-shrink:0;">🔌</span>
-                        <span class="provider-title-text" data-provider="${key}" style="flex:1; min-width:0; font-size:14px; font-weight:700; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayLabel)}</span>
+                        <span class="provider-title-text" data-provider="${safeKey}" style="flex:1; min-width:0; font-size:14px; font-weight:700; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayLabel)}</span>
                     </div>
-                    ${displayRemark ? `<div class="provider-remark-preview" data-provider="${key}" style="font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayRemark)}</div>` : `<div class="provider-remark-preview" data-provider="${key}" style="display:none; font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>`}
+                    ${displayRemark ? `<div class="provider-remark-preview" data-provider="${safeKey}" style="font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayRemark)}</div>` : `<div class="provider-remark-preview" data-provider="${safeKey}" style="display:none; font-size:11px; font-weight:normal; color:var(--text-secondary); margin-left:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>`}
                </div>`
             : `<h3>🔌 ${esc(key)}
                     ${key === 'agnes-ai' ? `<span id="agnes-built-in-tip" style="font-size: 11px; font-weight: normal; color: #b388ff; margin-left: 8px; display: none;">${t('(已启用内置免配置服务通道)', '(Built-in bypass configured)', '(已啟用內置免配置服務通道)')}</span>` : ''}
@@ -5211,17 +5278,17 @@ function renderProvidersList() {
             ? `<div class="form-row" style="margin-bottom: 4px;">
                     <div class="form-field">
                         <label>${t('显示名称', 'Display Name', '顯示名稱')} <span style="font-weight:normal;opacity:.65;">${t('（仅界面，可随便改）', '(UI only)', '（僅界面，可隨便改）')}</span></label>
-                        <input type="text" class="provider-label-input" data-provider="${key}" value="${esc(provider.label || provider.displayName || '')}" placeholder="${esc(t('例如: 公司 Gemini 中转', 'e.g. Company Gemini Relay', '例如: 公司 Gemini 中轉'))}">
+                        <input type="text" class="provider-label-input" data-provider="${safeKey}" value="${esc(provider.label || provider.displayName || '')}" placeholder="${esc(t('例如: 公司 Gemini 中转', 'e.g. Company Gemini Relay', '例如: 公司 Gemini 中轉'))}">
                     </div>
                     <div class="form-field">
                         <label>${t('备注', 'Remark', '備註')} <span style="font-weight:normal;opacity:.65;">${t('（仅界面）', '(UI only)', '（僅界面）')}</span></label>
-                        <input type="text" class="provider-remark-input" data-provider="${key}" value="${esc(provider.remark || '')}" placeholder="${esc(t('例如: 测试账号 / 生产环境', 'e.g. Test account / Production', '例如: 測試帳號 / 生產環境'))}">
+                        <input type="text" class="provider-remark-input" data-provider="${safeKey}" value="${esc(provider.remark || '')}" placeholder="${esc(t('例如: 测试账号 / 生产环境', 'e.g. Test account / Production', '例如: 測試帳號 / 生產環境'))}">
                     </div>
                </div>
                <div class="form-row" style="margin-bottom: 8px;">
                     <div class="form-field">
                         <label>${t('厂商标识', 'Provider ID', '廠商標識')} <span style="font-weight:normal;opacity:.65;">${t('（真正供应商名，网关用）', '(Real provider ID for gateway)', '（真正供應商名，網關用）')}</span></label>
-                        <input type="text" class="provider-id-input" data-provider="${key}" value="${esc(key)}" placeholder="${esc(t('例如: deepseek, openai', 'e.g. deepseek, openai', '例如: deepseek, openai'))}" spellcheck="false" autocomplete="off">
+                        <input type="text" class="provider-id-input" data-provider="${safeKey}" value="${safeKey}" placeholder="${esc(t('例如: deepseek, openai', 'e.g. deepseek, openai', '例如: deepseek, openai'))}" spellcheck="false" autocomplete="off">
                     </div>
                </div>`
             : '';
@@ -5234,23 +5301,23 @@ function renderProvidersList() {
                     ${foldButtonHtml}
                 </div>
             </div>
-            <div class="provider-card-body" id="provider-card-body-${key}">
+            <div class="provider-card-body" id="provider-card-body-${safeKey}">
                 ${customMetaHtml}
                 <div class="form-row">
                     <div class="form-field">
                         <label>${t('Base URL (API 端点)', 'Base URL (API Endpoint)', 'Base URL (API 端點)')}</label>
-                        <input type="text" class="provider-url-input" data-provider="${key}" value="${provider.baseUrl || ''}" placeholder="${t('例如: https://api.openai.com/v1', 'e.g., https://api.openai.com/v1', '例如: https://api.openai.com/v1')}">
+                        <input type="text" class="provider-url-input" data-provider="${safeKey}" value="${esc(provider.baseUrl || '')}" placeholder="${esc(t('例如: https://api.openai.com/v1', 'e.g., https://api.openai.com/v1', '例如: https://api.openai.com/v1'))}">
                     </div>
                     <div class="form-field">
                         <label>${t('API Key (授权密钥)', 'API Key', 'API Key (授權金鑰)')}</label>
                         <div class="password-input-wrapper" style="position: relative; display: flex; align-items: center;">
                             ${key === 'agnes-ai'
-                                ? `<input type="password" class="provider-key-input" data-provider="${key}" value="${useBuiltIn ? KEY_MASK : (provider.apiKey === AGNES_BUILT_IN_KEY ? '' : (provider.apiKey || ''))}" placeholder="${t('API 密钥', 'API Key', 'API 金鑰')}" style="padding-right: 36px; width: 100%; user-select: none;" ${useBuiltIn ? 'readonly oncopy="return false;" oncut="return false;" oncontextmenu="return false;"' : ''}>`
-                                : `<input type="password" class="provider-key-input" data-provider="${key}" value="${provider.apiKey || ''}" placeholder="${t('API 密钥', 'API Key', 'API 金鑰')}" style="padding-right: 36px; width: 100%;">`
+                                ? `<input type="password" class="provider-key-input" data-provider="${safeKey}" value="${esc(useBuiltIn ? KEY_MASK : (provider.apiKey || ''))}" placeholder="${esc(t('API 密钥', 'API Key', 'API 金鑰'))}" style="padding-right: 36px; width: 100%; user-select: none;" ${useBuiltIn ? 'readonly oncopy="return false;" oncut="return false;" oncontextmenu="return false;"' : ''}>`
+                                : `<input type="password" class="provider-key-input" data-provider="${safeKey}" value="${esc(provider.apiKey || '')}" placeholder="${esc(t('API 密钥', 'API Key', 'API 金鑰'))}" style="padding-right: 36px; width: 100%;">`
                             }
                             ${key === 'agnes-ai' && useBuiltIn
                                 ? ''
-                                : `<span class="btn-toggle-visibility" data-provider="${key}" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-size: 16px; user-select: none;">👁️</span>`
+                                : `<span class="btn-toggle-visibility" data-provider="${safeKey}" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-size: 16px; user-select: none;">👁️</span>`
                             }
                         </div>
                     </div>
@@ -5258,15 +5325,15 @@ function renderProvidersList() {
                 <div class="form-row">
                     <div class="form-field half">
                         <label>${t('API 协议类型', 'API Protocol', 'API 協定類型')}</label>
-                        <select class="provider-api-select" data-provider="${key}">
+                        <select class="provider-api-select" data-provider="${safeKey}">
                             ${renderModelApiProtocolOptions(provider.api)}
                         </select>
                     </div>
                 </div>
                 <div style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 12px; margin-top: 12px; margin-bottom: 16px;">
-                    <button type="button" class="btn-primary btn-test-connection" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap;">⚡ ${t('检验连通性', 'Verify Connectivity', '檢驗連通性')}</button>
-                    <button type="button" class="btn-secondary btn-test-key" data-provider="${key}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap; background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); border: none; color: white;">🔑 ${t('检验密钥', 'Verify Key', '檢驗金鑰')}</button>
-                    <span id="test-result-${key}" style="font-size: 12px; font-weight: bold; display: none; white-space: nowrap;"></span>
+                    <button type="button" class="btn-primary btn-test-connection" data-provider="${safeKey}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap;">⚡ ${t('检验连通性', 'Verify Connectivity', '檢驗連通性')}</button>
+                    <button type="button" class="btn-secondary btn-test-key" data-provider="${safeKey}" style="margin-top: 0; padding: 0 16px; font-size: 12px; height: 32px; border-radius: 6px; white-space: nowrap; background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); border: none; color: white;">🔑 ${t('检验密钥', 'Verify Key', '檢驗金鑰')}</button>
+                    <span id="test-result-${safeKey}" style="font-size: 12px; font-weight: bold; display: none; white-space: nowrap;"></span>
                 </div>
                 
                 <div class="provider-models-zone" style="margin-top: 16px;">
@@ -5281,13 +5348,13 @@ function renderProvidersList() {
                         <div style="text-align: center;">${t('操作', 'Actions', '操作')}</div>
                     </div>
 
-                    <div class="model-list-container" id="model-list-container-${key}" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px; margin-bottom: 12px;">
+                    <div class="model-list-container" id="model-list-container-${safeKey}" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px; margin-bottom: 12px;">
                     </div>
 
                     <div style="display: flex; gap: 8px; align-items: center;">
-                        <button type="button" class="btn-primary btn-add-new-model-row" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white;">${t('+ 添加模型', '+ Add Model', '+ 新增模型')}</button>
-                        <button type="button" class="btn-primary btn-fetch-upstream-models" data-provider="${key}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(140, 82, 255, 0.15); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff;">${t('📥 从上游获取', '📥 Fetch Upstream', '📥 從上游獲取')}</button>
-                        <span id="fetch-status-${key}" style="font-size: 11px; font-weight: bold; margin-left: 4px; display: none;"></span>
+                        <button type="button" class="btn-primary btn-add-new-model-row" data-provider="${safeKey}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white;">${t('+ 添加模型', '+ Add Model', '+ 新增模型')}</button>
+                        <button type="button" class="btn-primary btn-fetch-upstream-models" data-provider="${safeKey}" style="padding: 0 12px; font-size: 12px; height: 28px; border-radius: 6px; background: rgba(140, 82, 255, 0.15); border: 1px solid rgba(140, 82, 255,0.3); color: #b388ff;">${t('📥 从上游获取', '📥 Fetch Upstream', '📥 從上游獲取')}</button>
+                        <span id="fetch-status-${safeKey}" style="font-size: 11px; font-weight: bold; margin-left: 4px; display: none;"></span>
                     </div>
                 </div>
             </div>
@@ -5304,15 +5371,15 @@ function renderProvidersList() {
             row.style.cssText = 'display: grid; grid-template-columns: 1fr 156px 40px; gap: 12px; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.01); border-radius: 6px;';
             row.innerHTML = `
                 <div>
-                    <input type="text" class="model-id-edit-input" data-provider="${key}" data-index="${index}" value="${model.id || ''}" placeholder="${t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o')}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <input type="text" class="model-id-edit-input" data-provider="${safeKey}" data-index="${index}" value="${esc(model.id || '')}" placeholder="${esc(t('模型名称, 如: gpt-4o', 'Model ID, e.g., gpt-4o', '模型名稱, 如: gpt-4o'))}" style="width: 100%; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
                 </div>
                 <div style="display: flex; gap: 4px; align-items: center;">
-                    <input type="checkbox" class="model-vision-toggle" data-provider="${key}" data-index="${index}" ${model.supportsImages === true || (Array.isArray(model.input) && model.input.includes('image')) ? 'checked' : ''} title="This model supports image input" style="flex: none;">
-                    <input type="text" class="model-context-edit-input" data-provider="${key}" data-index="${index}" value="${formatContextWindow(model.contextWindow || inferContextWindow(model.id))}" placeholder="${t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M')}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
-                    <button type="button" class="btn-probe-context" data-provider="${key}" data-index="${index}" title="${t('实测真实上下文窗口（发送探测请求）', 'Probe real context window (sends a test request)', '實測真實上下文視窗（發送探測請求）')}" style="background: none; border: 1px solid var(--border-color); border-radius: 6px; color: #aaa; cursor: pointer; font-size: 13px; height: 30px; width: 30px; flex: none; line-height: 1; padding: 0;">📏</button>
+                    <input type="checkbox" class="model-vision-toggle" data-provider="${safeKey}" data-index="${index}" ${model.supportsImages === true || (Array.isArray(model.input) && model.input.includes('image')) ? 'checked' : ''} title="This model supports image input" style="flex: none;">
+                    <input type="text" class="model-context-edit-input" data-provider="${safeKey}" data-index="${index}" value="${esc(formatContextWindow(model.contextWindow || inferContextWindow(model.id)))}" placeholder="${esc(t('例如: 128k 或 1M', 'e.g., 128k or 1M', '例如: 128k 或 1M'))}" style="flex: 1; min-width: 0; height: 30px; font-size: 12px; background: var(--bg-input) !important; border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 0 8px; outline: none;">
+                    <button type="button" class="btn-probe-context" data-provider="${safeKey}" data-index="${index}" title="${esc(t('实测真实上下文窗口（发送探测请求）', 'Probe real context window (sends a test request)', '實測真實上下文視窗（發送探測請求）'))}" style="background: none; border: 1px solid var(--border-color); border-radius: 6px; color: #aaa; cursor: pointer; font-size: 13px; height: 30px; width: 30px; flex: none; line-height: 1; padding: 0;">📏</button>
                 </div>
                 <div style="text-align: center;">
-                    <button type="button" class="btn-delete-model-row" data-provider="${key}" data-index="${index}" style="background: none; border: none; color: #ff5252; cursor: pointer; font-size: 14px; padding: 4px; line-height: 1;">🗑️</button>
+                    <button type="button" class="btn-delete-model-row" data-provider="${safeKey}" data-index="${index}" style="background: none; border: none; color: #ff5252; cursor: pointer; font-size: 14px; padding: 4px; line-height: 1;">🗑️</button>
                 </div>
             `;
             container.appendChild(row);
@@ -5348,14 +5415,7 @@ function toggleProviderInputsEditable() {
             keyInput.removeAttribute('readonly');
             
             const savedKey = (localProviders['agnes-ai'] && localProviders['agnes-ai'].apiKey) || '';
-            if (savedKey === AGNES_BUILT_IN_KEY) {
-                keyInput.value = '';
-                if (localProviders['agnes-ai']) {
-                    localProviders['agnes-ai'].apiKey = '';
-                }
-            } else {
-                keyInput.value = savedKey;
-            }
+            keyInput.value = savedKey;
             
             urlInput.style.opacity = '1';
             keyInput.style.opacity = '1';
@@ -5430,7 +5490,7 @@ function toggleProviderInputsEditable() {
                     storedImgKey = JSON.parse(storedImgConfigStr).apiKey || '';
                 } catch(e){}
             }
-            if (storedImgKey === AGNES_BUILT_IN_KEY || imageKeyInput.value === KEY_MASK) {
+            if (imageKeyInput.value === KEY_MASK) {
                 imageKeyInput.value = '';
             } else {
                 imageKeyInput.value = storedImgKey;
@@ -5464,7 +5524,7 @@ function toggleProviderInputsEditable() {
                     storedVidKey = JSON.parse(storedVidConfigStr).apiKey || '';
                 } catch(e){}
             }
-            if (storedVidKey === AGNES_BUILT_IN_KEY || videoKeyInput.value === KEY_MASK) {
+            if (videoKeyInput.value === KEY_MASK) {
                 videoKeyInput.value = '';
             } else {
                 videoKeyInput.value = storedVidKey;
@@ -5787,8 +5847,19 @@ function bindProviderEvents() {
             const provider = e.target.getAttribute('data-provider');
             const index = parseInt(e.target.getAttribute('data-index'), 10);
             if (localProviders[provider] && localProviders[provider].models[index]) {
-                localProviders[provider].models[index].id = e.target.value.trim();
-                localProviders[provider].models[index].name = e.target.value.trim();
+                const previousId = String(localProviders[provider].models[index].id || '');
+                const nextId = normalizeModelId(e.target.value);
+                if (!nextId && e.target.value.trim()) {
+                    e.target.value = previousId;
+                    showToast(t(
+                        '模型 ID 只能包含字母、数字及 . _ : / @ + -，且不能超过 200 个字符。',
+                        'Model ID may only contain letters, numbers, . _ : / @ + -, up to 200 characters.',
+                        '模型 ID 只能包含字母、數字及 . _ : / @ + -，且不能超過 200 個字元。'
+                    ));
+                    return;
+                }
+                localProviders[provider].models[index].id = nextId;
+                localProviders[provider].models[index].name = nextId;
                 updateModelsDatalist();
                 markConfigDirty();
             }
@@ -5929,7 +6000,7 @@ function bindProviderEvents() {
             const useBuiltIn = getUseBuiltIn();
             if (provider === 'agnes-ai' && useBuiltIn) {
                 baseUrl = 'https://apihub.agnes-ai.com/v1';
-                apiKey = AGNES_BUILT_IN_KEY;
+                apiKey = '';
             }
 
             if (!baseUrl) {
@@ -5952,11 +6023,13 @@ function bindProviderEvents() {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-                const response = await fetch(testUrl, {
-                    method: 'GET',
-                    headers: headers,
-                    signal: controller.signal
-                });
+                const response = provider === 'agnes-ai' && useBuiltIn
+                    ? await requestBuiltInAgnes('models')
+                    : await fetch(testUrl, {
+                        method: 'GET',
+                        headers: headers,
+                        signal: controller.signal
+                    });
                 
                 clearTimeout(timeoutId);
 
@@ -5966,7 +6039,7 @@ function bindProviderEvents() {
                     
                     if (apiType === 'ollama' && data.models) {
                         fetchedModels = data.models.map(m => ({
-                            id: m.name || m.model,
+                            id: normalizeModelId(m.name || m.model),
                             contextWindow: 16384,
                             ...(m.input ? { input: m.input } : {}),
                             ...(m.modalities ? { modalities: m.modalities } : {}),
@@ -5982,7 +6055,7 @@ function bindProviderEvents() {
                                 (m.limits && (m.limits.max_context_tokens || m.limits.context_length))
                             );
                             const model = {
-                                id: m.id,
+                                id: normalizeModelId(m.id),
                                 contextWindow: (Number.isFinite(upstream) && upstream > 0)
                                     ? upstream
                                     : (inferContextWindow(m.id) || 128000)
@@ -5995,6 +6068,8 @@ function bindProviderEvents() {
                             return model;
                         });
                     }
+
+                    fetchedModels = fetchedModels.filter((model) => !!model.id);
 
                     if (fetchedModels.length === 0) {
                         if (statusSpan) {
@@ -7013,13 +7088,12 @@ const handleSaveConfigAction = async () => {
     if (!configData.models) configData.models = {};
     
     const useBuiltIn = getUseBuiltIn();
+    configData.__nexoraUseBuiltIn = useBuiltIn;
     const finalProviders = JSON.parse(JSON.stringify(localProviders));
     
     if (useBuiltIn && finalProviders['agnes-ai']) {
         finalProviders['agnes-ai'].baseUrl = 'https://apihub.agnes-ai.com/v1';
-        // 仅在拿到有效内置 key 时才写；否则 IPC 偶发返空会把真实 key 覆盖为空 → 401 静默不回复
-        // （与加载路径 applyBuiltInModelPolicy 的守卫保持一致）
-        if (AGNES_BUILT_IN_KEY) finalProviders['agnes-ai'].apiKey = AGNES_BUILT_IN_KEY;
+        finalProviders['agnes-ai'].apiKey = '';
     }
     
     configData.models.providers = finalProviders;
@@ -7029,9 +7103,7 @@ const handleSaveConfigAction = async () => {
     for (const key of Object.keys(localProviders)) {
         const envKeyName = key.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase() + '_API_KEY';
         let val = localProviders[key].apiKey;
-        if (key === 'agnes-ai' && useBuiltIn && AGNES_BUILT_IN_KEY) {
-            val = AGNES_BUILT_IN_KEY;
-        }
+        if (key === 'agnes-ai' && useBuiltIn) val = '';
         if (val) {
             configData.env[envKeyName] = val;
         } else {
@@ -7118,12 +7190,12 @@ const handleSaveConfigAction = async () => {
         configData.imageGenerator.apiBase = document.getElementById('image-api-base').value.trim();
         configData.imageGenerator.model = imageVal;
         const imgKey = document.getElementById('image-api-key').value.trim();
-        configData.imageGenerator.apiKey = (imgKey === KEY_MASK || imgKey === AGNES_BUILT_IN_KEY) ? '' : imgKey;
+        configData.imageGenerator.apiKey = imgKey === KEY_MASK ? '' : imgKey;
 
         configData.videoGenerator.apiBase = document.getElementById('video-api-base').value.trim();
         configData.videoGenerator.model = videoVal;
         const vidKey = document.getElementById('video-api-key').value.trim();
-        configData.videoGenerator.apiKey = (vidKey === KEY_MASK || vidKey === AGNES_BUILT_IN_KEY) ? '' : vidKey;
+        configData.videoGenerator.apiKey = vidKey === KEY_MASK ? '' : vidKey;
     }
 
     // 存储在本地 localStorage 供客户端回显使用
@@ -7396,11 +7468,15 @@ async function renderSkillsClawhub(opts = {}) {
                     return;
                 }
                 if (act === 'install') {
-                    const ok = await confirm(skillsT('skills.clawhub.confirm_install', '确认安装该技能？安装后默认禁用，需在「已安装」中手动启用。'));
+                    const ok = await confirm(skillsT('skills.clawhub.confirm_install', '该技能来自第三方，可能包含会读写文件、访问网络或执行命令的代码。仅在你信任其来源并检查内容后安装。\n\n确认承担这些风险并继续安装吗？安装后仍默认禁用。'));
                     if (!ok) return;
                     btn.disabled = true;
                     btn.textContent = skillsT('skills.clawhub.installing', '安装中…');
-                    const r = await window.api.skillsClawhubInstall({ ref: item.ref || item.slug, version: item.version || undefined });
+                    const r = await window.api.skillsClawhubInstall({
+                        ref: item.ref || item.slug,
+                        version: item.version || undefined,
+                        acknowledgedRisk: true
+                    });
                     btn.disabled = false;
                     btn.textContent = skillsT('skills.clawhub.install', '安装（默认禁用）');
                     if (!r || !r.success) {
@@ -8692,7 +8768,10 @@ function setupTabSwitching() {
 
     /** 进入某页后的实质加载（遮罩盖住直到完成） */
     async function hydrateTabContent(tabId) {
-        // 离开加速页时停掉连接轮询(每 1.5s 一次 IPC)，否则切走后仍在后台空跑一整个会话
+        // 连续快速点菜单时，前一个点击排队的异步任务已经失效，直接丢弃，
+        // 避免多个页面的磁盘/网络加载同时挤占主进程造成短暂无响应。
+        if (tabId !== currentTab) return;
+        // 离开加速页时停掉连接轮询，否则切走后仍在后台空跑一整个会话
         if (tabId !== 'acceleration-view') { try { stopConnectionPolling(); } catch (_) {} }
         if (tabId === 'dashboard-view') {
             try { renderUsageCharts(); } catch (err) { console.error(err); }
@@ -8888,7 +8967,8 @@ function setupTabSwitching() {
                     frame.style.visibility = (nextTab === 'data-center-view') ? 'visible' : 'hidden';
                     if (nextTab === 'data-center-view') {
                         try {
-                            frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, '*');
+                            const origin = new URL(frame.src).origin;
+                            frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, origin);
                         } catch (_) {}
                     }
                 }
@@ -11605,26 +11685,6 @@ function createChatAvatarEl(sender) {
 }
 
 function appendChatMessage(sender, content, attachment = null, isHTML = false) {
-    // 隐藏底层系统失败横幅（⚠️ ✉️ Message: ... failed / Exec failed 等），不进会话气泡
-    if (typeof content === 'string') {
-        const raw = content.trim();
-        if (
-            raw.includes('Exec failed') ||
-            raw.includes('⚠️') ||
-            raw.includes('🛠️') ||
-            /Message:\s*.+\s+failed/i.test(raw) ||
-            (/openclaw-screenshot-latest/i.test(raw) && !/MEDIA\s*:/i.test(raw))
-        ) {
-            // 保留前端主动引导文案（选模型等），其余带 ⚠️ 的一律不展示
-            const isUiGuide =
-                raw.includes('请先在右上角选择') ||
-                raw.includes('提供商配置不存在') ||
-                raw.includes('未配置 Base URL') ||
-                raw.includes('Please select') ||
-                raw.includes('请先前往【模型配置】');
-            if (!isUiGuide) return null;
-        }
-    }
     // 🌟 MEDIA:本地路径 / [[image]] → 气泡内直接出图
     if (typeof content === 'string' && (/MEDIA\s*:/i.test(content) || content.includes('[[image]]') || content.includes('[image]'))) {
         const rendered = renderChatMediaHtml(content);
@@ -12373,7 +12433,7 @@ async function handleSendMessage() {
     // 如果启用内置模型，且当前选的是 agnes-ai 厂家
     if (isAgnesBuiltIn) {
         baseUrl = 'https://apihub.agnes-ai.com/v1';
-        apiKey = AGNES_BUILT_IN_KEY;
+        apiKey = '';
     }
 
     if (!baseUrl) {
@@ -12507,12 +12567,14 @@ async function handleSendMessage() {
         chatSendAbortController = controller;
         timeoutId = setTimeout(() => controller.abort(), 120000);
 
-        const response = await fetch(chatUrl, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(reqBody),
-            signal: controller.signal
-        });
+        const response = isAgnesBuiltIn
+            ? await requestBuiltInAgnes('chat', reqBody)
+            : await fetch(chatUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(reqBody),
+                signal: controller.signal
+            });
 
         if (response.ok) {
             const result = await readChatResponseJson(response, controller);
@@ -12636,20 +12698,18 @@ async function handleActionGenerate(type) {
         const useBuiltIn = getUseBuiltIn();
         if (useBuiltIn || !apiKey || apiKey === KEY_MASK) {
             if (useBuiltIn) {
-                apiKey = AGNES_BUILT_IN_KEY;
+                apiKey = '';
             } else {
                 const agnesKeyInput = document.querySelector('input.provider-key-input[data-provider="agnes-ai"]');
                 if (agnesKeyInput && agnesKeyInput.value.trim() !== KEY_MASK) {
                     apiKey = agnesKeyInput.value.trim();
                 } else if (localProviders['agnes-ai'] && localProviders['agnes-ai'].apiKey && localProviders['agnes-ai'].apiKey !== KEY_MASK) {
                     apiKey = localProviders['agnes-ai'].apiKey;
-                } else {
-                    apiKey = AGNES_BUILT_IN_KEY;
                 }
             }
         }
 
-        if (!apiKey) {
+        if (!useBuiltIn && !apiKey) {
             aiBubble.innerHTML = `<span style="color: #ff6b6b;">❌ 未配置 API Key，请先在【模型配置】中填写 Agnes AI 的 API Key。</span>`;
             return;
         }
@@ -12691,11 +12751,13 @@ async function handleActionGenerate(type) {
                 size: '1024x1024'
             };
 
-            const response = await fetch(genUrl, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(body)
-            });
+            const response = useBuiltIn
+                ? await requestBuiltInAgnes('image', body)
+                : await fetch(genUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(body)
+                });
 
             if (!response.ok) {
                 mediaGenerationInFlight = false;
@@ -12752,11 +12814,13 @@ async function handleActionGenerate(type) {
                 frame_rate: 24
             };
 
-            const response = await fetch(genUrl, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(body)
-            });
+            const response = useBuiltIn
+                ? await requestBuiltInAgnes('video', body)
+                : await fetch(genUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(body)
+                });
 
             if (!response.ok) {
                 mediaGenerationInFlight = false;
@@ -12813,7 +12877,12 @@ async function handleActionGenerate(type) {
                 pollInFlight = true;
                 pollCount++;
                 try {
-                    const pollResp = await fetch(pollUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } });
+                    const pollResp = useBuiltIn
+                        ? await requestBuiltInAgnes('videoStatus', null, {
+                            taskId: String(taskId),
+                            modelName: String(modelId || '').replace(/^.*\//, '')
+                        })
+                        : await fetch(pollUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${apiKey}` } });
                     if (!pollResp.ok) {
                         clearInterval(pollInterval);
                         mediaGenerationInFlight = false;
@@ -13201,9 +13270,7 @@ async function performGeneratorTest(type) {
     }
 
     const useBuiltIn = getUseBuiltIn();
-    if (useBuiltIn && (!apiKey || apiKey === KEY_MASK)) {
-        apiKey = AGNES_BUILT_IN_KEY;
-    }
+    if (useBuiltIn) apiKey = '';
 
     if (!baseUrl) {
         alert(`请输入${type === 'image' ? '图片' : '视频'}生成 API 地址后再进行检验！`);
@@ -13245,11 +13312,13 @@ async function performGeneratorTest(type) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        const response = await fetch(testUrl, {
-            method: 'GET',
-            headers: headers,
-            signal: controller.signal
-        });
+        const response = useBuiltIn
+            ? await requestBuiltInAgnes('models')
+            : await fetch(testUrl, {
+                method: 'GET',
+                headers: headers,
+                signal: controller.signal
+            });
         
         clearTimeout(timeoutId);
 
@@ -13309,9 +13378,7 @@ async function performGeneratorKeyTest(type) {
     }
 
     const useBuiltIn = getUseBuiltIn();
-    if (useBuiltIn && (!apiKey || apiKey === KEY_MASK)) {
-        apiKey = AGNES_BUILT_IN_KEY;
-    }
+    if (useBuiltIn) apiKey = '';
 
     if (!baseUrl) {
         alert(`请输入${type === 'image' ? '图片' : '视频'}生成 API 地址后再进行检验！`);
@@ -13345,11 +13412,13 @@ async function performGeneratorKeyTest(type) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        const response = await fetch(testUrl, {
-            method: 'GET',
-            headers: headers,
-            signal: controller.signal
-        });
+        const response = useBuiltIn
+            ? await requestBuiltInAgnes('models')
+            : await fetch(testUrl, {
+                method: 'GET',
+                headers: headers,
+                signal: controller.signal
+            });
         
         clearTimeout(timeoutId);
 
@@ -13922,6 +13991,75 @@ function finishGatewayUpdateProgress(success, message) {
     }
 }
 
+function setOpenclawUpdateStatus(message, state = 'idle') {
+    const el = document.getElementById('openclaw-update-status');
+    if (!el) return;
+    el.textContent = String(message || '');
+    el.style.color = state === 'ok'
+        ? '#34d399'
+        : (state === 'error' ? '#f87171' : 'var(--text-secondary)');
+}
+
+async function maintainOpenclawStableVersion(manual = false) {
+    if (!window.api || typeof window.api.checkOpenclawStableUpdate !== 'function') return null;
+    setOpenclawUpdateStatus('正在核对 npm 官方 latest 正式版…');
+    let check;
+    try {
+        check = await window.api.checkOpenclawStableUpdate();
+    } catch (error) {
+        check = { success: false, message: error.message || String(error) };
+    }
+    if (!check || check.success !== true) {
+        const message = (check && check.message) || '稳定版检查失败';
+        setOpenclawUpdateStatus(message, 'error');
+        if (manual) showToast(message);
+        return check;
+    }
+
+    const versionText = `当前 v${check.currentVersion || '未知'} · 官方稳定版 v${check.latestVersion}`;
+    if (!check.hasUpdate) {
+        const message = check.aheadOfLatest
+            ? `${versionText}（当前版本更新，不执行降级）`
+            : `${versionText}（已是最新版）`;
+        setOpenclawUpdateStatus(message, 'ok');
+        if (manual) showToast('OpenClaw 已是最新正式稳定版');
+        return { ...check, alreadyLatest: true };
+    }
+
+    setOpenclawUpdateStatus(`${versionText} · 准备安全升级`);
+    showGatewayUpdateProgress();
+    appendGatewayUpdateLog('仅安装 npm 官方 latest 正式版，不安装 Beta/预览版');
+    try {
+        const result = await window.api.updateOpenclawPackage({
+            targetVersion: check.latestVersion,
+            automatic: !manual,
+            channel: 'latest'
+        });
+        if (result && result.success) {
+            const ok = result.validated !== false;
+            finishGatewayUpdateProgress(ok, result.message);
+            setOpenclawUpdateStatus(
+                `OpenClaw v${result.installedVersion || check.latestVersion} · 稳定版自检通过`,
+                ok ? 'ok' : 'error'
+            );
+            setTimeout(() => {
+                const webview = document.getElementById('openclaw-iframe');
+                try { if (webview && typeof webview.reload === 'function') webview.reload(); } catch (_) {}
+            }, 3000);
+        } else {
+            const message = (result && result.message) || '稳定升级失败';
+            finishGatewayUpdateProgress(false, message);
+            setOpenclawUpdateStatus(message, 'error');
+        }
+        return result;
+    } catch (error) {
+        const message = `OpenClaw 稳定升级失败: ${error.message || error}`;
+        finishGatewayUpdateProgress(false, message);
+        setOpenclawUpdateStatus(message, 'error');
+        return { success: false, message };
+    }
+}
+
 /** 内置 OpenClaw Control UI：免密载入；同 URL 不重复刷新，避免「失败尝试过多」限流 */
 let __openclawPanelLastUrl = '';
 let __openclawLoadRetryTimer = null;
@@ -14064,6 +14202,8 @@ function buildOpenclawPanelCss(paint) {
         'button:not([data-state="active"]):not([data-state="checked"]):not(.qs-segmented__btn--active):hover, a:hover, li:not(.nexora-solid-sidebar):hover, tr:hover, td:hover, [class*="item"]:not(.nexora-solid-sidebar):hover, [class*="Item"]:not(.nexora-solid-sidebar):hover, [class*="hover:bg-"]:hover { background-color: transparent !important; }',
         'textarea, input, [contenteditable="true"] { background-color: rgba(0, 0, 0, 0.2) !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.25) !important; caret-color: ' + accent + ' !important; }',
         'textarea::placeholder, input::placeholder, [class*="placeholder"] { color: ' + muted + ' !important; opacity: 0.85 !important; }',
+        /* OpenClaw 2026.9 输入区自带 24px 顶部渐变；嵌入缩放后会放大成明显黑色矩形阴影 */
+        '.agent-chat__composer-shell::before { content: none !important; display: none !important; background: none !important; box-shadow: none !important; }',
         'svg { color: ' + accent + ' !important; opacity: 1 !important; }',
         'pre, code { background-color: rgba(0, 0, 0, 0.3) !important; color: #e0f2fe !important; }',
         /* 标准滚动条属性(scrollbar-width/color)一旦被设置，Chromium 会整体忽略 ::-webkit-scrollbar 美化，必须重置回 auto 让下面的胶囊样式生效 */
@@ -14288,6 +14428,12 @@ function collectDataCenterThemeVars() {
 function pushDataCenterTheme(frame) {
     const target = frame || document.getElementById('data-center-iframe');
     if (!target || !target.contentWindow) return;
+    let targetOrigin = '';
+    try { targetOrigin = new URL(target.src).origin; } catch (_) { return; }
+    // The iframe still has the parent file:// origin until its navigation has
+    // committed. Posting an http origin before that point creates noisy
+    // security warnings and can race repeated tab switches.
+    if (!targetOrigin || target.dataset.loadedOrigin !== targetOrigin) return;
     const lang = localStorage.getItem('setting_language') || 'zh-CN';
     const title = t('nav.data_center');
     try {
@@ -14301,7 +14447,7 @@ function pushDataCenterTheme(frame) {
             lang,
             title: 'Nexora ' + title,
             statusRunning: t('系统运行中', 'System running', '系統運行中'),
-        }, '*');
+        }, targetOrigin);
     } catch (_) {}
 }
 
@@ -14309,6 +14455,11 @@ try {
     window.addEventListener('message', (evt) => {
         const data = evt && evt.data;
         if (!data || data.type !== 'nexora-data-center-ready') return;
+        const frame = document.getElementById('data-center-iframe');
+        if (!frame || evt.source !== frame.contentWindow) return;
+        try {
+            if (evt.origin !== new URL(frame.src).origin) return;
+        } catch (_) { return; }
         pushDataCenterTheme();
     });
 } catch (_) {}
@@ -14324,30 +14475,41 @@ async function loadDataCenterUi(forceReload = false) {
         if (!info || !info.ok || !info.url) {
             throw new Error((info && info.error) || 'data-center start failed');
         }
-        const url = String(info.url).replace(/\/?$/, '/');
+        const parsedUrl = new URL(String(info.url));
+        if (!parsedUrl.pathname.endsWith('/')) parsedUrl.pathname += '/';
+        // Never append after the hash: that would turn the bearer token into
+        // "token/" and make every API request fail with 401.
+        const url = parsedUrl.toString();
         const currentSrc = (frame.getAttribute('src') || '').trim();
-        if (!forceReload && currentSrc && (currentSrc === url || currentSrc.startsWith(url))) {
+        const requestedOrigin = new URL(url).origin;
+        if (!forceReload && currentSrc && (currentSrc === url || currentSrc.startsWith(url)) && frame.dataset.loadedOrigin === requestedOrigin) {
             pushDataCenterTheme(frame);
             try {
-                frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, '*');
+                frame.contentWindow.postMessage({ type: 'nexora-data-center-refresh' }, new URL(frame.src).origin);
             } catch (_) {}
             return;
         }
         const waitLoad = new Promise((resolve) => {
             let done = false;
-            const finish = () => {
+            const finish = (loaded) => {
                 if (done) return;
                 done = true;
-                frame.removeEventListener('load', finish);
+                frame.removeEventListener('load', onLoad);
+                if (loaded) {
+                    try { frame.dataset.loadedOrigin = new URL(frame.src).origin; } catch (_) {}
+                }
                 resolve();
             };
-            frame.addEventListener('load', finish);
-            setTimeout(finish, 12000);
+            const onLoad = () => finish(true);
+            frame.addEventListener('load', onLoad);
+            setTimeout(() => finish(false), 12000);
         });
         if (currentSrc === url) {
+            delete frame.dataset.loadedOrigin;
             frame.src = 'about:blank';
             await new Promise((r) => setTimeout(r, 30));
         }
+        delete frame.dataset.loadedOrigin;
         frame.src = url;
         await waitLoad;
         pushDataCenterTheme(frame);
@@ -14573,6 +14735,22 @@ async function loadOpenclawControlUi(forceReload = false, opts = {}) {
         } else {
             webview.src = url;
         }
+
+        // will-attach-webview 被安全策略误拦时不会触发 did-fail-load。主动确认 guest
+        // 已挂载，避免只留下与主题同色的永久空白区域。
+        const attachWatchToken = (webview.__nexoraAttachWatchToken || 0) + 1;
+        webview.__nexoraAttachWatchToken = attachWatchToken;
+        setTimeout(() => {
+            if (webview.__nexoraAttachWatchToken !== attachWatchToken) return;
+            let attachedUrl = '';
+            try {
+                attachedUrl = typeof webview.getURL === 'function' ? String(webview.getURL() || '') : '';
+            } catch (_) {}
+            if (attachedUrl && attachedUrl !== 'about:blank' && !attachedUrl.startsWith('chrome-error://')) return;
+            const pane = document.getElementById('openclaw-panel-view');
+            if (!pane || !pane.classList.contains('active')) return;
+            scheduleOpenclawControlUiRetry('内嵌面板尚未挂载');
+        }, 2500);
 
         injectWebviewUpdateInterceptor(webview);
         // 导航后只温和补 1～2 次，避免叠 CSS 闪烁
@@ -14892,8 +15070,7 @@ function injectWebviewUpdateInterceptor(webview) {
             try {
                 const result = await window.api.updateOpenclawPackage({ targetVersion });
                 if (result.success) {
-                    // 安装成功但自动重启失败时，按“告警”状态呈现，提示用户手动启动
-                    const ok = result.restarted !== false;
+                    const ok = result.validated !== false;
                     finishGatewayUpdateProgress(ok, result.message);
                     setTimeout(() => {
                         const wv = document.getElementById('openclaw-iframe');
@@ -15174,6 +15351,9 @@ function applyAccelerationProxiesViewMode(mode, options = {}) {
 let expandedGroups = new Set();
 const CONNECTION_POLL_TASK = 'acceleration-connections';
 let connSearchText = '';
+let lastConnectionsRenderSignature = '';
+let connectionsRefreshPromise = null;
+let accelerationRefreshPromise = null;
 
 function isAccelerationDelayBusyMessage(message) {
     return /测速|延迟/.test(String(message || ''));
@@ -15561,7 +15741,7 @@ function setAccelerationImportFeedback(text, type) {
 
 function startConnectionPolling() {
     stopConnectionPolling();
-    NexoraScheduler.register(CONNECTION_POLL_TASK, refreshConnections, { visibleMs: 1500, hiddenMs: 30000 });
+    NexoraScheduler.register(CONNECTION_POLL_TASK, refreshConnections, { visibleMs: 3000, hiddenMs: 30000 });
 }
 
 function stopConnectionPolling() {
@@ -15570,14 +15750,33 @@ function stopConnectionPolling() {
 
 async function refreshConnections() {
     if (!window.api || !window.api.getAccelerationConnections) return;
-    try {
-        const data = await window.api.getAccelerationConnections();
-        if (data && data.success) {
-            renderConnections(data);
+    if (connectionsRefreshPromise) return connectionsRefreshPromise;
+    connectionsRefreshPromise = (async () => {
+        try {
+            const data = await window.api.getAccelerationConnections();
+            if (data && data.success) {
+                // Connections 在空闲时通常完全不变。旧实现仍每 1.5 秒重写表格和两张
+                // Canvas，会反复触发布局与合成，尤其和毛玻璃叠加后容易把窗口拖死。
+                const signature = JSON.stringify({
+                    query: connSearchText,
+                    uploadTotal: Number(data.uploadTotal) || 0,
+                    downloadTotal: Number(data.downloadTotal) || 0,
+                    connections: Array.isArray(data.connections) ? data.connections : []
+                });
+                if (signature !== lastConnectionsRenderSignature) {
+                    lastConnectionsRenderSignature = signature;
+                    renderConnections(data);
+                }
+            }
+            return data;
+        } catch (e) {
+            console.error('[Connections] refresh failed:', e);
+            return null;
+        } finally {
+            connectionsRefreshPromise = null;
         }
-    } catch (e) {
-        console.error('[Connections] refresh failed:', e);
-    }
+    })();
+    return connectionsRefreshPromise;
 }
 
 function formatBytes(b) {
@@ -16073,17 +16272,25 @@ function buildProfileTrafficHtml(profile) {
 
 async function refreshAccelerationChannel() {
     if (!window.api || !window.api.getAccelerationStatus) return;
-    try {
-        const data = await window.api.getAccelerationStatus();
-        if (data && data.success) {
-            accelerationState = data;
-            renderAccelerationChannel(data);
-        } else if (data && data.error) {
-            showToast(t('网络中转状态读取失败: ', 'Network Relay status failed: ', '網路中轉狀態讀取失敗: ') + data.error);
+    if (accelerationRefreshPromise) return accelerationRefreshPromise;
+    accelerationRefreshPromise = (async () => {
+        try {
+            const data = await window.api.getAccelerationStatus();
+            if (data && data.success) {
+                accelerationState = data;
+                renderAccelerationChannel(data);
+            } else if (data && data.error) {
+                showToast(t('网络中转状态读取失败: ', 'Network Relay status failed: ', '網路中轉狀態讀取失敗: ') + data.error);
+            }
+            return data;
+        } catch (err) {
+            console.warn('[Acceleration] refresh failed:', err);
+            return null;
+        } finally {
+            accelerationRefreshPromise = null;
         }
-    } catch (err) {
-        console.warn('[Acceleration] refresh failed:', err);
-    }
+    })();
+    return accelerationRefreshPromise;
 }
 
 function renderAccelerationChannel(data) {

@@ -48,7 +48,7 @@ try {
     },
   };
   const memoryResult = ensureLatencySafeConfig(memoryCfg);
-  assert.equal(memoryResult.config.agents.defaults.memorySearch.provider, 'none');
+  assert.equal(memoryResult.config.memory.search.provider, 'none');
   assert.equal(memoryResult.config.agents.defaults.model.fallbacks.length, 1);
   assert.equal(memoryResult.config.agents.defaults.model.fallbacks[0], 'agnes-ai/agnes-1.5-flash');
   assert.equal(memoryResult.config.plugins.entries.slack.enabled, true);
@@ -77,7 +77,9 @@ try {
   };
   const visionResult = ensureVisionModelConfig(visionCfg);
   assert.equal(visionResult.config.agents.defaults.imageModel.primary, 'agnes-ai/agnes-2.0-flash');
-  assert.equal(visionResult.config.tools.media.image.models[0].provider, 'agnes-ai');
+  assert.equal(visionResult.config.tools.media.models[0].provider, 'agnes-ai');
+  assert.equal(visionResult.config.tools.media.models[0].capabilities.includes('image'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(visionResult.config.tools.media.image, 'models'), false);
 
   console.log('chat config guard tests passed');
 } finally {

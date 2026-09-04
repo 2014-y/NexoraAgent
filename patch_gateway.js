@@ -1210,6 +1210,14 @@ function loadRotationKeys() {
 
 const BUILT_IN_KEYS = loadRotationKeys();
 
+function safeKeyFingerprint(value) {
+    try {
+        return 'sha256:' + require('crypto').createHash('sha256').update(String(value || '')).digest('hex').slice(0, 12);
+    } catch (_) {
+        return 'sha256:unavailable';
+    }
+}
+
 const rotators = new Map();
 function getNextKey(rawKey, keys) {
     let idx = rotators.get(rawKey) || 0;
@@ -1243,7 +1251,7 @@ function patchHeadersInArguments(args) {
                     if (keys.length > 0) {
                         const selectedKey = getNextKey(rawKey, keys);
                         arg.headers[authKey] = `Bearer ${selectedKey}`;
-                        console.log(`[TokenGuard] API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                        console.log(`[TokenGuard] API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
                     }
                 }
             }
@@ -1261,7 +1269,7 @@ function patchHeadersInArguments(args) {
                     if (keys.length > 0) {
                         const selectedKey = getNextKey(apiVal, keys);
                         arg.headers[apiKeyName] = selectedKey;
-                        console.log(`[TokenGuard] API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                        console.log(`[TokenGuard] API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
                     }
                 }
             }
@@ -1285,7 +1293,7 @@ function patchFetchHeaders(headersObj) {
             if (keys.length > 0) {
                 const selectedKey = getNextKey(rawKey, keys);
                 headersObj.set('Authorization', `Bearer ${selectedKey}`);
-                console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
             }
         }
         let apiKeyVal = headersObj.get('api-key') || headersObj.get('x-api-key');
@@ -1300,7 +1308,7 @@ function patchFetchHeaders(headersObj) {
                 const selectedKey = getNextKey(apiKeyVal, keys);
                 if (headersObj.has('api-key')) headersObj.set('api-key', selectedKey);
                 if (headersObj.has('x-api-key')) headersObj.set('x-api-key', selectedKey);
-                console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
             }
         }
     } else {
@@ -1318,7 +1326,7 @@ function patchFetchHeaders(headersObj) {
                 if (keys.length > 0) {
                     const selectedKey = getNextKey(rawKey, keys);
                     headersObj[authKey] = `Bearer ${selectedKey}`;
-                    console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                    console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
                 }
             }
         }
@@ -1335,7 +1343,7 @@ function patchFetchHeaders(headersObj) {
                 if (keys.length > 0) {
                     const selectedKey = getNextKey(apiVal, keys);
                     headersObj[apiKeyName] = selectedKey;
-                    console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}): ${selectedKey.substring(0, 12)}...`);
+                    console.log(`[TokenGuard] Fetch API Key rotated (index ${keys.indexOf(selectedKey)}) fingerprint=${safeKeyFingerprint(selectedKey)}`);
                 }
             }
         }

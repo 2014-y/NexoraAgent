@@ -1431,13 +1431,22 @@
             <!-- 自动检查更新 -->
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
               <div>
-                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.auto_update.title">🔄 自动检查更新</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.auto_update.desc">开启后启动时在后台静默检查新版本，有更新再弹窗，不打扰界面。</div>
+                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.auto_update.title">🔄 自动稳定更新</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.auto_update.desc">默认跟随客户端与 OpenClaw 正式稳定版；核心升级前自动备份，启动自检失败会自动回滚，不安装 Beta/预览版。</div>
               </div>
               <label class="switch-slider-btn">
                 <input type="checkbox" id="setting-auto-update-toggle" checked>
                 <span class="slider-knob"></span>
               </label>
+            </div>
+
+            <!-- OpenClaw 稳定版维护 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 12px;">
+              <div style="min-width: 0;">
+                <div style="font-size: 13px; font-weight: bold; color: var(--text-primary);" data-i18n="settings.openclaw_update.title">🛡️ OpenClaw 稳定版维护</div>
+                <div id="openclaw-update-status" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;" data-i18n="settings.openclaw_update.idle">等待检查正式稳定版</div>
+              </div>
+              <button type="button" class="btn-secondary" id="btn-openclaw-stable-update" style="flex-shrink: 0; width: auto; padding: 7px 12px;" data-i18n="settings.openclaw_update.button">检查并稳定升级</button>
             </div>
 
             <!-- 语言模块 -->
