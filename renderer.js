@@ -12006,8 +12006,10 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
         font-size: 13px;
         line-height: 1.5;
         border-top-${sender === 'user' ? 'right' : 'left'}-radius: 2px;
-        white-space: pre-wrap;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+         white-space: pre-wrap;
+         min-width: 64px;
+         box-sizing: border-box;
+         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
     `;
 
     if (attachment) {
@@ -12028,7 +12030,8 @@ function appendChatMessage(sender, content, attachment = null, isHTML = false) {
     if (isHTML) {
         textNode.innerHTML = content;
     } else {
-        textNode.innerText = content;
+        // 上游 OpenAI 兼容接口经常在正文前返回换行；首尾空白不应变成气泡里的空行。
+        textNode.innerText = typeof content === 'string' ? content.trim() : content;
     }
     bubble.appendChild(textNode);
 
@@ -12872,6 +12875,8 @@ async function handleSendMessage() {
             if (reply == null || String(reply).trim() === '') {
                 throw new Error('模型返回了空内容');
             }
+            // 统一清掉上游回复首尾的换行，避免短回复被渲染成带大块空白的窄高气泡。
+            if (typeof reply === 'string') reply = reply.trim();
             
             if (typeof reply === 'string' && (/MEDIA\s*:/i.test(reply) || reply.includes('[[image]]') || reply.includes('[image]'))) {
                 const rendered = renderChatMediaHtml(reply);

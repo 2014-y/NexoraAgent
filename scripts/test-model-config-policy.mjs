@@ -135,5 +135,8 @@ assert.match(html, /id="model-fallback-enabled"/);
 assert.match(html, /id="dmt-mode"/);
 assert.match(plugin, /Promise\.resolve\(studentLearnInBackground\(/);
 assert.doesNotMatch(plugin, /Promise\.resolve\(teachAndLearn\(question/);
+assert.match(renderer, /typeof content === 'string' \? content\.trim\(\) : content/);
+assert.match(renderer, /min-width: 64px/);
+assert.match(renderer, /if \(typeof reply === 'string'\) reply = reply\.trim\(\)/);
 
 console.log('model config policy guards passed');
