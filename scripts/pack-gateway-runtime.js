@@ -114,7 +114,7 @@ function computeFingerprint() {
     'node_modules/openclaw/package.json',
     'node_modules/@tencent-weixin/openclaw-weixin/package.json',
     'node_modules/@openclaw/feishu/package.json',
-    'node_modules/@openclaw/qqbot/package.json',
+    'node_modules/@tencent-connect/openclaw-qqbot/package.json',
     'node_modules/@openclaw/slack/package.json',
     'node_modules/@openclaw/whatsapp/package.json',
     'node_modules/@openclaw/matrix/package.json',

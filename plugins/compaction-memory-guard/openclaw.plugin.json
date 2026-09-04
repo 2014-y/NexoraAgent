@@ -6,6 +6,7 @@
   },
   "description": "对话过长时自动备份关键信息到 MEMORY.md",
   "kind": "extension",
+  "activation": { "onStartup": true },
   "version": "1.0.0",
   "main": "index.js",
   "type": "module"

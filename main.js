@@ -1036,12 +1036,22 @@ function normalizeWebToolsConfig(config) {
         delete config.tools.webFetch;
         changed = true;
     }
-    if (config.tools.web.search.enabled !== true) {
-        config.tools.web.search.enabled = true;
+    // Search must follow the DuckDuckGo plugin switch.  Forcing it on while
+    // the provider plugin is disabled produces WEB_SEARCH_PROVIDER_INVALID_AUTODETECT
+    // on every gateway start and leaves the UI in a false "available" state.
+    const duckEntry = config.plugins && config.plugins.entries && config.plugins.entries.duckduckgo;
+    const duckEnabled = Boolean(duckEntry && duckEntry.enabled === true);
+    if (config.tools.web.search.enabled !== duckEnabled) {
+        config.tools.web.search.enabled = duckEnabled;
         changed = true;
     }
-    if (!config.tools.web.search.provider) {
+    if (duckEnabled && config.tools.web.search.provider !== 'duckduckgo') {
         config.tools.web.search.provider = 'duckduckgo';
+        changed = true;
+    } else if (!duckEnabled && config.tools.web.search.provider === 'duckduckgo') {
+        // A selected-but-disabled provider still triggers OpenClaw's
+        // WEB_SEARCH_PROVIDER_INVALID_AUTODETECT warning during startup.
+        delete config.tools.web.search.provider;
         changed = true;
     }
     if (config.tools.web.fetch.enabled !== true) {
@@ -1738,7 +1748,7 @@ function pruneStalePluginConfigEntries(config) {
         }
         if (!existsOnDisk(id)) {
             const channelIds = new Set([
-                'feishu', 'qqbot', 'telegram', 'slack', 'whatsapp', 'matrix',
+                'feishu', 'openclaw-qqbot', 'qqbot', 'telegram', 'slack', 'whatsapp', 'matrix',
                 'voice-call', 'openclaw-weixin'
             ]);
             if (channelIds.has(id)) {
@@ -2265,7 +2275,7 @@ function allBundledManagedPluginIds() {
 // 避免无影上残留「别人电脑」的绝对路径 / Program Files 坏入口导致全部加载失败。
 const BUNDLED_NPM_CHANNEL_PLUGINS = [
     { id: 'openclaw-weixin', viaLoadPaths: true, candidates: [path.join('node_modules', '@tencent-weixin', 'openclaw-weixin')] },
-    { id: 'qqbot', viaLoadPaths: true, packageName: '@openclaw/qqbot', candidates: [path.join('node_modules', '@openclaw', 'qqbot')] },
+    { id: 'openclaw-qqbot', viaLoadPaths: false, packageName: '@tencent-connect/openclaw-qqbot', candidates: [path.join('node_modules', '@tencent-connect', 'openclaw-qqbot')] },
     { id: 'feishu', viaLoadPaths: true, packageName: '@openclaw/feishu', candidates: [path.join('node_modules', '@openclaw', 'feishu')] },
     // voice-call 绝不能进 load.paths（trusted store）
     { id: 'voice-call', viaLoadPaths: false, packageName: '@openclaw/voice-call', candidates: [path.join('node_modules', '@openclaw', 'voice-call')] },
@@ -3826,6 +3836,24 @@ function seedMediaRuntimeArtifacts(appVersion) {
     }
 }
 
+function syncBundledInternalHookFiles(hookId) {
+    try {
+        const srcCandidates = [
+            resolveAppFsPath('hooks', hookId),
+            path.join(__dirname, 'hooks', hookId)
+        ];
+        const src = srcCandidates.find((p) => fs.existsSync(path.join(p, 'HOOK.md')));
+        if (!src) return false;
+        const dest = path.join(CONFIG_DIR, 'hooks', hookId);
+        fs.mkdirSync(dest, { recursive: true });
+        fs.cpSync(src, dest, { recursive: true, force: true });
+        return true;
+    } catch (e) {
+        console.warn(`[HookSeed] ${hookId}:`, e.message);
+        return false;
+    }
+}
+
 function seedBundledPlugins(options = {}) {
     try {
         const destRoot = path.join(CONFIG_DIR, 'extensions');
@@ -3861,6 +3889,7 @@ function seedBundledPlugins(options = {}) {
                     }
                     // 快路径也必须清掉误种的 media-core，并确保 media-runtime 可用
                     try { syncMediaCoreBundle(); } catch (e) {}
+                    syncBundledInternalHookFiles('auto-start-codex');
                     global.__nexoraBundledSeedVersion = appVersion;
                     return;
                 }
@@ -3947,6 +3976,7 @@ function seedBundledPlugins(options = {}) {
             syncBundledPluginFiles(name);
         }
         seedMediaRuntimeArtifacts(appVersion);
+        syncBundledInternalHookFiles('auto-start-codex');
         try { fs.writeFileSync(seedStampPath, appVersion, 'utf8'); } catch (e) {}
         global.__nexoraBundledSeedVersion = appVersion;
     } catch (e) {
@@ -4012,7 +4042,7 @@ function prepareChannelPluginsBeforeGateway() {
     const channelPathMatchers = [
         { id: 'openclaw-weixin', re: /(?:^|[\\/])openclaw-weixin(?:[\\/]|$)/i },
         { id: 'feishu', re: /[\\/]@openclaw[\\/]feishu(?:[\\/]|$)/i },
-        { id: 'qqbot', re: /[\\/]@openclaw[\\/]qqbot(?:[\\/]|$)/i },
+        { id: 'openclaw-qqbot', re: /[\\/]@tencent-connect[\\/]openclaw-qqbot(?:[\\/]|$)/i },
         { id: 'slack', re: /[\\/]@openclaw[\\/]slack(?:[\\/]|$)/i },
         { id: 'whatsapp', re: /[\\/]@openclaw[\\/]whatsapp(?:[\\/]|$)/i },
         { id: 'matrix', re: /[\\/]@openclaw[\\/]matrix(?:[\\/]|$)/i },
@@ -4193,7 +4223,7 @@ function prepareChannelPluginsBeforeGateway() {
                 || (q.accounts && Object.keys(q.accounts).length));
             if (hasQ || q.enabled === true) {
                 if (q.enabled !== true) { q.enabled = true; needsSave = true; }
-                forceOn('qqbot');
+                forceOn('openclaw-qqbot');
             }
         }
         // 微信以磁盘账号为准：accounts.json 有号 → 强制开插件

@@ -42,6 +42,16 @@ assert.match(
   /hasOwnProperty\.call\(config\.plugins, 'bundledDiscovery'\)[\s\S]*delete config\.plugins\.bundledDiscovery/s,
   'startup must remove the discovery key retired by OpenClaw 2026.9'
 );
+assert.match(
+  main,
+  /const duckEnabled = Boolean\(duckEntry && duckEntry\.enabled === true\)[\s\S]*config\.tools\.web\.search\.enabled !== duckEnabled/s,
+  'web search runtime must follow the DuckDuckGo plugin switch'
+);
+assert.match(
+  renderer,
+  /pluginKey === 'duckduckgo'[\s\S]*configData\.tools\.web\.search\.enabled = checked/s,
+  'DuckDuckGo UI toggle must update the web-search runtime switch'
+);
 const bootHarden = fs.readFileSync(new URL('../gateway-boot-harden.js', import.meta.url), 'utf8');
 const gatewayPatch = fs.readFileSync(new URL('../patch_gateway.js', import.meta.url), 'utf8');
 assert.doesNotMatch(gatewayPatch, /selectedKey\.substring\(/, 'gateway logs must never expose API key prefixes');
@@ -106,16 +116,44 @@ try {
   fs.rmSync(modelSyncTemp, { recursive: true, force: true });
 }
 const { forceDisableUninstalledChannelPlugins } = require('../gateway-boot-harden.js');
+const { sanitizeQqbotConfig } = require('../channel-config-sanitize.js');
+const qqConfig = { channels: { qqbot: { dmPolicy: 'open', allowFrom: ['openclaw:approval-disabled'], accounts: {} } } };
+assert.equal(sanitizeQqbotConfig(qqConfig), false);
+assert.deepEqual(qqConfig.channels.qqbot.allowFrom, ['openclaw:approval-disabled']);
+const legacyQqConfig = {
+  channels: {
+    qqbot: {
+      defaultAccount: 'default',
+      dmPolicy: 'open',
+      allowFrom: ['*'],
+      accounts: { default: { appId: '123', clientSecret: 'secret' } }
+    }
+  }
+};
+assert.equal(sanitizeQqbotConfig(legacyQqConfig), true);
+assert.equal(legacyQqConfig.channels.qqbot.defaultAccount, undefined);
+assert.equal(legacyQqConfig.channels.qqbot.appId, '123');
+assert.equal(legacyQqConfig.channels.qqbot.clientSecret, 'secret');
+assert.deepEqual(legacyQqConfig.channels.qqbot.allowFrom, ['openclaw:approval-disabled']);
+const { probePlugin, applyPluginCredentials } = require('../plugin-catalog.js');
+const webhookConfig = { plugins: { entries: {}, allow: [] } };
+assert.equal(probePlugin('webhooks', { config: webhookConfig }).needsConfig, true);
+assert.deepEqual(applyPluginCredentials(webhookConfig, 'webhooks', {
+  routeId: 'orders', path: 'hooks/orders', sessionKey: 'agent:main:orders', secret: 'test-secret'
+}), { ok: true });
+assert.equal(webhookConfig.plugins.entries.webhooks.config.routes.orders.path, '/hooks/orders');
+assert.equal(probePlugin('webhooks', { config: webhookConfig }).needsConfig, false);
 const pluginConfig = {
   browser: { enabled: true },
   tools: { web: { search: { provider: 'duckduckgo' }, fetch: { enabled: true } } },
   models: { providers: { ollama: { models: [] } } },
   plugins: {
-    allow: ['session-overflow-rollover', 'key-rotator-proxy'],
+    allow: ['session-overflow-rollover', 'key-rotator-proxy', 'qqbot'],
     entries: {
       'session-overflow-rollover': { enabled: true },
       'key-rotator-proxy': { enabled: true },
       'system-control': { enabled: true },
+      qqbot: { enabled: true },
     },
     installs: {
       'key-rotator-proxy': { installPath: 'missing' },
@@ -128,6 +166,8 @@ assert.equal(Object.prototype.hasOwnProperty.call(pluginConfig.plugins, 'bundled
 assert.equal(Object.prototype.hasOwnProperty.call(pluginConfig.plugins, 'installs'), false);
 assert.equal(pluginConfig.plugins.entries['key-rotator-proxy'], undefined);
 assert.equal(pluginConfig.plugins.entries['system-control'], undefined);
+assert.equal(pluginConfig.plugins.entries.qqbot, undefined);
+assert.equal(pluginConfig.plugins.allow.includes('qqbot'), false);
 assert.ok(pluginConfig.plugins.allow.includes('browser'));
 assert.ok(pluginConfig.plugins.allow.includes('duckduckgo'));
 assert.ok(pluginConfig.plugins.allow.includes('ollama'));

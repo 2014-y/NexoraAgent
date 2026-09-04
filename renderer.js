@@ -1343,25 +1343,6 @@ function renderQqbotAccounts() {
     if (!configData.channels) configData.channels = {};
     if (!configData.channels.qqbot) configData.channels.qqbot = { accounts: {} };
     
-    // 自愈式升级：如果检测到旧格式的单账号配置，自动做一次平滑迁移
-    if (configData.channels.qqbot.appId && configData.channels.qqbot.clientSecret) {
-        const oldAppId = configData.channels.qqbot.appId;
-        const oldSecret = configData.channels.qqbot.clientSecret;
-        
-        configData.channels.qqbot.accounts = configData.channels.qqbot.accounts || {};
-        configData.channels.qqbot.accounts['default'] = {
-            appId: oldAppId,
-            clientSecret: oldSecret
-        };
-        configData.channels.qqbot.defaultAccount = 'default';
-        configData.channels.qqbot.enabled = true;
-        
-        delete configData.channels.qqbot.appId;
-        delete configData.channels.qqbot.clientSecret;
-        
-        window.api.saveConfig(configData).catch(() => {});
-    }
-
     // 中文/非法账号 ID：触发保存，主进程 sanitize 后回写 configData
     try {
         const accounts = configData.channels.qqbot.accounts || {};
@@ -1379,8 +1360,12 @@ function renderQqbotAccounts() {
 
     if (!configData.channels.qqbot.accounts) configData.channels.qqbot.accounts = {};
 
-    const accounts = configData.channels.qqbot.accounts;
-    const defaultAccount = configData.channels.qqbot.defaultAccount || '';
+    const namedAccounts = configData.channels.qqbot.accounts;
+    const hasRootAccount = !!(configData.channels.qqbot.appId && configData.channels.qqbot.clientSecret);
+    const accounts = hasRootAccount
+        ? { default: { appId: configData.channels.qqbot.appId, clientSecret: configData.channels.qqbot.clientSecret }, ...namedAccounts }
+        : namedAccounts;
+    const defaultAccount = hasRootAccount ? 'default' : (Object.keys(namedAccounts)[0] || '');
 
     const accountIds = Object.keys(accounts);
     if (accountIds.length === 0) {
@@ -1415,7 +1400,7 @@ function renderQqbotAccounts() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px;">
-                ${!isDefault ? `<button type="button" class="btn-primary btn-set-default-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer;">${t('设为默认', 'Set Default', '設為默認')}</button>` : ''}
+                ${!isDefault && !hasRootAccount ? `<button type="button" class="btn-primary btn-set-default-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer;">${t('设为默认', 'Set Default', '設為默認')}</button>` : ''}
                 <button type="button" class="btn-primary btn-edit-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(140, 82, 255, 0.1); border: 1px solid rgba(140, 82, 255, 0.3); color: #b388ff; cursor: pointer;">${t('编辑', 'Edit', '編輯')}</button>
                 <button type="button" class="btn-primary btn-delete-qqbot" data-id="${id}" style="margin-top: 0; padding: 0 10px; font-size: 11px; height: 26px; border-radius: 4px; background: rgba(255, 82, 82, 0.1); border: 1px solid rgba(255, 82, 82, 0.3); color: #ff5252; cursor: pointer;">${t('删除', 'Delete', '刪除')}</button>
             </div>
@@ -1427,9 +1412,16 @@ function renderQqbotAccounts() {
     container.querySelectorAll('.btn-set-default-qqbot').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const id = e.target.getAttribute('data-id');
-            configData.channels.qqbot.defaultAccount = id;
+            const selected = configData.channels.qqbot.accounts[id];
+            if (!selected) return;
+            const reordered = { [id]: selected };
+            for (const [accountId, account] of Object.entries(configData.channels.qqbot.accounts)) {
+                if (accountId !== id) reordered[accountId] = account;
+            }
+            configData.channels.qqbot.accounts = reordered;
             try {
-                await window.api.saveConfig(configData);
+                const saved = await window.api.saveConfig(configData);
+                if (saved && saved.config) configData = saved.config;
                 renderQqbotAccounts();
                 showToast('已成功切换默认 QQ 机器人！');
                 reloadGatewayAfterChannelChange('qqbot-default');
@@ -1443,13 +1435,13 @@ function renderQqbotAccounts() {
         btn.addEventListener('click', async (e) => {
             const id = e.target.getAttribute('data-id');
             if (confirm(`确认要删除 QQ 机器人 [ ${id} ] 吗？`)) {
-                delete configData.channels.qqbot.accounts[id];
-                if (configData.channels.qqbot.defaultAccount === id) {
-                    const keys = Object.keys(configData.channels.qqbot.accounts);
-                    configData.channels.qqbot.defaultAccount = keys[0] || '';
-                }
+                if (id === 'default' && hasRootAccount) {
+                    delete configData.channels.qqbot.appId;
+                    delete configData.channels.qqbot.clientSecret;
+                } else delete configData.channels.qqbot.accounts[id];
                 try {
-                    await window.api.saveConfig(configData);
+                    const saved = await window.api.saveConfig(configData);
+                    if (saved && saved.config) configData = saved.config;
                     renderQqbotAccounts();
                     showToast('QQ 机器人已删除！');
                     reloadGatewayAfterChannelChange('qqbot-delete');
@@ -1473,12 +1465,19 @@ function renderQqbotAccounts() {
                 showToast('App ID 和 Client Secret 不能为空！');
                 return;
             }
-            configData.channels.qqbot.accounts[id] = {
-                appId: values.appId.trim(),
-                clientSecret: values.clientSecret.trim()
-            };
+            if (id === 'default' && hasRootAccount) {
+                configData.channels.qqbot.appId = values.appId.trim();
+                configData.channels.qqbot.clientSecret = values.clientSecret.trim();
+            } else {
+                configData.channels.qqbot.accounts[id] = {
+                    ...configData.channels.qqbot.accounts[id],
+                    appId: values.appId.trim(),
+                    clientSecret: values.clientSecret.trim()
+                };
+            }
             try {
-                await window.api.saveConfig(configData);
+                const saved = await window.api.saveConfig(configData);
+                if (saved && saved.config) configData = saved.config;
                 renderQqbotAccounts();
                 showToast('QQ 机器人编辑保存成功！');
                 reloadGatewayAfterChannelChange('qqbot-edit');
@@ -1748,6 +1747,7 @@ let pluginProbeMap = {};
 
 function badgeLabelForProbe(probe) {
     const b = (probe && probe.badge) || 'ready';
+    if (b === 'limited') return (probe && probe.badgeLabel) || t('plugin.badge.limited');
     if (b === 'needs-config') return t('plugin.badge.needs_config');
     if (b === 'needs-software') return t('plugin.badge.needs_software');
     if (b === 'missing-runtime') return t('plugin.badge.missing_runtime');
@@ -1756,6 +1756,7 @@ function badgeLabelForProbe(probe) {
 
 function badgeClassForProbe(probe) {
     const b = (probe && probe.badge) || 'ready';
+    if (b === 'limited') return 'plugin-avail-badge limited';
     if (b === 'needs-config') return 'plugin-avail-badge needs-config';
     if (b === 'needs-software') return 'plugin-avail-badge needs-software';
     if (b === 'missing-runtime') return 'plugin-avail-badge missing-runtime';
@@ -2560,34 +2561,31 @@ async function init() {
             
             configData.channels.qqbot.accounts[accountId] = {
                 appId: values.appId.trim(),
-                clientSecret: values.clientSecret.trim()
+                clientSecret: values.clientSecret.trim(),
+                allowFrom: ['openclaw:approval-disabled']
             };
             
             configData.channels.qqbot.enabled = true;
             if (!configData.channels.qqbot.allowFrom) {
-                configData.channels.qqbot.allowFrom = ['*'];
+                configData.channels.qqbot.allowFrom = ['openclaw:approval-disabled'];
             }
             
-            // 确保开通了对应的 QQ 插件（OpenClaw QQ 机器人插件的真实 ID 是 `qqbot`，
-            // 早期误用 `openclaw-qqbot` 会导致插件不被加载、绑定后完全无效）
+            // QQ 渠道在 OpenClaw 2026.9 由腾讯官方 2.0 插件提供；渠道 ID
+            // 仍为 qqbot，但运行时插件 ID 是 openclaw-qqbot。
             if (!configData.plugins) configData.plugins = {};
             if (!configData.plugins.entries) configData.plugins.entries = {};
-            configData.plugins.entries['qqbot'] = { enabled: true };
+            configData.plugins.entries['openclaw-qqbot'] = { enabled: true };
             if (!configData.plugins.allow) configData.plugins.allow = [];
-            if (!configData.plugins.allow.includes('qqbot')) {
-                configData.plugins.allow.push('qqbot');
+            if (!configData.plugins.allow.includes('openclaw-qqbot')) {
+                configData.plugins.allow.push('openclaw-qqbot');
             }
-            // 清理历史错误 ID 残留，避免混淆
-            if (configData.plugins.entries['openclaw-qqbot']) delete configData.plugins.entries['openclaw-qqbot'];
-            configData.plugins.allow = configData.plugins.allow.filter((x) => x !== 'openclaw-qqbot');
-            
-            // 如果是第一个账号，自动设为 defaultAccount
-            if (!configData.channels.qqbot.defaultAccount) {
-                configData.channels.qqbot.defaultAccount = accountId;
-            }
+            // 清理旧运行时 ID 残留，避免同时加载两套 QQ 插件。
+            if (configData.plugins.entries.qqbot) delete configData.plugins.entries.qqbot;
+            configData.plugins.allow = configData.plugins.allow.filter((x) => x !== 'qqbot');
             
             try {
-                await window.api.saveConfig(configData);
+                const saved = await window.api.saveConfig(configData);
+                if (saved && saved.config) configData = saved.config;
                 renderQqbotAccounts();
                 showToast('QQ 机器人绑定成功，正在热重载网关...');
                 reloadGatewayAfterChannelChange('qqbot-add', { startIfStopped: true });
@@ -7822,8 +7820,9 @@ async function renderPluginsGrid() {
             let painted = 0;
             for (const key of UI_PLUGIN_ORDER) {
                 if (!pluginMetadata[key]) continue;
-                if (!entries[key] && key !== 'auto-start-codex' && key !== 'long-term-memory' && key !== 'voice-call') {
-                    entries[key] = { enabled: false };
+                const runtimeKey = key === 'qqbot' ? 'openclaw-qqbot' : key;
+                if (!entries[runtimeKey] && key !== 'auto-start-codex' && key !== 'long-term-memory' && key !== 'voice-call') {
+                    entries[runtimeKey] = { enabled: false };
                 }
 
                 const isLockedOn = LOCKED_ALWAYS_ON_UI_IDS.has(key);
@@ -7839,7 +7838,7 @@ async function renderPluginsGrid() {
                     // 与「语音管理」总开关联动（默认关闭）
                     isEnabled = !!(__voiceState && __voiceState.settings && __voiceState.settings.enabled);
                 } else {
-                    isEnabled = entries[key] ? entries[key].enabled === true : false;
+                    isEnabled = entries[runtimeKey] ? entries[runtimeKey].enabled === true : false;
                 }
                 if (isLockedOn) isEnabled = true;
 
@@ -7847,8 +7846,14 @@ async function renderPluginsGrid() {
                 const name = (() => { try { return t('plugin.' + key + '.name'); } catch (e) { return pluginMetadata[key].name; } })();
                 const desc = (() => { try { return t('plugin.' + key + '.desc'); } catch (e) { return pluginMetadata[key].desc; } })();
                 const statusText = (() => {
-                    try { return isEnabled ? t('plugin.status.enabled') : t('plugin.status.disabled'); }
-                    catch (e) { return isEnabled ? '已启用' : '已禁用'; }
+                    try {
+                        if (isEnabled && probe.needsConfig) return t('plugin.status.enabled_needs_config');
+                        return isEnabled ? t('plugin.status.enabled') : t('plugin.status.disabled');
+                    }
+                    catch (e) {
+                        if (isEnabled && probe.needsConfig) return '已开启 · 待配置';
+                        return isEnabled ? '已启用' : '已禁用';
+                    }
                 })();
                 const badgeText = (() => { try { return badgeLabelForProbe(probe); } catch (e) { return '开箱可用'; } })();
                 const hintText = (() => {
@@ -7941,6 +7946,7 @@ async function renderPluginsGrid() {
 
     async function onPluginToggle(e) {
         const pluginKey = e.target.getAttribute('data-plugin');
+        const runtimePluginKey = pluginKey === 'qqbot' ? 'openclaw-qqbot' : pluginKey;
         const checked = e.target.checked;
 
         if (LOCKED_ALWAYS_ON_UI_IDS.has(pluginKey)) {
@@ -7987,7 +7993,7 @@ async function renderPluginsGrid() {
                 return;
             }
 
-            if ((pluginKey === 'slack' || pluginKey === 'matrix' || pluginKey === 'telegram') && probe && probe.needsConfig) {
+            if ((pluginKey === 'slack' || pluginKey === 'matrix' || pluginKey === 'telegram' || pluginKey === 'webhooks') && probe && probe.needsConfig) {
                 const ok = await confirm(
                     (probe.hint || '') + '\n\n' + t('plugin.toast.need_credentials'),
                     t('plugin.' + pluginKey + '.name')
@@ -8007,10 +8013,17 @@ async function renderPluginsGrid() {
                     fieldDefs = [
                         { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF...' }
                     ];
-                } else {
+                } else if (pluginKey === 'matrix') {
                     fieldDefs = [
                         { key: 'homeserver', label: 'Homeserver URL', placeholder: 'https://matrix.org' },
                         { key: 'accessToken', label: 'Access Token', placeholder: 'syt_...' }
+                    ];
+                } else {
+                    fieldDefs = [
+                        { key: 'routeId', label: '路由 ID', placeholder: 'default', value: 'default' },
+                        { key: 'path', label: '接收路径', placeholder: '/hooks/nexora' },
+                        { key: 'sessionKey', label: '会话键', placeholder: 'agent:main:webhook' },
+                        { key: 'secret', label: '签名密钥', placeholder: '请设置强随机密钥', type: 'password' }
                     ];
                 }
                 const values = await window.promptFields(
@@ -8029,6 +8042,12 @@ async function renderPluginsGrid() {
                     return;
                 }
                 if (pluginKey === 'matrix' && (!values.homeserver || !values.accessToken)) {
+                    showToast(t('plugin.toast.token_required'));
+                    e.target.checked = false;
+                    paintCards();
+                    return;
+                }
+                if (pluginKey === 'webhooks' && (!values.path || !values.sessionKey || !values.secret)) {
                     showToast(t('plugin.toast.token_required'));
                     e.target.checked = false;
                     paintCards();
@@ -8087,13 +8106,21 @@ async function renderPluginsGrid() {
                 showToast(t('plugin.toast.ltm_enabled'));
             }
         } else {
-            if (!configData.plugins.entries[pluginKey]) configData.plugins.entries[pluginKey] = {};
-            configData.plugins.entries[pluginKey].enabled = checked;
+            if (!configData.plugins.entries[runtimePluginKey]) configData.plugins.entries[runtimePluginKey] = {};
+            configData.plugins.entries[runtimePluginKey].enabled = checked;
             if (checked) {
-                if (!configData.plugins.allow.includes(pluginKey)) configData.plugins.allow.push(pluginKey);
+                if (!configData.plugins.allow.includes(runtimePluginKey)) configData.plugins.allow.push(runtimePluginKey);
                 if (pluginKey === 'auto-summary' && !configData.plugins.allow.includes('llm-task')) {
                     configData.plugins.allow.push('llm-task');
                 }
+            }
+            if (pluginKey === 'duckduckgo') {
+                if (!configData.tools) configData.tools = {};
+                if (!configData.tools.web) configData.tools.web = {};
+                if (!configData.tools.web.search) configData.tools.web.search = {};
+                configData.tools.web.search.enabled = checked;
+                if (checked) configData.tools.web.search.provider = 'duckduckgo';
+                else if (configData.tools.web.search.provider === 'duckduckgo') delete configData.tools.web.search.provider;
             }
         }
 
@@ -8794,8 +8821,9 @@ function normalizeSidebarNavVisibility(preferred) {
         : Object.create(null);
     const normalized = Object.create(null);
     for (const tabId of getDefaultSidebarNavOrder()) {
-        // 网络中转属于可选能力，首次安装/恢复默认时不占用侧栏；用户明确点“显示”后再保留。
-        const defaultVisible = tabId !== 'acceleration-view';
+        // 网络中转、语音服务属于可选能力，首次安装/恢复默认时不占用侧栏；
+        // 用户明确点“显示”后仍按保存值保留。
+        const defaultVisible = !['acceleration-view', 'voice-view'].includes(tabId);
         normalized[tabId] = tabId === SIDEBAR_NAV_FIXED_TAB
             ? true
             : (Object.prototype.hasOwnProperty.call(source, tabId) ? source[tabId] !== false : defaultVisible);
@@ -20555,6 +20583,8 @@ function bindVoiceControlsOnce() {
                 showToast(voiceT('voice.toast.sapi_fallback', '男声音色未下载，已阻止系统女声朗读。请下载对应语音包。'));
             } else if (err.hint === 'neural_failed_no_sapi_fallback') {
                 showToast(voiceT('voice.toast.neural_fail', '神经音色朗读失败：{error}').replace('{error}', err.error || 'unknown'));
+            } else if (err.hint === 'online_tts_failed') {
+                showToast('error', voiceT('voice.toast.online_fail', '在线语音试听失败：{error}').replace('{error}', err.error || 'unknown'));
             }
         });
     }

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
 const PLUGIN_NAME = 'compaction-memory-guard';
 /** 每会话最短追加间隔：默认 10 分钟，避免每回合都写 MEMORY.md 跟 memory-rotate 抢写（defect 4） */
@@ -15,7 +16,7 @@ const MEMORY_FILE = path.join(
   'MEMORY.md'
 );
 
-export default function createPlugin(runtime) {
+function createLegacyPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 记忆保护插件已加载`);
 
   function readCurrentMemory() {
@@ -92,3 +93,18 @@ export default function createPlugin(runtime) {
     },
   };
 }
+
+export default definePluginEntry({
+  id: PLUGIN_NAME,
+  name: 'Compaction Memory Guard',
+  description: '对话压缩后自动备份近期关键信息到 MEMORY.md',
+  register(api) {
+    const legacy = createLegacyPlugin({ ...api.runtime, config: api.config });
+    api.on('after_compaction', async (event) => {
+      await legacy.onAfterResponse?.({ sessionFile: event?.sessionFile });
+    }, { timeoutMs: 30_000 });
+    api.on('gateway_stop', async () => {
+      await legacy.onShutdown?.();
+    });
+  },
+});

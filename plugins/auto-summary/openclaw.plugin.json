@@ -6,6 +6,7 @@
   },
   "description": "每天凌晨2点自动总结聊天记录和训练数据，写入MEMORY.md",
   "kind": "extension",
+  "activation": { "onStartup": true },
   "version": "1.0.0",
   "main": "index.js",
   "type": "module"

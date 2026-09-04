@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +33,7 @@ const MIN_QUESTION_LENGTH = 1;           // 最小问题长度，过滤空消息
 const DATA_WRITE_BUFFER_SIZE = 50;       // 批量写入缓冲（减少 fs 操作）
 const EMOTICON_REGEX = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
 
-export default function createPlugin(runtime) {
+function createLegacyPlugin(runtime) {
   const pluginName = 'dual-model-trainer';
 
   // ─── 初始化日志 ───
@@ -957,3 +958,61 @@ ${question}
     },
   };
 }
+
+function messageText(message) {
+  const content = message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (typeof part?.text === 'string') return part.text;
+    if (typeof part?.content === 'string') return part.content;
+    return '';
+  }).join('\n').trim();
+}
+
+function lastMessageText(messages, role) {
+  for (let i = Array.isArray(messages) ? messages.length - 1 : -1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== role) continue;
+    const text = messageText(message);
+    if (text) return text;
+  }
+  return '';
+}
+
+export default definePluginEntry({
+  id: 'dual-model-trainer',
+  name: 'Teach-Learn 双模型训练系统 v4',
+  description: '收集主模型回答，并可让学生模型在后台学习主模型表达',
+  register(api) {
+    const legacy = createLegacyPlugin({
+      ...api.runtime,
+      config: api.config,
+      llm: api.runtime?.llm,
+      chat: api.runtime?.chat,
+      models: api.runtime?.models,
+    });
+    api.on('agent_end', async (event, context) => {
+      if (!event?.success) return;
+      const question = lastMessageText(event.messages, 'user');
+      const response = lastMessageText(event.messages, 'assistant');
+      if (!question || !response) return;
+      const model = context?.modelProviderId && context?.modelId
+        ? `${context.modelProviderId}/${context.modelId}`
+        : (context?.modelId || '');
+      const legacyContext = {
+        ...context,
+        message: { content: question },
+        content: question,
+        response: { content: response },
+        model,
+      };
+      await legacy.onMessage?.(legacyContext);
+      await legacy.onAfterResponse?.(legacyContext);
+    }, { timeoutMs: 30_000 });
+    api.on('gateway_stop', async () => {
+      await legacy.onShutdown?.();
+    });
+  },
+});

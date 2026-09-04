@@ -3,6 +3,7 @@
   "name": "Teach-Learn 双模型训练系统 v3 (口吻模仿版)",
   "description": "老师模型回答 → 学生模型学习并 1:1 模仿老师口吻回复 → 老师不可用时学生自主回答",
   "version": "3.0.0",
+  "activation": { "onStartup": true },
   "main": "index.js",
   "type": "module",
   "configSchema": {

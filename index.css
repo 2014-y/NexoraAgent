@@ -4328,6 +4328,11 @@ select option {
   background: rgba(241, 196, 15, 0.2);
 }
 
+.plugin-avail-badge.limited {
+  color: #8a5a00;
+  background: rgba(255, 174, 66, 0.2);
+}
+
 .plugin-avail-badge.needs-software {
   color: #8a3a00;
   background: rgba(230, 126, 34, 0.2);
@@ -4344,6 +4349,9 @@ select option {
   line-height: 1.45;
   color: var(--text-secondary);
   opacity: 0.9;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .plugin-card-top p {

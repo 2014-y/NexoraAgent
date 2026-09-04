@@ -44,20 +44,34 @@ function sanitizeQqbotConfig(config) {
   const qq = config.channels.qqbot;
   if (typeof qq !== 'object' || Array.isArray(qq)) return false;
   let changed = false;
+  const approvalSentinel = 'openclaw:approval-disabled';
+  const preferredDefault = typeof qq.defaultAccount === 'string' ? qq.defaultAccount : '';
 
-  if (!qq.accounts || typeof qq.accounts !== 'object') qq.accounts = {};
+  if (!qq.accounts || typeof qq.accounts !== 'object' || Array.isArray(qq.accounts)) {
+    qq.accounts = {};
+    changed = true;
+  }
 
-  if (qq.appId && (qq.clientSecret || qq.appSecret)) {
-    if (Object.keys(qq.accounts).length === 0) {
-      qq.accounts.default = {
-        appId: String(qq.appId).trim(),
-        clientSecret: String(qq.clientSecret || qq.appSecret).trim()
-      };
-      if (!qq.defaultAccount) qq.defaultAccount = 'default';
-      changed = true;
+  // Tencent QQBot 2.0 stores the default account on the channel root.  Older
+  // Nexora builds moved it to accounts.default/defaultAccount, which OpenClaw
+  // now treats as a legacy shape and refuses until doctor migrates it.
+  const legacyDefault = qq.accounts.default;
+  if (legacyDefault && typeof legacyDefault === 'object') {
+    for (const [key, value] of Object.entries(legacyDefault)) {
+      if (key !== 'accounts' && qq[key] === undefined) qq[key] = value;
     }
-    delete qq.appId;
-    delete qq.clientSecret;
+    delete qq.accounts.default;
+    changed = true;
+  }
+  if (Object.prototype.hasOwnProperty.call(qq, 'defaultAccount')) {
+    delete qq.defaultAccount;
+    changed = true;
+  }
+  if (qq.appSecret && !qq.clientSecret) {
+    qq.clientSecret = String(qq.appSecret).trim();
+    changed = true;
+  }
+  if (Object.prototype.hasOwnProperty.call(qq, 'appSecret')) {
     delete qq.appSecret;
     changed = true;
   }
@@ -91,25 +105,48 @@ function sanitizeQqbotConfig(config) {
 
   if (changed) {
     qq.accounts = nextAccounts;
-    if (qq.defaultAccount && renameMap[qq.defaultAccount]) {
-      qq.defaultAccount = renameMap[qq.defaultAccount];
+  }
+
+  // The official 2.0 host schema no longer accepts defaultAccount. Preserve
+  // legacy intent by moving the selected named account to insertion position 1.
+  const wanted = renameMap[preferredDefault] || preferredDefault;
+  if (wanted && wanted !== 'default' && qq.accounts[wanted]) {
+    const reordered = { [wanted]: qq.accounts[wanted] };
+    for (const [id, account] of Object.entries(qq.accounts)) {
+      if (id !== wanted) reordered[id] = account;
+    }
+    qq.accounts = reordered;
+    changed = true;
+  }
+
+  for (const account of Object.values(qq.accounts)) {
+    if (!account || typeof account !== 'object') continue;
+    if (!Array.isArray(account.allowFrom) || account.allowFrom.length === 0 || account.allowFrom.includes('*')) {
+      const explicit = Array.isArray(account.allowFrom)
+        ? account.allowFrom.filter((entry) => String(entry).trim() && entry !== '*')
+        : [];
+      account.allowFrom = explicit.length > 0 ? explicit : [approvalSentinel];
+      changed = true;
     }
   }
 
   const accountIds = Object.keys(qq.accounts);
   if (accountIds.length > 0) {
-    if (!qq.defaultAccount || !qq.accounts[qq.defaultAccount]) {
-      qq.defaultAccount = accountIds[0];
-      changed = true;
-    } else if (!OPENCLAW_ACCOUNT_ID_RE.test(String(qq.defaultAccount))) {
-      const fixed = renameMap[qq.defaultAccount] || openclawNormalizeAccountId(qq.defaultAccount);
-      qq.defaultAccount = (fixed && qq.accounts[fixed]) ? fixed : accountIds[0];
-      changed = true;
-    }
     if (qq.enabled !== true) { qq.enabled = true; changed = true; }
     if (!qq.dmPolicy) { qq.dmPolicy = 'open'; changed = true; }
-    if (!Array.isArray(qq.allowFrom)) { qq.allowFrom = ['*']; changed = true; }
-    if (!qq.groupPolicy) { qq.groupPolicy = 'open'; changed = true; }
+    if (!qq.groupPolicy) { qq.groupPolicy = 'allowlist'; changed = true; }
+  }
+
+  // In Tencent QQBot 2.0, dmPolicy controls chat access while allowFrom is the
+  // native approval-operator list. A wildcard is deliberately invalid because
+  // it would grant approval authority to every sender. Keep approvals locked
+  // until the user explicitly supplies concrete QQ OpenIDs.
+  if (!Array.isArray(qq.allowFrom) || qq.allowFrom.length === 0 || qq.allowFrom.includes('*')) {
+    const explicit = Array.isArray(qq.allowFrom)
+      ? qq.allowFrom.filter((entry) => String(entry).trim() && entry !== '*')
+      : [];
+    qq.allowFrom = explicit.length > 0 ? explicit : [approvalSentinel];
+    changed = true;
   }
 
   return changed;

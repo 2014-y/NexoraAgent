@@ -20,6 +20,11 @@ const LONG_TERM_MEMORY_STACK = [
 
 /** UI 伞形卡 ID（仅用于 Nexora Agent 插件菜单，不写入 OpenClaw plugins.allow） */
 const LONG_TERM_MEMORY_UI_ID = 'long-term-memory';
+const UI_RUNTIME_PLUGIN_IDS = Object.freeze({ qqbot: 'openclaw-qqbot' });
+
+function runtimePluginIdForUi(id) {
+  return UI_RUNTIME_PLUGIN_IDS[id] || id;
+}
 
 /** A：零配置（随 OpenClaw 或我们 seed） */
 const ZERO_CONFIG_PLUGINS = [
@@ -152,6 +157,14 @@ function ensureLongTermMemoryStack(config) {
       changes.push(`${id}: enabled -> true (long-term-memory oobe)`);
     }
     if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
+    if (!config.plugins.entries[id].hooks || typeof config.plugins.entries[id].hooks !== 'object') {
+      config.plugins.entries[id].hooks = {};
+      changes.push(`${id}: hooks created`);
+    }
+    if (config.plugins.entries[id].hooks.allowConversationAccess !== true) {
+      config.plugins.entries[id].hooks.allowConversationAccess = true;
+      changes.push(`${id}: conversation access enabled`);
+    }
   }
   // UI 伞形状态只存在于 Nexora 面板推导；勿写入 openclaw.json（OpenClaw 会告警 plugin not found）
   if (config.plugins.entries && config.plugins.entries[LONG_TERM_MEMORY_UI_ID]) {
@@ -197,23 +210,27 @@ function ensureUiPluginCatalog(config, opts = {}) {
   const changes = [];
   const forceDefaultOn = Boolean(opts.forceDefaultOn);
 
-  // 迁移历史错误插件 ID：早期版本误用 `openclaw-qqbot`，但 OpenClaw QQ 机器人插件的真实 ID 是 `qqbot`。
-  // 错误 ID 会导致插件既不进 allow 也不被加载，QQ 绑定“完全没效果”。此处把旧条目安全迁移到正确 ID。
+  // OpenClaw 2026.9 将 QQ 渠道迁移到腾讯官方 2.0 插件；UI 仍用
+  // `qqbot` 作为卡片 ID，运行时插件 ID 则是 `openclaw-qqbot`。
   try {
-    if (config.plugins && config.plugins.entries && config.plugins.entries['openclaw-qqbot']) {
-      const legacy = config.plugins.entries['openclaw-qqbot'];
-      if (!config.plugins.entries['qqbot']) {
-        config.plugins.entries['qqbot'] = legacy;
+    if (config.plugins && config.plugins.entries && config.plugins.entries.qqbot) {
+      const legacy = config.plugins.entries.qqbot;
+      if (!config.plugins.entries['openclaw-qqbot']) {
+        config.plugins.entries['openclaw-qqbot'] = legacy;
       } else if (legacy && legacy.enabled === true) {
-        config.plugins.entries['qqbot'].enabled = true;
+        config.plugins.entries['openclaw-qqbot'].enabled = true;
       }
-      delete config.plugins.entries['openclaw-qqbot'];
-      changes.push('qqbot: migrated legacy id openclaw-qqbot -> qqbot');
+      delete config.plugins.entries.qqbot;
+      changes.push('qqbot: migrated legacy runtime id qqbot -> openclaw-qqbot');
     }
     if (config.plugins && Array.isArray(config.plugins.allow)) {
       const before = config.plugins.allow.length;
-      config.plugins.allow = config.plugins.allow.filter((x) => x !== 'openclaw-qqbot');
-      if (config.plugins.allow.length !== before) changes.push('qqbot: removed legacy openclaw-qqbot from allow');
+      config.plugins.allow = config.plugins.allow.filter((x) => x !== 'qqbot');
+      if (config.plugins.allow.length !== before) changes.push('qqbot: removed legacy runtime allow id');
+      if (!config.plugins.allow.includes('openclaw-qqbot')) {
+        config.plugins.allow.push('openclaw-qqbot');
+        changes.push('openclaw-qqbot: +allow');
+      }
     }
   } catch (e) {}
 
@@ -233,7 +250,8 @@ function ensureUiPluginCatalog(config, opts = {}) {
   for (const id of CREDENTIAL_PLUGINS) {
     // 不要预先写入 entries（OpenClaw 会对「有条目但未安装」刷 Config warnings）
     // 用户在插件页打开时再写入；allow 仍保留方便一键启用
-    if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
+    const runtimeId = runtimePluginIdForUi(id);
+    if (ensureAllow(config, runtimeId)) changes.push(`${runtimeId}: +allow`);
   }
 
   // 长期记忆开箱：强制启用真实插件栈 + UI 伞形卡
@@ -242,12 +260,13 @@ function ensureUiPluginCatalog(config, opts = {}) {
 
   // QQ / 微信 / 飞书：与长期记忆同级，始终开启（UI 开关锁定）
   for (const id of ['qqbot', 'openclaw-weixin', 'feishu']) {
-    if (ensureEntry(config, id, true)) changes.push(`${id}: entry created`);
-    if (config.plugins.entries[id] && config.plugins.entries[id].enabled !== true) {
-      config.plugins.entries[id].enabled = true;
-      changes.push(`${id}: enabled -> true (locked always-on)`);
+    const runtimeId = runtimePluginIdForUi(id);
+    if (ensureEntry(config, runtimeId, true)) changes.push(`${runtimeId}: entry created`);
+    if (config.plugins.entries[runtimeId] && config.plugins.entries[runtimeId].enabled !== true) {
+      config.plugins.entries[runtimeId].enabled = true;
+      changes.push(`${runtimeId}: enabled -> true (locked always-on)`);
     }
-    if (ensureAllow(config, id)) changes.push(`${id}: +allow`);
+    if (ensureAllow(config, runtimeId)) changes.push(`${runtimeId}: +allow`);
   }
 
   // 角色管理：全渠道查询/切换基础能力，始终默认开启（不进插件菜单）
@@ -257,6 +276,20 @@ function ensureUiPluginCatalog(config, opts = {}) {
     changes.push('role-manager: enabled -> true (role commands oobe)');
   }
   if (ensureAllow(config, 'role-manager')) changes.push('role-manager: +allow');
+
+  // 双模型教学通过 agent_end 读取本轮问答；OpenClaw 2026.9 对非内置
+  // conversation hooks 默认拒绝，必须显式授权，否则插件虽显示 loaded 却永远不执行。
+  if (config.plugins.entries['dual-model-trainer']) {
+    const dmt = config.plugins.entries['dual-model-trainer'];
+    if (!dmt.hooks || typeof dmt.hooks !== 'object') {
+      dmt.hooks = {};
+      changes.push('dual-model-trainer: hooks created');
+    }
+    if (dmt.hooks.allowConversationAccess !== true) {
+      dmt.hooks.allowConversationAccess = true;
+      changes.push('dual-model-trainer: conversation access enabled');
+    }
+  }
 
   // llm-task 作为摘要能力补充始终允许（即使 UI 主卡是 long-term-memory）
   if (ensureAllow(config, 'llm-task')) changes.push('llm-task: +allow');
@@ -315,7 +348,7 @@ function pluginLooksPresent(pluginId, opts = {}) {
   if (appRoot) {
     const scoped = {
       'openclaw-weixin': ['@tencent-weixin/openclaw-weixin'],
-      qqbot: ['@openclaw/qqbot'],
+      qqbot: ['@tencent-connect/openclaw-qqbot'],
       feishu: ['@openclaw/feishu'],
       'voice-call': ['@openclaw/voice-call'],
       slack: ['@openclaw/slack'],
@@ -485,6 +518,22 @@ function voiceCallNeedsConfig() {
   };
 }
 
+function webhooksNeedsConfig(config) {
+  const routes = config?.plugins?.entries?.webhooks?.config?.routes;
+  const ready = routes && typeof routes === 'object' && Object.values(routes).some((route) => (
+    route && typeof route === 'object'
+    && String(route.path || '').trim()
+    && String(route.sessionKey || '').trim()
+    && route.secret
+  ));
+  if (ready) return { needsConfig: false, missingFields: [], hint: 'Webhook 路由与签名密钥已配置' };
+  return {
+    needsConfig: true,
+    missingFields: ['routeId', 'path', 'sessionKey', 'secret'],
+    hint: '需配置至少一条 Webhook 路由、会话键和签名密钥；只开开关不会产生入口'
+  };
+}
+
 /**
  * @returns {{ id, tier, available, needsConfig, missingFields, hint, badge, codexPath? }}
  */
@@ -527,6 +576,33 @@ function probePlugin(pluginId, opts = {}) {
     base.missingFields = [];
     base.hint = n.hint;
     base.badge = 'ready';
+    return base;
+  }
+
+  if (pluginId === 'dual-model-trainer') {
+    const entry = config?.plugins?.entries?.[pluginId] || {};
+    const cfg = entry.config || {};
+    if (cfg.mode !== 'teach-learn' || cfg.enableTeachLearn !== true) {
+      base.badge = 'limited';
+      base.badgeLabel = '仅收集';
+      base.hint = '当前为“仅收集”模式，不会调用学生模型；可在“模型配置”中开启双模型教学';
+    } else if (!String(cfg.studentModel || '').trim()) {
+      base.badge = 'needs-config';
+      base.needsConfig = true;
+      base.missingFields = ['studentModel'];
+      base.hint = '已选择双模型教学，但尚未配置学生模型';
+    } else {
+      base.badge = 'ready';
+      base.hint = `双模型教学已配置：${String(cfg.studentModel).trim()}`;
+    }
+    return base;
+  }
+
+  if (pluginId === 'webhooks') {
+    const n = webhooksNeedsConfig(config);
+    Object.assign(base, n);
+    base.badge = n.needsConfig ? 'needs-config' : 'ready';
+    base.blockEnable = false;
     return base;
   }
 
@@ -670,6 +746,27 @@ function applyPluginCredentials(config, pluginId, fields) {
     return { ok: true };
   }
 
+  if (pluginId === 'webhooks') {
+    const routeId = String(fields.routeId || 'default').trim().replace(/[^a-zA-Z0-9_-]/g, '-') || 'default';
+    let routePath = String(fields.path || '').trim();
+    if (routePath && !routePath.startsWith('/')) routePath = '/' + routePath;
+    const sessionKey = String(fields.sessionKey || '').trim();
+    const secret = String(fields.secret || '').trim();
+    if (!routePath || !sessionKey || !secret) return { ok: false, error: 'Webhook 路由、会话键和密钥不能为空' };
+    config.plugins.entries.webhooks = config.plugins.entries.webhooks || {};
+    config.plugins.entries.webhooks.enabled = true;
+    config.plugins.entries.webhooks.config = config.plugins.entries.webhooks.config || {};
+    config.plugins.entries.webhooks.config.routes = config.plugins.entries.webhooks.config.routes || {};
+    config.plugins.entries.webhooks.config.routes[routeId] = {
+      enabled: true,
+      path: routePath,
+      sessionKey,
+      secret
+    };
+    ensureAllow(config, 'webhooks');
+    return { ok: true };
+  }
+
   return { ok: false, error: 'unsupported plugin' };
 }
 
@@ -684,6 +781,7 @@ module.exports = {
   PLUGIN_TIER,
   LONG_TERM_MEMORY_STACK,
   LONG_TERM_MEMORY_UI_ID,
+  runtimePluginIdForUi,
   ensureUiPluginCatalog,
   ensureLongTermMemoryStack,
   isLongTermMemoryEnabled,

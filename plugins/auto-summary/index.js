@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
 const PLUGIN_NAME = 'auto-summary';
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
@@ -32,7 +33,7 @@ function autoSummaryEnabled() {
   return true;
 }
 
-export default function createPlugin(runtime) {
+function createLegacyPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 📅 长期记忆·自动摘要已加载`);
 
   function readMemoryFile(dateStr) {
@@ -188,3 +189,26 @@ ${currentMem || '(无)'}
     },
   };
 }
+
+export default definePluginEntry({
+  id: PLUGIN_NAME,
+  name: '每日自动总结',
+  description: '每天自动整理对话与训练数据并写入 MEMORY.md',
+  register(api) {
+    const legacy = createLegacyPlugin({
+      ...api.runtime,
+      config: api.config,
+      llm: api.runtime?.llm,
+    });
+    api.on('agent_end', async (event, context) => {
+      if (!event?.success) return;
+      await legacy.onAfterResponse?.({
+        ...context,
+        messages: event.messages,
+      });
+    }, { timeoutMs: 30_000 });
+    api.on('gateway_stop', async () => {
+      await legacy.onShutdown?.();
+    });
+  },
+});

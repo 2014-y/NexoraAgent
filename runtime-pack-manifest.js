@@ -3,7 +3,7 @@
  * 网关运行时打包 / 解压共用清单（单一真相源）。
  * pack-gateway-runtime.js 与 gateway-runtime.js 必须引用同一份。
  */
-const RUNTIME_PACK_ID = 'pack-fec760d6f516';
+const RUNTIME_PACK_ID = 'pack-74c713e7926c';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
 const ALL_RUNTIME_MARKERS = [
@@ -16,7 +16,8 @@ const ALL_RUNTIME_MARKERS = [
   ['node_modules', '@openclaw', 'feishu', 'package.json'],
   ['node_modules', '@openclaw', 'feishu', 'dist', 'index.js'],
   ['node_modules', '@openclaw', 'feishu', 'dist', 'setup-entry.js'],
-  ['node_modules', '@openclaw', 'qqbot', 'package.json'],
+  ['node_modules', '@tencent-connect', 'openclaw-qqbot', 'package.json'],
+  ['node_modules', '@tencent-connect', 'openclaw-qqbot', 'preload.cjs'],
   ['node_modules', '@openclaw', 'slack', 'package.json'],
   ['node_modules', '@openclaw', 'whatsapp', 'package.json'],
   ['node_modules', '@openclaw', 'matrix', 'package.json'],

@@ -817,7 +817,17 @@ class VoiceRuntime extends EventEmitter {
 
         // 1) 微软 Edge 在线神经 TTS（云扬等）
         if (isOnlinePack(pack)) {
-            await this._speakWithEdgeOnline(job, pack, volume);
+            try {
+                await this._speakWithEdgeOnline(job, pack, volume);
+            } catch (error) {
+                this._broadcast('voice-speak-error', {
+                    packId: job.packId,
+                    packName: pack && pack.name,
+                    error: error && error.message ? error.message : String(error || 'online tts failed'),
+                    hint: 'online_tts_failed'
+                });
+                throw error;
+            }
             return;
         }
 
@@ -868,7 +878,14 @@ class VoiceRuntime extends EventEmitter {
         const volPct = Math.max(0, Math.min(100, volume));
 
         fs.mkdirSync(this.tmpDir, { recursive: true });
-        const mp3Path = path.join(this.tmpDir, `edge-tts-${Date.now()}.mp3`);
+        // msedge-tts.toFile() 的第一个参数是“输出目录”，不是目标文件名。
+        // 每次使用独立目录，既符合其 API，也避免上一次残留的 audio.mp3 被误判为本次结果。
+        const jobDir = path.join(
+            this.tmpDir,
+            `edge-tts-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+        );
+        fs.mkdirSync(jobDir, { recursive: true });
+        let mp3Path = path.join(jobDir, 'audio.mp3');
 
         let synthesized = false;
         // 1) 优先 Node msedge-tts
@@ -878,7 +895,15 @@ class VoiceRuntime extends EventEmitter {
                 const tts = new MsEdgeTTS();
                 await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
                 if (epoch === this._speakEpoch) {
-                    await tts.toFile(mp3Path, job.text, { rate: rateStr, volume: String(volPct) });
+                    const safeText = String(job.text || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+                    const result = await tts.toFile(jobDir, safeText, {
+                        rate: rateStr,
+                        volume: String(volPct)
+                    });
+                    if (result && result.audioFilePath) mp3Path = path.resolve(result.audioFilePath);
                     synthesized = fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 1000;
                 }
                 try { tts.close(); } catch (e) {}
@@ -894,7 +919,7 @@ class VoiceRuntime extends EventEmitter {
         }
 
         if (epoch !== this._speakEpoch) {
-            try { fs.unlinkSync(mp3Path); } catch (e) {}
+            try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch (e) {}
             return;
         }
         if (!synthesized) {
@@ -904,7 +929,7 @@ class VoiceRuntime extends EventEmitter {
         try {
             await this._playWav(mp3Path, volume, epoch);
         } finally {
-            try { fs.unlinkSync(mp3Path); } catch (e) {}
+            try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch (e) {}
         }
     }
 

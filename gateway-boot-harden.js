@@ -9,13 +9,14 @@ const fs = require('fs');
 const path = require('path');
 
 const CHANNEL_PLUGIN_IDS = [
-  'feishu', 'qqbot', 'slack', 'whatsapp', 'matrix', 'voice-call', 'telegram'
+  'feishu', 'openclaw-qqbot', 'slack', 'whatsapp', 'matrix', 'voice-call', 'telegram'
 ];
 const STALE_PLUGIN_IDS = [
   'long-term-memory',
   'channel-router',
   'key-rotator-proxy',
-  'system-control'
+  'system-control',
+  'qqbot'
 ];
 
 function exists(p) {
@@ -175,7 +176,7 @@ function ensureSandboxNpmPresent(runtimeRoot, projectRoot) {
 
 const CHANNEL_PACKAGE_BY_ID = {
   feishu: '@openclaw/feishu',
-  qqbot: '@openclaw/qqbot',
+  'openclaw-qqbot': '@tencent-connect/openclaw-qqbot',
   slack: '@openclaw/slack',
   whatsapp: '@openclaw/whatsapp',
   matrix: '@openclaw/matrix',

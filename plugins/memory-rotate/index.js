@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
 const PLUGIN_NAME = 'memory-rotate';
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR
@@ -17,7 +18,7 @@ const MEMORY_DIR = path.join(STATE_DIR, 'workspace', 'memory');
 const MAX_CHARS = 4500;
 const PROTECTED_HEADING = /^##\s+Active session context\b/i;
 
-export default function createPlugin(runtime) {
+function createLegacyPlugin(runtime) {
   console.log(`[${PLUGIN_NAME}] 记忆旋转插件已加载 (上限: ${MAX_CHARS} chars)`);
 
   function parseSections(content) {
@@ -117,3 +118,18 @@ export default function createPlugin(runtime) {
     async onShutdown() { console.log(`[${PLUGIN_NAME}] stopped`); },
   };
 }
+
+export default definePluginEntry({
+  id: PLUGIN_NAME,
+  name: 'Memory Rotation',
+  description: 'Prevents MEMORY.md from growing unbounded by archiving old content',
+  register(api) {
+    const legacy = createLegacyPlugin({ ...api.runtime, config: api.config });
+    api.on('agent_end', async () => {
+      await legacy.onAfterResponse?.({});
+    }, { timeoutMs: 30_000 });
+    api.on('gateway_stop', async () => {
+      await legacy.onShutdown?.();
+    });
+  },
+});
