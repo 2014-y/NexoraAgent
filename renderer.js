@@ -8814,7 +8814,11 @@ function normalizeSidebarNavVisibility(preferred) {
         : Object.create(null);
     const normalized = Object.create(null);
     for (const tabId of getDefaultSidebarNavOrder()) {
-        normalized[tabId] = tabId === SIDEBAR_NAV_FIXED_TAB ? true : source[tabId] !== false;
+        // 网络中转属于可选能力，首次安装/恢复默认时不占用侧栏；用户明确点“显示”后再保留。
+        const defaultVisible = tabId !== 'acceleration-view';
+        normalized[tabId] = tabId === SIDEBAR_NAV_FIXED_TAB
+            ? true
+            : (Object.prototype.hasOwnProperty.call(source, tabId) ? source[tabId] !== false : defaultVisible);
     }
     return normalized;
 }

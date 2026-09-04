@@ -11,6 +11,7 @@ assert.match(renderer, /if \(target < 1 \|\| target >= order\.length\) return or
 assert.match(renderer, /setting_sidebar_nav_visibility: '\{\}'/, 'visibility must have a persisted default');
 assert.match(renderer, /fixed \? '' : `<div class="settings-menu-order-actions">/, 'the fixed first row must render no actions');
 assert.match(renderer, /data-menu-visibility=/, 'all non-fixed rows must expose visibility controls');
+assert.match(renderer, /const defaultVisible = tabId !== 'acceleration-view'/, 'network relay must be hidden by default');
 assert.match(renderer, /if \(active\)[\s\S]*if \(fixed\) fixed\.click\(\)/, 'hiding the active menu must return to dashboard');
 assert.match(styles, /\.sidebar-nav > \.nav-item\.is-menu-hidden\s*\{\s*display: none !important;/, 'hidden menus must be removed from sidebar layout');
 
