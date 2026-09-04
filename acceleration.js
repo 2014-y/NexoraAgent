@@ -1231,11 +1231,23 @@ function sanitizeProfileName(name) {
 function listProfiles() {
     ensureDirs();
     const metaPath = path.join(getRootDir(), 'profiles.json');
-    let list = [];
+    let list = null;
     try {
-        if (fs.existsSync(metaPath)) list = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (clientSettingsStore) list = clientSettingsStore.get('acceleration', 'profiles', null);
+    } catch (e) {
+        console.warn('[Acceleration] profile database read failed:', e && e.message);
+    }
+    try {
+        if (!Array.isArray(list) && fs.existsSync(metaPath)) list = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     } catch (e) {}
     if (!Array.isArray(list)) list = [];
+    try {
+        if (clientSettingsStore && clientSettingsStore.get('acceleration', 'profiles', null) === null) {
+            clientSettingsStore.set('acceleration', 'profiles', list);
+        }
+    } catch (e) {
+        console.warn('[Acceleration] profile database migration failed:', e && e.message);
+    }
     let changed = false;
     const out = list.filter((p) => p && p.id && fs.existsSync(path.join(getProfilesDir(), `${p.id}.yaml`))).map((p) => {
         const before = p.userInfo ? JSON.stringify(p.userInfo) : '';
@@ -1252,7 +1264,22 @@ function listProfiles() {
 
 function saveProfilesMeta(list) {
     ensureDirs();
-    fs.writeFileSync(path.join(getRootDir(), 'profiles.json'), JSON.stringify(list, null, 2), 'utf8');
+    let databaseSaved = false;
+    if (clientSettingsStore) {
+        try {
+            clientSettingsStore.set('acceleration', 'profiles', Array.isArray(list) ? list : []);
+            databaseSaved = true;
+        } catch (e) {
+            console.warn('[Acceleration] profile database write failed:', e && e.message);
+        }
+    }
+    // 保留旧文件作为降级兼容副本；SQLite 是主读取源。
+    try {
+        fs.writeFileSync(path.join(getRootDir(), 'profiles.json'), JSON.stringify(list, null, 2), 'utf8');
+    } catch (e) {
+        if (!databaseSaved) throw e;
+        console.warn('[Acceleration] legacy profile backup write failed:', e && e.message);
+    }
 }
 
 function writeProfileYaml(id, content) {

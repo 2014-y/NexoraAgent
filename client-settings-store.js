@@ -21,6 +21,7 @@ const RENDERER_SETTING_KEYS = new Set([
     'console_view_mode',
     'chat_quick_panel_collapsed',
     'guide_completed',
+    'client_pref_chat_model',
     'client_pref_image_model',
     'client_pref_video_model'
 ]);

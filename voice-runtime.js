@@ -2,7 +2,7 @@
 
 /**
  * Nexora Agent — 本地离线语音运行时（主进程）
- * - 设置持久化 nexora-voice.json
+ * - 设置以 SQLite 为主存储，并兼容迁移旧 nexora-voice.json
  * - TTS：优先 Piper CLI（若已下载），否则 Windows SAPI（离线可用）
  * - 本机 HTTP：供 voice-bridge 插件投递渠道 AI 回复朗读
  * - 单队列播放；静音清空队列；默认全部关闭不占性能
@@ -201,6 +201,7 @@ class VoiceRuntime extends EventEmitter {
     constructor() {
         super();
         this._configDir = null;
+        this._settingsStore = null;
         this._settings = { ...DEFAULT_SETTINGS };
         this._queue = [];
         this._speaking = false;
@@ -221,6 +222,7 @@ class VoiceRuntime extends EventEmitter {
 
     init(opts) {
         this._configDir = opts.configDir;
+        if (opts.settingsStore) this._settingsStore = opts.settingsStore;
         this._mainWindowGetter = opts.getMainWindow || null;
         fs.mkdirSync(this.packsDir, { recursive: true });
         fs.mkdirSync(this.tmpDir, { recursive: true });
@@ -491,29 +493,72 @@ class VoiceRuntime extends EventEmitter {
         return !!this._findOnnxModel(id);
     }
 
-    _readSettings() {
+    _normalizeSettings(parsed) {
+        const value = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        const activeId = value.activePackId;
+        const activeOk = MALE_VOICE_PACK_IDS.has(activeId)
+            || !!(value.customPacks || []).find((p) => p && p.id === activeId);
+        return {
+            ...DEFAULT_SETTINGS,
+            ...value,
+            activePackId: activeOk ? activeId : DEFAULT_SETTINGS.activePackId,
+            volume: clampVolume(value.volume),
+            roleVoiceMap: {}
+        };
+    }
+
+    _readLegacySettings() {
         try {
-            if (!fs.existsSync(this.settingsPath)) return { ...DEFAULT_SETTINGS };
+            if (!fs.existsSync(this.settingsPath)) return null;
             const raw = fs.readFileSync(this.settingsPath, 'utf8').replace(/^\uFEFF/, '');
             const parsed = JSON.parse(raw);
-            const activeId = parsed.activePackId;
-            const activeOk = MALE_VOICE_PACK_IDS.has(activeId)
-                || !!(parsed.customPacks || []).find((p) => p && p.id === activeId);
-            return {
-                ...DEFAULT_SETTINGS,
-                ...parsed,
-                activePackId: activeOk ? activeId : DEFAULT_SETTINGS.activePackId,
-                volume: clampVolume(parsed.volume),
-                roleVoiceMap: {}
-            };
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
         } catch (e) {
-            return { ...DEFAULT_SETTINGS };
+            return null;
         }
     }
 
+    _readSettings() {
+        let parsed = null;
+        let loadedFromDatabase = false;
+        if (this._settingsStore) {
+            try {
+                parsed = this._settingsStore.get('voice', 'settings', null);
+                loadedFromDatabase = !!(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+            } catch (e) {
+                console.warn('[VoiceRuntime] SQLite settings read failed:', e && e.message);
+            }
+        }
+        if (!loadedFromDatabase) parsed = this._readLegacySettings();
+        const normalized = this._normalizeSettings(parsed);
+        if (!loadedFromDatabase && this._settingsStore) {
+            try {
+                this._settingsStore.set('voice', 'settings', normalized);
+            } catch (e) {
+                console.warn('[VoiceRuntime] SQLite settings migration failed:', e && e.message);
+            }
+        }
+        return normalized;
+    }
+
     _writeSettings() {
-        fs.mkdirSync(path.dirname(this.settingsPath), { recursive: true });
-        fs.writeFileSync(this.settingsPath, JSON.stringify(this._settings, null, 2), 'utf8');
+        let databaseSaved = false;
+        if (this._settingsStore) {
+            try {
+                this._settingsStore.set('voice', 'settings', this._settings);
+                databaseSaved = true;
+            } catch (e) {
+                console.warn('[VoiceRuntime] SQLite settings write failed:', e && e.message);
+            }
+        }
+        // 暂时双写旧文件，方便旧版本回退；SQLite 始终优先读取。
+        try {
+            fs.mkdirSync(path.dirname(this.settingsPath), { recursive: true });
+            fs.writeFileSync(this.settingsPath, JSON.stringify(this._settings, null, 2), 'utf8');
+        } catch (e) {
+            if (!databaseSaved) throw e;
+            console.warn('[VoiceRuntime] legacy settings backup write failed:', e && e.message);
+        }
     }
 
     getSettings() {
@@ -1411,6 +1456,7 @@ const voiceRuntime = new VoiceRuntime();
 
 module.exports = {
     voiceRuntime,
+    VoiceRuntime,
     DEFAULT_SETTINGS,
     VOICE_PACKS,
     sanitizeText

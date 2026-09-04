@@ -8546,7 +8546,7 @@ input:focus, select:focus, textarea:focus {
 .session-archive-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .session-archive-tag { color: #7fe6ff; background: rgba(0,210,255,0.08); border: 1px solid rgba(0,210,255,0.18); border-radius: 999px; padding: 2px 8px; font-size: 10px; }
 .session-archive-detail { min-height: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.session-archive-detail-empty { height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-secondary); border: 1px dashed var(--border-color); border-radius: 12px; }
+.session-archive-detail-empty { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 24px 36px; text-align: center; line-height: 1.65; color: var(--text-secondary); border: 1px dashed var(--border-color); border-radius: 12px; }
 .session-archive-detail-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
 .session-archive-detail-title { margin: 0 0 6px 0; color: var(--text-primary); font-size: 18px; }
 .session-archive-detail-meta { color: var(--text-secondary); font-size: 12px; }

@@ -11738,6 +11738,7 @@ app.whenReady().then(async () => {
         // CONFIG_DIR 可能稍后才最终确定，这里先用当前值；home 矫正后再 re-init
         voiceRuntime.init({
             configDir: CONFIG_DIR,
+            settingsStore: getClientSettingsStore(),
             getMainWindow: () => mainWindow
         });
     } catch (e) {
@@ -11834,6 +11835,7 @@ app.whenReady().then(async () => {
     try {
         voiceRuntime.init({
             configDir: CONFIG_DIR,
+            settingsStore: getClientSettingsStore(),
             getMainWindow: () => mainWindow
         });
     } catch (e) {

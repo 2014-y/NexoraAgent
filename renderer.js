@@ -8,6 +8,7 @@ const CLIENT_SETTING_KEYS = new Set([
     'console_view_mode',
     'chat_quick_panel_collapsed',
     'guide_completed',
+    'client_pref_chat_model',
     'client_pref_image_model',
     'client_pref_video_model'
 ]);
@@ -14595,9 +14596,12 @@ try {
     });
 } catch (_) {}
 
+let __dataCenterLoading = false;
+
 async function loadDataCenterUi(forceReload = false) {
     const frame = document.getElementById('data-center-iframe');
-    if (!frame) return;
+    if (!frame || __dataCenterLoading) return;
+    __dataCenterLoading = true;
     try {
         if (!window.api || typeof window.api.getDataCenterUrl !== 'function') {
             throw new Error('getDataCenterUrl unavailable');
@@ -14620,26 +14624,28 @@ async function loadDataCenterUi(forceReload = false) {
             } catch (_) {}
             return;
         }
-        const waitLoad = new Promise((resolve) => {
+        const waitForFrameLoad = (timeoutMs, markOrigin) => new Promise((resolve) => {
             let done = false;
             const finish = (loaded) => {
                 if (done) return;
                 done = true;
                 frame.removeEventListener('load', onLoad);
-                if (loaded) {
+                if (loaded && markOrigin) {
                     try { frame.dataset.loadedOrigin = new URL(frame.src).origin; } catch (_) {}
                 }
-                resolve();
+                resolve(loaded);
             };
             const onLoad = () => finish(true);
             frame.addEventListener('load', onLoad);
-            setTimeout(() => finish(false), 12000);
+            setTimeout(() => finish(false), timeoutMs);
         });
         if (currentSrc === url) {
             delete frame.dataset.loadedOrigin;
+            const blankLoad = waitForFrameLoad(1000, false);
             frame.src = 'about:blank';
-            await new Promise((r) => setTimeout(r, 30));
+            await blankLoad;
         }
+        const waitLoad = waitForFrameLoad(12000, true);
         delete frame.dataset.loadedOrigin;
         frame.src = url;
         await waitLoad;
@@ -14656,6 +14662,8 @@ async function loadDataCenterUi(forceReload = false) {
                     : t('数据总览启动失败', 'Data Overview failed to start', '數據總覽啟動失敗')
             );
         } catch (_) {}
+    } finally {
+        __dataCenterLoading = false;
     }
 }
 
