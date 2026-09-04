@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld('api', {
     // 配置读写
     readConfig: () => ipcRenderer.invoke('config-read'),
     saveConfig: (newConfig) => ipcRenderer.invoke('config-save', newConfig),
+    clientSettings: {
+        // 启动时同步恢复，必须先于 renderer.js 中任何配置读取执行。
+        bootstrap: (legacyValues) => ipcRenderer.sendSync('client-settings-bootstrap-sync', legacyValues || {}),
+        set: (key, value) => ipcRenderer.invoke('client-settings-set', key, value),
+        remove: (key) => ipcRenderer.invoke('client-settings-remove', key),
+        clear: () => ipcRenderer.invoke('client-settings-clear')
+    },
     /** 实测模型真实上下文窗口（报错解析+标记回忆），适配任意 OpenAI 兼容自定义服务商 */
     probeModelContext: (provider, model, target) => ipcRenderer.invoke('model-probe-context', provider, model, target),
     persistMediaPrefs: (payload) => ipcRenderer.invoke('persist-media-prefs', payload),

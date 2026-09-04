@@ -71,6 +71,36 @@ const roleConfig = require('./role-config');
 const { voiceRuntime } = require('./voice-runtime');
 const { startGoogleLogin, cancelGoogleLogin, uploadConfigToDrive, downloadConfigFromDrive, refreshAccessToken } = require('./google-login');
 const { createSkillCenter } = require('./skill-center');
+const { ClientSettingsStore, isSafeRendererSettingKey } = require('./client-settings-store');
+
+let clientSettingsStore = null;
+function getClientSettingsStore() {
+    if (clientSettingsStore) return clientSettingsStore;
+    const dbPath = path.join(app.getPath('userData'), 'client-settings.sqlite');
+    clientSettingsStore = new ClientSettingsStore(dbPath);
+    return clientSettingsStore;
+}
+
+function readClientSystemSetting(key, fallback = undefined) {
+    try { return getClientSettingsStore().get('system', key, fallback); } catch (e) {
+        console.warn('[ClientSettings] read system setting failed:', key, e && e.message);
+        return fallback;
+    }
+}
+
+function writeClientSystemSetting(key, value) {
+    try { return getClientSettingsStore().set('system', key, value); } catch (e) {
+        console.warn('[ClientSettings] write system setting failed:', key, e && e.message);
+        return value;
+    }
+}
+
+function seedClientSystemSetting(key, value) {
+    try { getClientSettingsStore().setIfAbsent('system', key, value); } catch (e) {
+        console.warn('[ClientSettings] migrate system setting failed:', key, e && e.message);
+    }
+    return readClientSystemSetting(key, value);
+}
 
 /** 技能中心（延迟绑定 CONFIG_DIR，避免启动期 TDZ） */
 let skillCenterApi = null;
@@ -9054,6 +9084,57 @@ ipcMain.handle('google-sync-download', async () => {
 });
 
 
+// 客户端轻量偏好统一落 SQLite。渲染层仍可使用 localStorage 作为同步读取缓存，
+// 但数据库是跨重启/升级的权威副本；约定 setting_* 等安全键会自动持久化。
+ipcMain.on('client-settings-bootstrap-sync', (event, legacyValues) => {
+    try {
+        const values = getClientSettingsStore().bootstrap(
+            'renderer',
+            legacyValues,
+            isSafeRendererSettingKey
+        );
+        const safeValues = Object.create(null);
+        for (const [key, value] of Object.entries(values)) {
+            if (isSafeRendererSettingKey(key) && typeof value === 'string') safeValues[key] = value;
+        }
+        event.returnValue = { success: true, values: safeValues };
+    } catch (e) {
+        console.warn('[ClientSettings] renderer bootstrap failed:', e && e.message);
+        event.returnValue = { success: false, values: {}, error: e && e.message };
+    }
+});
+
+ipcMain.handle('client-settings-set', async (_event, key, value) => {
+    if (!isSafeRendererSettingKey(key) || typeof value !== 'string') {
+        return { success: false, error: 'unsupported client setting' };
+    }
+    try {
+        getClientSettingsStore().set('renderer', key, value);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+});
+
+ipcMain.handle('client-settings-remove', async (_event, key) => {
+    if (!isSafeRendererSettingKey(key)) return { success: false, error: 'unsupported client setting' };
+    try {
+        getClientSettingsStore().remove('renderer', key);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+});
+
+ipcMain.handle('client-settings-clear', async () => {
+    try {
+        getClientSettingsStore().clear('renderer');
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+});
+
 // 开机自启的设置与获取
 // 开机自启：Windows 上 get/set 必须使用相同的 path + args，否则会读成 false
 function autoStartSettingsPath() {
@@ -9081,18 +9162,23 @@ function buildLoginItemOptions(enabled) {
 }
 
 function readPersistedAutoStart() {
+    const stored = readClientSystemSetting('autostart', null);
+    if (typeof stored === 'boolean') return stored;
     try {
         const p = autoStartSettingsPath();
         if (!fs.existsSync(p)) return null;
         const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
         const data = JSON.parse(raw);
-        if (data && typeof data.enabled === 'boolean') return data.enabled;
+        if (data && typeof data.enabled === 'boolean') {
+            return seedClientSystemSetting('autostart', data.enabled);
+        }
     } catch (e) {}
     return null;
 }
 
 function writePersistedAutoStart(enabled) {
     const on = Boolean(enabled);
+    writeClientSystemSetting('autostart', on);
     const p = autoStartSettingsPath();
     try {
         const dir = path.dirname(p);
@@ -9130,7 +9216,7 @@ function queryOsAutoStart() {
 function isAutoStartEnabled() {
     const persisted = readPersistedAutoStart();
     if (persisted !== null) return persisted;
-    return queryOsAutoStart();
+    return seedClientSystemSetting('autostart', queryOsAutoStart());
 }
 
 function setAutoStartEnabled(enabled) {
@@ -9167,19 +9253,22 @@ function silentStartSettingsPath() {
 }
 
 function isSilentStartEnabled() {
+    const stored = readClientSystemSetting('silentStart', null);
+    if (typeof stored === 'boolean') return stored;
     try {
         const p = silentStartSettingsPath();
-        if (!fs.existsSync(p)) return false;
+        if (!fs.existsSync(p)) return seedClientSystemSetting('silentStart', false);
         const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
         const data = JSON.parse(raw);
-        return data && data.enabled === true;
+        return seedClientSystemSetting('silentStart', !!(data && data.enabled === true));
     } catch (e) {
-        return false;
+        return seedClientSystemSetting('silentStart', false);
     }
 }
 
 function setSilentStartEnabled(enabled) {
     const on = Boolean(enabled);
+    writeClientSystemSetting('silentStart', on);
     const p = silentStartSettingsPath();
     try {
         const dir = path.dirname(p);
@@ -9215,19 +9304,22 @@ function autoLaunchGatewaySettingsPath() {
 
 /** 未写入配置文件时默认关闭（仅左上角手动启用；用户可在系统设置中打开） */
 function isAutoLaunchGatewayEnabled() {
+    const stored = readClientSystemSetting('autoLaunchGateway', null);
+    if (typeof stored === 'boolean') return stored;
     try {
         const p = autoLaunchGatewaySettingsPath();
-        if (!fs.existsSync(p)) return false;
+        if (!fs.existsSync(p)) return seedClientSystemSetting('autoLaunchGateway', false);
         const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
         const data = JSON.parse(raw);
-        return !!(data && data.enabled === true);
+        return seedClientSystemSetting('autoLaunchGateway', !!(data && data.enabled === true));
     } catch (e) {
-        return false;
+        return seedClientSystemSetting('autoLaunchGateway', false);
     }
 }
 
 function setAutoLaunchGatewayEnabled(enabled) {
     const on = Boolean(enabled);
+    writeClientSystemSetting('autoLaunchGateway', on);
     const p = autoLaunchGatewaySettingsPath();
     try {
         const dir = path.dirname(p);
@@ -11604,9 +11696,16 @@ app.whenReady().then(async () => {
         console.warn('[Media] nexora-media panel session register failed:', e && e.message);
     }
 
+    // 在窗口创建前初始化客户端设置库；后续渲染层同步启动读取不会碰到未建表状态。
+    try {
+        getClientSettingsStore();
+    } catch (e) {
+        console.warn('[ClientSettings] initialization failed:', e && e.message);
+    }
+
     // 初始化加速通道目录与状态
     try {
-        acceleration.init(app);
+        acceleration.init(app, { settingsStore: getClientSettingsStore() });
         if (typeof acceleration.onStatusChange === 'function') {
             acceleration.onStatusChange((payload) => {
                 try {
@@ -11812,6 +11911,10 @@ app.on('will-quit', async (e) => {
     // 下次启动又被强杀于半写状态（会话/配置损坏）。await 确保杀干净再退出。
     try {
         await stopGatewayProcess({ reason: 'app-quit' });
+    } catch (err) {}
+    try {
+        if (clientSettingsStore) clientSettingsStore.close();
+        clientSettingsStore = null;
     } catch (err) {}
     app.exit(0);
 });

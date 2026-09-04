@@ -47,6 +47,7 @@ const NO_PROXY_LIST = [
 ].join(',');
 
 let appRef = null;
+let clientSettingsStore = null;
 let mihomoProc = null;
 let lastMihomoMemoryText = 'INACTIVE';
 let mihomoMemoryTimer = null;
@@ -423,8 +424,9 @@ function setIsQuitting(val) {
     appIsQuitting = !!val;
 }
 
-function init(electronApp) {
+function init(electronApp, options = {}) {
     appRef = electronApp;
+    clientSettingsStore = options && options.settingsStore ? options.settingsStore : null;
     ensureDirs();
     installBundledCore();
     bootstrapSecondaryAccelerationFromPrimary();
@@ -479,15 +481,32 @@ function bootstrapSecondaryAccelerationFromPrimary() {
 }
 
 function loadState() {
+    let legacyState = null;
     try {
         const p = getStatePath();
-        if (!fs.existsSync(p)) return;
-        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (fs.existsSync(p)) legacyState = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch (e) {}
+
+    let storedState = null;
+    try {
+        if (clientSettingsStore) storedState = clientSettingsStore.get('system', 'accelerationState', null);
+    } catch (e) {
+        console.warn('[Acceleration] settings database read failed:', e && e.message);
+    }
+
+    const raw = storedState && typeof storedState === 'object'
+        ? storedState
+        : (legacyState && typeof legacyState === 'object' ? legacyState : null);
+    if (raw) {
         state = { ...state, ...raw };
         if (raw.enabled !== undefined && raw.autoStart === undefined) {
             state.autoStart = raw.enabled;
         }
-    } catch (e) {}
+    }
+    // 即使用户从未操作过，也把默认网络中转状态显式落库，便于统一查询/备份。
+    if (!storedState && clientSettingsStore) {
+        try { clientSettingsStore.setIfAbsent('system', 'accelerationState', state); } catch (_) {}
+    }
 }
 
 function saveState() {
@@ -495,6 +514,11 @@ function saveState() {
     try {
         fs.writeFileSync(getStatePath(), JSON.stringify(state, null, 2), 'utf8');
     } catch (e) {}
+    try {
+        if (clientSettingsStore) clientSettingsStore.set('system', 'accelerationState', state);
+    } catch (e) {
+        console.warn('[Acceleration] settings database write failed:', e && e.message);
+    }
 }
 
 function getMihomoExeName() {

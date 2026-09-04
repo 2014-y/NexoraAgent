@@ -1,3 +1,134 @@
+// 客户端配置自动持久化层：localStorage 只作为同步读取缓存，SQLite 是权威副本。
+// 以后新增普通客户端设置请使用 setting_*；主题/网络中转 UI 前缀也会自动入库。
+const CLIENT_SETTING_PREFIXES = ['setting_', 'custom_theme_', 'acc_ui_', 'acc_auto_select_'];
+const CLIENT_SETTING_KEYS = new Set([
+    'user-theme',
+    'sidebar_collapsed',
+    'console_pref_channel',
+    'console_view_mode',
+    'chat_quick_panel_collapsed',
+    'guide_completed',
+    'client_pref_image_model',
+    'client_pref_video_model'
+]);
+const CLIENT_SETTING_DEFAULTS = Object.freeze({
+    setting_enable_notification: 'true',
+    setting_use_built_in_models: 'true',
+    setting_auto_update: 'true',
+    setting_language: 'zh-CN',
+    setting_menu_order_expanded: 'false',
+    'user-theme': 'theme-abyss',
+    sidebar_collapsed: 'false',
+    console_view_mode: 'step',
+    chat_quick_panel_collapsed: 'false'
+});
+const CLIENT_SETTING_SECRET_PATTERN = /(api[-_]?key|secret|password|credential|access[-_]?token|refresh[-_]?token)/i;
+
+function isAutoPersistedClientSettingKey(value) {
+    const key = String(value || '').trim();
+    if (!key || key.length > 160 || CLIENT_SETTING_SECRET_PATTERN.test(key)) return false;
+    return CLIENT_SETTING_KEYS.has(key) || CLIENT_SETTING_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+(function installClientSettingsPersistence() {
+    const diagnostic = { started: true, restored: false, hooked: false, error: '' };
+    window.__nexoraClientSettingsPersistence = diagnostic;
+    try {
+        if (!window.api || !window.api.clientSettings || !window.localStorage) {
+            diagnostic.error = 'bridge-unavailable';
+            return;
+        }
+        const local = window.localStorage;
+        const storageProto = Object.getPrototypeOf(local);
+        const nativeGetItem = storageProto.__nexoraNativeGetItem || storageProto.getItem;
+        const nativeSetItem = storageProto.__nexoraNativeSetItem || storageProto.setItem;
+        const nativeRemoveItem = storageProto.__nexoraNativeRemoveItem || storageProto.removeItem;
+        const nativeClear = storageProto.__nexoraNativeClear || storageProto.clear;
+        const nativeKey = storageProto.__nexoraNativeKey || storageProto.key;
+        for (const [name, fn] of Object.entries({
+            __nexoraNativeGetItem: nativeGetItem,
+            __nexoraNativeSetItem: nativeSetItem,
+            __nexoraNativeRemoveItem: nativeRemoveItem,
+            __nexoraNativeClear: nativeClear,
+            __nexoraNativeKey: nativeKey
+        })) {
+            if (!Object.prototype.hasOwnProperty.call(storageProto, name)) {
+                Object.defineProperty(storageProto, name, {
+                    value: fn,
+                    configurable: false,
+                    enumerable: false
+                });
+            }
+        }
+        // 首次启动不仅迁移用户改过的值，也把代码默认值显式写库，数据库始终有完整状态。
+        const legacyValues = Object.assign(Object.create(null), CLIENT_SETTING_DEFAULTS);
+
+        for (let i = 0; i < local.length; i += 1) {
+            const key = nativeKey.call(local, i);
+            if (!isAutoPersistedClientSettingKey(key)) continue;
+            const value = nativeGetItem.call(local, key);
+            if (typeof value === 'string') legacyValues[key] = value;
+        }
+
+        // 同步恢复只发生一次，保证本文件后续顶层变量初始化时读到数据库中的最新配置。
+        const restored = window.api.clientSettings.bootstrap(legacyValues);
+        if (restored && restored.success && restored.values && typeof restored.values === 'object') {
+            for (const [key, value] of Object.entries(restored.values)) {
+                if (isAutoPersistedClientSettingKey(key) && typeof value === 'string') {
+                    nativeSetItem.call(local, key, value);
+                }
+            }
+            diagnostic.restored = true;
+        }
+
+        // Chromium 可能在刷新后复用 Storage 原型，因此每个新页面上下文都重新绑定包装器。
+        // 原生方法已固定保存在上面的只读属性中，不会出现包装器套包装器。
+        Object.defineProperty(storageProto, 'setItem', {
+            configurable: true,
+            writable: true,
+            value: function nexoraPersistedSetItem(key, value) {
+                const result = nativeSetItem.call(this, key, value);
+                if (this === local && isAutoPersistedClientSettingKey(key)) {
+                    window.api.clientSettings.set(String(key), String(value)).catch((error) => {
+                        console.warn('[ClientSettings] auto-save failed:', error && error.message);
+                    });
+                }
+                return result;
+            }
+        });
+        Object.defineProperty(storageProto, 'removeItem', {
+            configurable: true,
+            writable: true,
+            value: function nexoraPersistedRemoveItem(key) {
+                const result = nativeRemoveItem.call(this, key);
+                if (this === local && isAutoPersistedClientSettingKey(key)) {
+                    window.api.clientSettings.remove(String(key)).catch((error) => {
+                        console.warn('[ClientSettings] auto-remove failed:', error && error.message);
+                    });
+                }
+                return result;
+            }
+        });
+        Object.defineProperty(storageProto, 'clear', {
+            configurable: true,
+            writable: true,
+            value: function nexoraPersistedClear() {
+                const result = nativeClear.call(this);
+                if (this === local) {
+                    window.api.clientSettings.clear().catch((error) => {
+                        console.warn('[ClientSettings] auto-clear failed:', error && error.message);
+                    });
+                }
+                return result;
+            }
+        });
+        diagnostic.hooked = true;
+    } catch (error) {
+        // 数据库不可用时保留原 localStorage 行为，不能让设置存储故障阻断 UI 启动。
+        diagnostic.error = error && error.message ? error.message : String(error);
+        console.warn('[ClientSettings] bootstrap unavailable; using local cache:', error && error.message);
+    }
+})();
 
 function escapeHtml(unsafe) {
     if (typeof unsafe !== 'string') return String(unsafe);

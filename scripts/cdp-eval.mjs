@@ -1,7 +1,8 @@
-const PORT = 9223;
+const PORT = Number(process.env.NEXORA_CDP_PORT || 9223);
 const expr = process.argv[2] || 'document.title';
 const list = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
-const page = list.find((t) => t.type === 'page');
+const page = list.find((t) => t.type === 'page' && /index\.html/.test(String(t.url || '')))
+  || list.find((t) => t.type === 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
 let id = 0;

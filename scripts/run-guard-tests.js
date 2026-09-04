@@ -5,6 +5,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const tests = [
+  'test-client-settings-store.mjs',
   'test-chat-config-guards.mjs',
   'test-chat-protocols.mjs',
   'test-chat-reliability-guards.mjs',
