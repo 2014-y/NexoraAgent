@@ -15681,6 +15681,11 @@ function setupUpdateModal() {
     if (confirmBtn) {
         confirmBtn.addEventListener('click', async () => {
             if (!updateInfo || !updateInfo.downloadUrl) return;
+            if (updateInfo.manualInstall) {
+                window.api.openExternal(updateInfo.downloadUrl);
+                modal.classList.remove('active');
+                return;
+            }
             
             // 禁用按钮并显示进度条
             confirmBtn.disabled = true;

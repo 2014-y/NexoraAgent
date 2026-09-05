@@ -3,7 +3,7 @@
  * 网关运行时打包 / 解压共用清单（单一真相源）。
  * pack-gateway-runtime.js 与 gateway-runtime.js 必须引用同一份。
  */
-const RUNTIME_PACK_ID = 'pack-748e8837cdb6';
+const RUNTIME_PACK_ID = 'pack-332f86754f92';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
 const ALL_RUNTIME_MARKERS = [
@@ -28,16 +28,29 @@ const ALL_RUNTIME_MARKERS = [
   ['node_modules', 'openclaw', 'docs', 'reference', 'templates', 'AGENTS.md']
 ];
 
-// .node-sandbox（内置 Windows Node/npm）只随 Windows 包分发，mac/linux 用系统或 Electron 内置 Node
-const REQUIRED_RUNTIME_MARKERS = process.platform === 'win32'
-  ? ALL_RUNTIME_MARKERS
-  : ALL_RUNTIME_MARKERS.filter((segs) => segs[0] !== '.node-sandbox');
+// Mac packages include native Node/npm too; Linux keeps its existing behavior.
+function requiredRuntimeMarkers(platform = process.platform) {
+  const common = ALL_RUNTIME_MARKERS.filter(segs => segs[0] !== '.node-sandbox');
+  if (platform === 'win32') return ALL_RUNTIME_MARKERS;
+  if (platform === 'darwin') return [
+    ...common,
+    ['.node-sandbox', 'node'],
+    ['.node-sandbox', 'npm'],
+    ['.node-sandbox', 'npx'],
+    ['.node-sandbox', 'runtime-platform.json'],
+    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-cli.js'],
+    ['.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-prefix.js']
+  ];
+  return common;
+}
+const REQUIRED_RUNTIME_MARKERS = requiredRuntimeMarkers();
 
 /** zip 内路径（正斜杠），打包结束必须全部存在 */
 const REQUIRED_ZIP_ENTRIES = REQUIRED_RUNTIME_MARKERS.map((segs) => segs.join('/'));
 
 module.exports = {
   RUNTIME_PACK_ID,
+  requiredRuntimeMarkers,
   REQUIRED_RUNTIME_MARKERS,
   REQUIRED_ZIP_ENTRIES
 };

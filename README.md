@@ -535,6 +535,9 @@ Nexora Agent 采用了分层解耦的四层软件架构设计，保障了系统�
 ## 👨‍💻 开发者二次开发与插件扩展 🚀
 
 ### 1. 本地构建与源码调试
+
+macOS 支持：在 Mac 上运行 `npm run app:dist:mac` 构建对应架构的 DMG/ZIP，包含独立 Node/npm 运行时。环境要求、验证和签名说明见 [macOS 构建文档](docs/macos-build.md)。
+
 ```bash
 # 克隆项目代码仓库
 git clone https://github.com/2014-y/NexoraAgent.git

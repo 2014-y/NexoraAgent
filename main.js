@@ -399,6 +399,7 @@ function resolveBundledNpmCliPath() {
         const nodeDir = path.dirname(nodePath);
         push(path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
         push(path.join(path.dirname(nodeDir), 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+        push(path.join(path.dirname(nodeDir), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
     }
 
     const pathEntries = String(process.env.Path || process.env.PATH || '')
@@ -1516,7 +1517,7 @@ function rememberDashboardUrl(url) {
     return fresh;
 }
 
-let CONFIG_DIR = path.join(process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\Public', '.openclaw');
+let CONFIG_DIR = path.join(process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\Public', '.openclaw');
 let CONFIG_PATH = path.join(CONFIG_DIR, 'openclaw.json');
 
 /**
@@ -10609,12 +10610,18 @@ ipcMain.handle('check-update', async (event, isManual) => {
             downloadUrl = `https://github.com/${UPDATE_REPO}/releases/download/${tag}/${fileName}`;
         }
 
+        if (process.platform !== 'win32') {
+            downloadUrl = UPDATE_RELEASES_PAGE;
+            fileName = '';
+        }
+
         if (hasUpdate && downloadUrl && /\.exe($|\?)/i.test(downloadUrl) && isTrustedUpdateUrl(downloadUrl)) {
             pendingUpdateDownload = { downloadUrl, fileName, digest };
         }
 
         return {
             hasUpdate,
+            manualInstall: process.platform !== 'win32',
             checkFailed: false,
             latestVersion,
             currentVersion,
@@ -11925,9 +11932,9 @@ app.whenReady().then(async () => {
         // 保留改写前的真实用户目录，供鉴权双目录同步 / 排障
         if (!process.env.NEXORA_AGENT_ORIGINAL_USERPROFILE) {
             process.env.NEXORA_AGENT_ORIGINAL_USERPROFILE =
-                process.env.USERPROFILE || process.env.HOME || app.getPath('home') || '';
+                process.env.OPENCLAW_HOME || process.env.USERPROFILE || process.env.HOME || app.getPath('home') || '';
         }
-        let preferredHome = app.getPath('home');
+        let preferredHome = process.env.OPENCLAW_HOME || app.getPath('home');
         const desktopInfo = detectRestrictedDesktop(process.env);
         const preferredWritable = preferredHome ? probeOpenClawHomeWritable(preferredHome) : false;
 

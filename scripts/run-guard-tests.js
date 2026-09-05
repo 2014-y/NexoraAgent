@@ -5,6 +5,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const tests = [
+  'test-mac-runtime.mjs',
   'test-bootstrap-patch-io.mjs',
   'test-acceleration-lazy-install.mjs',
   'test-client-settings-store.mjs',

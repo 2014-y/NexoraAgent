@@ -43,7 +43,8 @@ try {
   assert.equal(api.isCoreReady(), false);
   assert.equal((await api.ensureCore()).success, true, 'first use must install the bundled core offline');
   const copied = copies;
-  assert.ok(copied >= 4);
+  assert.ok(copied >= (process.platform === 'win32' ? 5 : 3),
+    'Windows installs two Wintun copies; macOS/Linux install only the core and geodata');
   assert.equal((await api.ensureCore()).success, true);
   assert.equal(copies, copied, 'repeated use must reuse installed files');
   const geoip = path.join(userData, 'acceleration', 'geoip.dat');

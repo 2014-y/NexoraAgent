@@ -12,6 +12,11 @@ const ROOT = path.join(__dirname, '..');
 const isWin = process.platform === 'win32';
 
 const steps = [];
+if (process.platform === 'darwin') {
+  steps.push('scripts/provision-mac-node.js');
+  steps.push('scripts/rebuild-mac-native.js');
+}
+steps.push('scripts/patch-bundled-security-deps.js');
 if (isWin) {
   steps.push('scripts/ensure-asr-release-asset.js');
   steps.push('scripts/ensure-builtin-asr.js');

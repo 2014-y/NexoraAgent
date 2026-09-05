@@ -46,11 +46,12 @@
     "preapp:pack": "node scripts/prepare-dist.js",
     "app:pack": "electron-builder --dir",
     "dist:prepare": "node scripts/prepare-dist.js",
-    "app:dist:mac": "npm run clean:dist && npm run dist:prepare && electron-builder --mac",
+    "app:dist:mac": "npm run clean:dist && npm run dist:prepare && node scripts/run-electron-builder.js --mac --config config/electron-builder.mac.cjs && npm run verify:mac",
     "app:dist:linux": "npm run clean:dist && npm run dist:prepare && electron-builder --linux",
     "pack:runtime": "node scripts/pack-gateway-runtime.js",
     "verify:package": "node scripts/verify-windows-package.js",
-    "data-center:install": "npm --prefix data-center install --omit=dev"
+    "data-center:install": "npm --prefix data-center install --omit=dev",
+    "verify:mac": "node scripts/verify-mac-package.js"
   },
   "dependencies": {
     "@openclaw/feishu": "2026.9.1",

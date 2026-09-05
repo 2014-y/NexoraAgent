@@ -101,7 +101,7 @@ function pathMeta(p) {
 
 function computeFingerprint() {
   const h = crypto.createHash('sha1');
-  h.update(`v8|pack-id-stable|`);
+  h.update(`v9|pack-id-stable|${process.platform}|${process.arch}|`);
   h.update(fileHash(path.join(ROOT, 'package.json')));
   h.update(fileHash(path.join(ROOT, 'package-lock.json')));
   // manifest 内含由本指纹派生的 RUNTIME_PACK_ID，绝不能反过来参与指纹，
@@ -123,6 +123,8 @@ function computeFingerprint() {
     'node_modules/openclaw/docs/reference/templates/AGENTS.md',
     'config/openclaw-templates/AGENTS.md',
     '.node-sandbox/node.exe',
+    '.node-sandbox/node',
+    '.node-sandbox/runtime-platform.json',
     '.node-sandbox/node_modules/npm/bin/npm-cli.js',
     '.node-sandbox/node_modules/npm/bin/npm-prefix.js',
     'plugins',
@@ -250,8 +252,8 @@ function appendOpenClawTemplates() {
 
 /** 确保沙箱自带 npm（Doctor 插件修复 / openclaw plugins install 依赖） */
 function appendSandboxNpm() {
-  if (process.platform !== 'win32') {
-    console.log('  + skip sandbox npm (non-Windows pack, uses system/Electron node)');
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    console.log('  + skip sandbox npm (Linux pack)');
     return;
   }
   const npmCli = path.join(ROOT, '.node-sandbox', 'node_modules', 'npm', 'bin', 'npm-cli.js');
@@ -385,7 +387,7 @@ function main() {
     inputs.push('workspace/skills/video-generator');
   }
   if (fs.existsSync(path.join(ROOT, 'config', 'openclaw-templates'))) inputs.push('config/openclaw-templates');
-  if (fs.existsSync(path.join(ROOT, '.node-sandbox', 'node.exe'))) inputs.push('.node-sandbox');
+  if (fs.existsSync(path.join(ROOT, '.node-sandbox', process.platform === 'win32' ? 'node.exe' : 'node'))) inputs.push('.node-sandbox');
   for (const f of ROOT_FILES) {
     if (fs.existsSync(path.join(ROOT, f))) inputs.push(f);
   }
