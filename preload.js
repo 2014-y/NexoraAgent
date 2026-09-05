@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('api', {
     copyText: (text) => ipcRenderer.invoke('copy-text', text),
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
     getAccelerationStatus: () => ipcRenderer.invoke('acceleration-status'),
+    getLocalNetworkAddress: () => ipcRenderer.invoke('local-network-address'),
     getAppInstanceInfo: () => ipcRenderer.invoke('app-instance-info'),
     getAccelerationConnections: () => ipcRenderer.invoke('acceleration-get-connections'),
     closeAccelerationConnection: (id) => ipcRenderer.invoke('acceleration-close-connection', id),

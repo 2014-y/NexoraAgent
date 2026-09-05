@@ -1,4 +1,9 @@
 // main.js - Electron 主进程入口
+const clientBootStartedAt = Date.now();
+function markClientBootPhase(phase) {
+    const elapsedMs = Date.now() - clientBootStartedAt;
+    setImmediate(() => appendMainDiagnostic('client-start-phase', null, { phase, elapsedMs }));
+}
 // [FIX] 清理外部 NODE_OPTIONS 污染，防止 --require 等参数干扰 Electron 主进程启动
 // 打包后的应用不应依赖任何外部 NODE_OPTIONS 设置
 delete process.env.NODE_OPTIONS;
@@ -4595,6 +4600,7 @@ function createWindow(existingSplash) {
     const revealWindow = () => {
         if (windowRevealed || !mainWindow || mainWindow.isDestroyed()) return;
         windowRevealed = true;
+        markClientBootPhase('window-visible');
         try { if (splash && !splash.isDestroyed()) splash.destroy(); } catch (e) {}
         try { mainWindow.setBackgroundColor(WINDOW_BG); } catch (e) {}
         const silent = isSilentStartEnabled() && process.argv.includes('--silent');
@@ -9534,6 +9540,16 @@ ipcMain.handle('acceleration-status', async () => {
     catch (e) { return { success: false, error: e.message || String(e) }; }
 });
 
+ipcMain.handle('local-network-address', () => {
+    const interfaces = require('os').networkInterfaces();
+    for (const addresses of Object.values(interfaces)) {
+        for (const address of addresses || []) {
+            if (!address.internal && (address.family === 'IPv4' || address.family === 4)) return address.address;
+        }
+    }
+    return '127.0.0.1';
+});
+
 ipcMain.handle('acceleration-get-connections', async () => {
     try { return { success: true, ...(await acceleration.getConnections()) }; }
     catch (e) { return { success: false, error: e.message || String(e) }; }
@@ -11587,6 +11603,7 @@ function prepareGatewayRuntimeInBackground(bootSplash) {
             const runtimeInfo = await ensureGatewayRuntime(app, {
                 onProgress: (p) => updateSplashStatus(bootSplash, (p && p.message) || '', p && p.percent)
             });
+            markClientBootPhase('runtime-located');
             console.log(
                 `[GatewayRuntime] mode=${runtimeInfo && runtimeInfo.mode} extracted=${runtimeInfo && runtimeInfo.extracted} root=${runtimeInfo && runtimeInfo.root}`
             );
@@ -11603,6 +11620,7 @@ function prepareGatewayRuntimeInBackground(bootSplash) {
                         }
                     } catch (e) {}
                     const soft = softenOpenClawStartupMigrationGuard(runtimeInfo.root);
+                    markClientBootPhase('runtime-hardened');
                     const npm = ensureSandboxNpmPresent(runtimeInfo.root, __dirname);
                     let tpl = { ok: false };
                     try {
@@ -11619,6 +11637,7 @@ function prepareGatewayRuntimeInBackground(bootSplash) {
                 console.warn('[GatewayBoot] post-extract harden:', e.message);
             }
             updateSplashStatus(bootSplash, '运行时就绪…', 100);
+            markClientBootPhase('runtime-ready');
             return runtimeInfo;
         } catch (err) {
             console.error('[GatewayRuntime] ensure failed:', err);
@@ -11739,6 +11758,12 @@ async function ensureOpenClawPostUpgradeMigration(params) {
 
 app.whenReady().then(async () => {
     if (!global.nexoraInstance) return;
+    markClientBootPhase('electron-ready');
+    // 尽早提供启动反馈；主窗口仍等待主文档首次绘制，避免白屏。
+    let bootSplash = null;
+    if (app.isPackaged) {
+        try { bootSplash = createSplashWindow(); } catch (_) {}
+    }
 
     try {
         protocol.registerFileProtocol('nexora-bg', (request, callback) => {
@@ -11843,18 +11868,6 @@ app.whenReady().then(async () => {
         console.warn('[AutoStart] sync on ready failed:', e && e.message);
     }
 
-    // 语音运行时：默认关闭，仅初始化配置目录；开启渠道朗读时才监听本机 HTTP
-    try {
-        // CONFIG_DIR 可能稍后才最终确定，这里先用当前值；home 矫正后再 re-init
-        voiceRuntime.init({
-            configDir: CONFIG_DIR,
-            settingsStore: getClientSettingsStore(),
-            getMainWindow: () => mainWindow
-        });
-    } catch (e) {
-        console.warn('[VoiceRuntime] init failed:', e.message);
-    }
-
     // 家目录矫正：优先真实用户目录；不可写时改走 AppData\NexoraAgent，禁止落到裸 Temp
     // 多开第 2+ 实例：强制使用本实例 userData 下的隔离 home，避免与主实例抢 .openclaw / 18789
     try {
@@ -11930,15 +11943,7 @@ app.whenReady().then(async () => {
         console.error('[System] Failed to resolve true user home:', err.message);
     }
 
-    let bootSplash = null;
-    try {
-        let packaged = false;
-        try { packaged = !!app.isPackaged; } catch (e) { packaged = false; }
-        if (packaged) {
-            bootSplash = createSplashWindow();
-            updateSplashStatus(bootSplash, '正在打开 Nexora Agent…', 3);
-        }
-    } catch (e) {}
+    markClientBootPhase('settings-home-ready');
 
     // 先出窗口再种插件，避免首启同步拷贝把 UI 卡死
     // CONFIG_DIR 最终确定后再挂载语音运行时（设置文件落在用户 OpenClaw 目录）
@@ -11954,6 +11959,7 @@ app.whenReady().then(async () => {
 
     try {
         createWindow(bootSplash);
+        markClientBootPhase('window-created');
     } catch (err) {
         appendMainDiagnostic('startup-create-window-failed', err);
         try {

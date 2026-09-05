@@ -2038,6 +2038,9 @@ function drawSidebarChart() {
 
 // 3. 初始化加载
 async function init() {
+    const startupTimings = window.__nexoraStartupTimings = {};
+    const markStartup = (phase) => { startupTimings[phase] = Math.round(performance.now()); };
+    markStartup('initStarted');
     const dismissLoading = () => {
         try {
             const appLoadingScreen = document.getElementById('app-loading-screen');
@@ -2057,6 +2060,7 @@ async function init() {
     // 获取并设置当前版本号
     try {
         const version = await window.api.getAppVersion();
+        markStartup('versionReady');
         const badge = document.getElementById('app-version-badge');
         if (badge) {
             badge.textContent = 'v' + version;
@@ -2078,12 +2082,14 @@ async function init() {
     setupUpdateModal();
 
     // 读取并渲染配置
+    markStartup('configRequested');
     await loadAndRenderConfig();
+    markStartup('configReady');
 
-    // 预加载全局角色配置（模型会话口吻 + 角色页）
+    // 绑定角色页事件，角色配置由实际进入的页面读取。
     try {
         if (typeof initRolesUI === 'function') initRolesUI();
-        if (typeof loadRoleConfigState === 'function') await loadRoleConfigState({ silent: true });
+        // 角色/聊天页进入时已有加载逻辑，首屏不重复同步角色文件。
     } catch (e) {
         console.warn('[Roles] preload failed:', e);
     }
@@ -3102,8 +3108,8 @@ async function init() {
     // Gateway 自动启用由主进程统一负责。渲染进程不再重复 start，
     // 避免主进程刚启动完成后又被第二次 stop/restart，造成启动抖动和会话断流。
 
-    // 渲染图表
-    renderUsageCharts();
+    // 用量图表在进入用量页时渲染。
+    if (currentTab === 'dashboard-view') renderUsageCharts();
     
     // 初始化侧边栏微型负载图
     initSidebarChart();
@@ -3122,6 +3128,7 @@ async function init() {
     // 隐藏全局初始化遮罩层，平滑淡出
     clearTimeout(loadingFailsafe);
     dismissLoading();
+    markStartup('interactive');
     } catch (initErr) {
         console.error('[Nexora Agent] init failed:', initErr);
         clearTimeout(loadingFailsafe);
@@ -4922,6 +4929,7 @@ function applyBuiltInModelPolicy(cfg) {
 
 async function loadAndRenderConfig() {
     configData = await window.api.readConfig();
+    if (window.__nexoraStartupTimings && !window.__nexoraStartupTimings.configRead) window.__nexoraStartupTimings.configRead = Math.round(performance.now());
     jsonConfigDraft = null;
     if (!configData) {
         logTerminal.innerText = '[System] [Error] 无法读取 openclaw.json 配置文件！\n';
@@ -5051,6 +5059,7 @@ async function loadAndRenderConfig() {
     // 同步到 ~/.openclaw 侧车文件，供 media-cli / draw_picture / draw_video 读取（任意电脑开箱）
     try {
         await syncMediaGeneratorPrefsToDisk(configData);
+        if (window.__nexoraStartupTimings && !window.__nexoraStartupTimings.mediaReady) window.__nexoraStartupTimings.mediaReady = Math.round(performance.now());
     } catch (e) {
         console.warn('[MediaPrefs] sync on load failed:', e);
     }
@@ -5062,8 +5071,8 @@ async function loadAndRenderConfig() {
         document.getElementById('gateway-token').value = (auth && auth.token) || '';
     }
 
-    // 渲染功能插件列表卡片
-    renderPluginsGrid();
+    // 插件探测涉及磁盘与外部程序扫描，进入插件页时才执行。
+    if (currentTab === 'plugins-view') renderPluginsGrid();
 
     // 控制内置模型配置项的启用与置灰
     toggleProviderInputsEditable();
@@ -7795,6 +7804,8 @@ async function renderSkillsPending() {
 
 // 渲染插件卡片网格
 async function renderPluginsGrid() {
+    // 语言初始化也会调用此函数；隐藏页不能绕过按需加载触发插件扫描。
+    if (currentTab !== 'plugins-view') return;
     const grid = document.getElementById('cfg-plugins-grid');
     if (!grid) return;
 
@@ -10843,7 +10854,7 @@ function applyLanguage(lang) {
     if (typeof renderPluginsGrid === 'function') {
         try { renderPluginsGrid(); } catch(e) { console.error(e); }
     }
-    if (typeof renderUsageCharts === 'function') {
+    if (currentTab === 'dashboard-view' && typeof renderUsageCharts === 'function') {
         try { renderUsageCharts(); } catch(e) { console.error(e); }
     }
     if (typeof updateWeChatStatusUI === 'function') {
@@ -18405,7 +18416,8 @@ function initAccelerationChannel() {
     }
 
     refreshAccelerationChannel().then(async () => {
-        // 启动即检测出口：未启用测本机公网，已启用测代理出口
+        // 未运行的可选中转无需在应用启动时探测公网、启动临时测速内核。
+        if (!accelerationState || !accelerationState.enabled) return;
         setTimeout(() => {
             maybeAutoAccelerationIpDetect({ force: true, reason: 'startup' });
         }, 800);
@@ -18862,29 +18874,13 @@ function getClashMemoryMock() {
     return window._clashMemMock.toFixed(1) + ' MB';
 }
 
-// 异步 WebRTC 方式安全无感获取本机内网 IP 地址
-function getLocalIP() {
-    return new Promise((resolve) => {
-        try {
-            const pc = new RTCPeerConnection({ iceServers: [] });
-            pc.createDataChannel('');
-            pc.createOffer().then(pc.setLocalDescription.bind(pc)).catch(() => resolve('127.0.0.1'));
-            pc.onicecandidate = (ice) => {
-                if (!ice || !ice.candidate || !ice.candidate.candidate) {
-                    resolve('127.0.0.1');
-                    return;
-                }
-                const matches = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
-                const myIP = matches ? matches[1] : '127.0.0.1';
-                resolve(myIP);
-                pc.onicecandidate = null;
-                pc.close();
-            };
-            setTimeout(() => resolve('127.0.0.1'), 1500); // 兜底超时
-        } catch (e) {
-            resolve('127.0.0.1');
-        }
-    });
+// 通过主进程读取本机网卡地址。
+async function getLocalIP() {
+    // 读取网卡即可，不为展示地址初始化 WebRTC/媒体设备，也不留下未关闭的连接。
+    try {
+        if (window.api && window.api.getLocalNetworkAddress) return await window.api.getLocalNetworkAddress();
+    } catch (_) {}
+    return '127.0.0.1';
 }
 
 // =========================

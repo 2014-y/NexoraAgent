@@ -192,7 +192,7 @@ function copyBundledFileIfNeeded(source, destination, expectedSha256, minSize) {
         if (!fs.existsSync(source)) return false;
         const sourceStat = fs.statSync(source);
         if (!sourceStat.isFile() || sourceStat.size < minSize) return false;
-        const sourceHash = expectedSha256 || fileSha256(source);
+        const sourceHash = fileSha256(source);
         if (expectedSha256 && sourceHash !== expectedSha256) {
             throw new Error(`内置文件校验失败: ${path.basename(source)}`);
         }
@@ -219,7 +219,16 @@ function copyBundledFileIfNeeded(source, destination, expectedSha256, minSize) {
 }
 
 /** 安装包随附内核：首次启动复制到可写 userData，联网下载只作为兜底。 */
+let bundledCoreInstallResult = null;
+let bundledCoreInstalledFiles = [];
 function installBundledCore() {
+    if (bundledCoreInstallResult && bundledCoreInstallResult.root === getRootDir()
+        && bundledCoreInstalledFiles.every(file => {
+            try {
+                const stat = fs.statSync(file.path);
+                return stat.isFile() && stat.size === file.size && stat.mtimeMs === file.mtimeMs;
+            } catch (_) { return false; }
+        })) return bundledCoreInstallResult;
     ensureDirs();
     const bundledDir = getBundledCoreDir();
     if (!bundledDir) return { success: false, bundled: false };
@@ -241,27 +250,45 @@ function installBundledCore() {
             wintun.sha256,
             32 * 1024
         ));
+        let workingWintunReady = process.platform !== 'win32';
         if (wintunReady && process.platform === 'win32') {
-            try { fs.copyFileSync(getWintunPath(), path.join(getRootDir(), 'wintun.dll')); } catch (e) {}
+            workingWintunReady = copyBundledFileIfNeeded(
+                getWintunPath(), path.join(getRootDir(), 'wintun.dll'), wintun.sha256, 32 * 1024
+            );
         }
         // mihomo -d 工作目录读取 geoip.dat / geosite.dat；内置后无需联网下载
+        let geoipReady = !geoip;
         if (geoip) {
-            copyBundledFileIfNeeded(
+            geoipReady = copyBundledFileIfNeeded(
                 path.join(bundledDir, geoip.name || 'geoip.dat'),
                 path.join(getRootDir(), 'geoip.dat'),
                 geoip.sha256,
                 Number(geoip.minSize) || 1024 * 1024
             );
         }
+        let geositeReady = !geosite;
         if (geosite) {
-            copyBundledFileIfNeeded(
+            geositeReady = copyBundledFileIfNeeded(
                 path.join(bundledDir, geosite.name || 'geosite.dat'),
                 path.join(getRootDir(), 'geosite.dat'),
                 geosite.sha256,
                 Number(geosite.minSize) || 100 * 1024
             );
         }
-        return { success: !!coreReady, bundled: true, wintunReady: !!wintunReady };
+        const result = { success: !!coreReady, bundled: true, wintunReady: !!wintunReady };
+        bundledCoreInstallResult = null;
+        if (coreReady && wintunReady && workingWintunReady && geoipReady && geositeReady) {
+            const files = [getMihomoPath()];
+            if (process.platform === 'win32') files.push(getWintunPath(), path.join(getRootDir(), 'wintun.dll'));
+            if (geoip) files.push(path.join(getRootDir(), 'geoip.dat'));
+            if (geosite) files.push(path.join(getRootDir(), 'geosite.dat'));
+            bundledCoreInstalledFiles = files.map(file => {
+                const stat = fs.statSync(file);
+                return { path: file, size: stat.size, mtimeMs: stat.mtimeMs };
+            });
+            bundledCoreInstallResult = { ...result, root: getRootDir() };
+        }
+        return result;
     } catch (e) {
         console.warn('[Acceleration] bundled core manifest invalid:', e && e.message);
         return { success: false, bundled: true, error: e.message || String(e) };
@@ -428,11 +455,11 @@ function init(electronApp, options = {}) {
     appRef = electronApp;
     clientSettingsStore = options && options.settingsStore ? options.settingsStore : null;
     ensureDirs();
-    installBundledCore();
+    // 大文件哈希/复制放到实际使用内核时；默认关闭的网络中转不阻塞主窗口。
     bootstrapSecondaryAccelerationFromPrimary();
     loadState();
 
-    if (state.autoStart) {
+    if (state.autoStart && state.activeProfileId) {
         console.log('[Acceleration] Auto-starting acceleration core on app launch...');
         setTimeout(() => {
             setEnabled(true, null, null).catch(err => {
@@ -624,9 +651,8 @@ function isProcessElevatedReal() {
 async function ensureWintun(onProgress) {
     if (process.platform !== 'win32') return { success: true, skipped: true };
     ensureDirs();
-    if (isWintunReady()) return { success: true, path: getWintunPath() };
-    installBundledCore();
-    if (isWintunReady()) return { success: true, path: getWintunPath(), bundled: true };
+    const bundled = installBundledCore();
+    if (isWintunReady()) return { success: true, path: getWintunPath(), bundled: !!bundled.wintunReady };
 
     const zipUrl = 'https://www.wintun.net/builds/wintun-0.14.1.zip';
     const mirrors = [
@@ -735,9 +761,8 @@ async function assertTunPrerequisites() {
 
 async function ensureCore(onProgress) {
     ensureDirs();
-    if (isCoreReady()) return { success: true, path: getMihomoPath() };
-    installBundledCore();
-    if (isCoreReady()) return { success: true, path: getMihomoPath(), bundled: true };
+    const bundled = installBundledCore();
+    if (isCoreReady()) return { success: true, path: getMihomoPath(), bundled: !!bundled.success };
 
     const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
     const zipName = process.platform === 'win32'
