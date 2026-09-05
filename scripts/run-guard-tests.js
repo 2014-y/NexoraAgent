@@ -5,6 +5,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const tests = [
+  'test-bootstrap-patch-io.mjs',
   'test-acceleration-lazy-install.mjs',
   'test-client-settings-store.mjs',
   'test-chat-config-guards.mjs',
@@ -17,6 +18,7 @@ const tests = [
   'test-gateway-lifecycle-guards.mjs',
   'test-openclaw-stable-update.mjs',
   'test-plugin-runtime-registrations.mjs',
+  'test-plugin-install-registry.mjs',
   'test-media-dedupe.mjs',
   'test-menu-visibility-guards.mjs',
   'test-model-config-policy.mjs',

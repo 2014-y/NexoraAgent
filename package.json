@@ -177,6 +177,7 @@
       "openclaw-state.js",
       "gateway-auth.js",
       "openclaw-model-sync.js",
+      "openclaw-plugin-registry.js",
       "openclaw-auth-sync.js",
       "openclaw-update-policy.js",
       "latency-tune.js",

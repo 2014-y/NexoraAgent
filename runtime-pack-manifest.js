@@ -3,7 +3,7 @@
  * 网关运行时打包 / 解压共用清单（单一真相源）。
  * pack-gateway-runtime.js 与 gateway-runtime.js 必须引用同一份。
  */
-const RUNTIME_PACK_ID = 'pack-74c713e7926c';
+const RUNTIME_PACK_ID = 'pack-748e8837cdb6';
 
 /** 相对 gateway-runtime 根目录；缺任一即视为残缺，必须重解压 */
 const ALL_RUNTIME_MARKERS = [
@@ -12,6 +12,7 @@ const ALL_RUNTIME_MARKERS = [
   ['.node-sandbox', 'vcruntime140.dll'],
   ['.node-sandbox', 'msvcp140.dll'],
   ['node_modules', 'openclaw', 'dist', 'index.js'],
+  ['node_modules', 'openclaw', 'openclaw.mjs'],
   ['node_modules', '@tencent-weixin', 'openclaw-weixin', 'package.json'],
   ['node_modules', '@openclaw', 'feishu', 'package.json'],
   ['node_modules', '@openclaw', 'feishu', 'dist', 'index.js'],

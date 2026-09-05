@@ -268,10 +268,8 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
 
     // 有包：OpenClaw 2026.9 使用 load.paths + entries + allow。
     const usePath = bundled || installPath;
-    // Packages inside the bundled runtime are global OpenClaw plugins and are
-    // discovered automatically. Only a legacy external install needs an
-    // explicit load path; registering bundled packages twice adds cold-start
-    // scans and duplicate-id warnings.
+    // The desktop startup registers bundled packages in the SQLite install
+    // index before this step. Only legacy external paths need load.paths.
     if (!bundled) {
       const resolvedUsePath = path.resolve(usePath);
       if (!config.plugins.load.paths.some((item) => {
@@ -283,9 +281,6 @@ function forceDisableUninstalledChannelPlugins(config, opts = {}) {
     }
     if (!config.plugins.entries[id]) {
       config.plugins.entries[id] = { enabled: true };
-      changed = true;
-    } else if (config.plugins.entries[id].enabled !== true) {
-      config.plugins.entries[id].enabled = true;
       changed = true;
     }
     if (!config.plugins.allow.includes(id)) {

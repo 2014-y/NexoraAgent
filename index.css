@@ -1,5 +1,6 @@
 /* index.css - 界面美化与主题配置 */
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Use the font stacks below without a network request. A remote CSS import
+   blocks both the splash and the main document on disconnected computers. */
 
 /* 主题 CSS 变量定义 */
 :root {

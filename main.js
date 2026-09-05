@@ -54,6 +54,7 @@ const {
     buildGatewayChildEnv
 } = require('./gateway-auth');
 const { syncModelConfigToStateDirs } = require('./openclaw-model-sync');
+const { syncBundledPluginRegistry } = require('./openclaw-plugin-registry');
 const {
     normalizeConfigRouting,
     omitBlankProviderApiKeys,
@@ -1349,6 +1350,11 @@ function startGatewayHttpReadyWatch(port) {
     gatewayHttpReadyNotified = false;
     const targetPort = Number(port) > 0 ? Number(port) : 18789;
     const http = require('http');
+    // A clean low-memory Windows VM can spend several minutes initializing and
+    // scanning the bundled runtime before its first HTTP listener is available.
+    // Use an elapsed-time budget so cold initialization is not killed halfway.
+    const readyStartedAt = Date.now();
+    const readyTimeoutMs = 300_000;
     let tries = 0;
     gatewayHttpReadyTimer = setInterval(() => {
         if (!gatewayProcess || gatewayHttpReadyNotified) {
@@ -1356,16 +1362,18 @@ function startGatewayHttpReadyWatch(port) {
             return;
         }
         tries += 1;
-        if (tries > 180) {
+        const elapsedMs = Date.now() - readyStartedAt;
+        if (elapsedMs >= readyTimeoutMs) {
             stopGatewayHttpReadyWatch();
             appendMainDiagnostic('gateway-http-ready-timeout', null, {
                 port: targetPort,
                 tries,
+                elapsedMs,
             });
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send(
                     'gateway-log',
-                    `\n[System] Gateway 进程已启动，但 ${Math.ceil(tries / 2)} 秒内 HTTP 接口未就绪，正在自动回收并重试。\n`
+                    `\n[System] Gateway 进程已启动，但 ${Math.ceil(elapsedMs / 1000)} 秒内 HTTP 接口未就绪，正在自动回收并重试。\n`
                 );
             }
             scheduleGatewayCrashRestart(-2, { force: true });
@@ -3990,8 +3998,17 @@ function seedBundledPlugins(options = {}) {
 }
 
 /** Gateway 启动前：把内置渠道插件登记进 installs / load.paths，避免交互式 Install? 卡死。 */
-function prepareChannelPluginsBeforeGateway() {
+async function prepareChannelPluginsBeforeGateway() {
     if (!fs.existsSync(CONFIG_PATH)) return;
+    // Channel login can run before the first Gateway start. Record the fresh
+    // state before its registry write creates SQLite, just as Gateway startup does.
+    if (!fs.existsSync(path.join(CONFIG_DIR, 'state', 'openclaw.sqlite'))) {
+        await ensureOpenClawPostUpgradeMigration({
+            nodeExePath: getAvailableNodePath(),
+            openclawEntry: resolveAppFsPath('node_modules', 'openclaw', 'openclaw.mjs'),
+            stateDir: CONFIG_DIR
+        });
+    }
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
     let config = JSON.parse(raw);
     let needsSave = false;
@@ -4065,8 +4082,8 @@ function prepareChannelPluginsBeforeGateway() {
         let drop = false;
         for (const m of channelPathMatchers) {
             if (!m.re.test(p)) continue;
-            // OpenClaw 2026.9 discovers runtime channel packages globally.
-            // Keeping their package roots in load.paths loads each id twice.
+            // The SQLite install registry below supplies these package roots.
+            // Keeping them in load.paths as well loads each id twice.
             drop = true;
             needsSave = true;
             break;
@@ -4167,9 +4184,6 @@ function prepareChannelPluginsBeforeGateway() {
             // 有包：与本机一致，默认启用并进 allow（Doctor 认 installs 后不会再去 npm）
             if (!config.plugins.entries[entry.id]) {
                 config.plugins.entries[entry.id] = { enabled: true };
-                needsSave = true;
-            } else if (config.plugins.entries[entry.id].enabled !== true) {
-                config.plugins.entries[entry.id].enabled = true;
                 needsSave = true;
             }
             if (!config.plugins.allow.includes(entry.id)) {
@@ -4341,15 +4355,30 @@ function prepareChannelPluginsBeforeGateway() {
             }
         }
     } catch (e) {}
-    // Preparation can consume legacy installs metadata, but OpenClaw 2026.9
-    // must never receive those retired keys in the persisted document.
+    // OpenClaw 2026.9 stores installs in SQLite, not in openclaw.json.
+    // Register every bundled channel, including former load.paths packages.
+    const registrySeeds = { ...config.plugins.installs };
+    for (const entry of BUNDLED_NPM_CHANNEL_PLUGINS) {
+        const installPath = resolveBundledNpmPluginPath(entry);
+        if (!installPath) continue;
+        const pkg = JSON.parse(fs.readFileSync(path.join(installPath, 'package.json'), 'utf8'));
+        registrySeeds[entry.id] = {
+            source: 'npm', installPath, spec: `${pkg.name}@${pkg.version}`,
+            resolvedName: pkg.name, resolvedVersion: pkg.version,
+            resolvedSpec: `${pkg.name}@${pkg.version}`, version: pkg.version
+        };
+    }
     if (stripNonSchemaOpenClawConfig(config)) needsSave = true;
+    await syncBundledPluginRegistry({
+        nodeExePath: getAvailableNodePath(), runtimeRoot: resolveAppFsRoot(),
+        stateDir: CONFIG_DIR, config, seeds: registrySeeds
+    });
 
     if (needsSave) {
         writeConfigFileAtomic(JSON.stringify(config, null, 2));
         console.log('[PluginSeed] Pre-gateway channel trust records synced');
         // 切勿删除 openclaw.sqlite：该库含审计事件 / Token / 工具调用等数据中心指标。
-        // 插件索引脏数据由 Gateway 下次启动按 config 重建即可。
+        // 插件安装记录已通过 OpenClaw 的事务接口保存，保留库内其他状态。
     }
 }
 
@@ -4667,6 +4696,7 @@ function createWindow(existingSplash) {
     });
 
     let rendererResponsive = true;
+    let rendererDocumentLoaded = false;
     let rendererRecoveryTimer = null;
     let lastRendererRecoveryAt = 0;
     const recoverRenderer = (reason) => {
@@ -4675,7 +4705,12 @@ function createWindow(existingSplash) {
         if (now - lastRendererRecoveryAt < 10000) return;
         lastRendererRecoveryAt = now;
         appendMainDiagnostic('renderer-auto-recovery', null, { reason });
-        try { mainWindow.webContents.reload(); } catch (_) {}
+        // A renderer that exited during its first navigation has no URL to
+        // reload. Explicitly restore the local entry point in that case.
+        try {
+            if (mainWindow.webContents.getURL()) mainWindow.webContents.reload();
+            else mainWindow.loadFile('index.html').catch(() => {});
+        } catch (_) {}
     };
     mainWindow.webContents.on('unresponsive', () => {
         rendererResponsive = false;
@@ -4685,7 +4720,7 @@ function createWindow(existingSplash) {
         rendererRecoveryTimer = setTimeout(() => {
             rendererRecoveryTimer = null;
             if (!rendererResponsive) recoverRenderer('unresponsive-timeout');
-        }, 15000);
+        }, rendererDocumentLoaded ? 15000 : 120000);
     });
     mainWindow.webContents.on('responsive', () => {
         rendererResponsive = true;
@@ -4696,6 +4731,7 @@ function createWindow(existingSplash) {
         appendMainDiagnostic('renderer-responsive');
     });
     mainWindow.webContents.on('did-finish-load', () => {
+        rendererDocumentLoaded = true;
         rendererResponsive = true;
         if (rendererRecoveryTimer) {
             clearTimeout(rendererRecoveryTimer);
@@ -4705,7 +4741,7 @@ function createWindow(existingSplash) {
     mainWindow.webContents.on('render-process-gone', (event, details) => {
         rendererResponsive = false;
         appendMainDiagnostic('main-window-render-process-gone', null, details || {});
-        if (!isQuitting && (!details || details.reason !== 'clean-exit')) {
+        if (!isQuitting && (!details || details.reason !== 'clean-exit' || !mainWindow.webContents.getURL())) {
             setTimeout(() => recoverRenderer((details && details.reason) || 'render-process-gone'), 800);
         }
     });
@@ -5404,11 +5440,49 @@ async function startGatewayProcess(opts = {}) {
             // 确保在网关启动前，openclaw.json 已经初始化了必需的插件 allow 列表
             ensureOpenClawConfigInitialized();
 
+            // Detect a fresh state before plugin registration creates the current SQLite schema.
+            const migrationAuth = lockGatewayAuthBeforeStart();
+            // 优先通过物理路径直接定位（asar 打包时走 unpacked，供沙箱 Node 读取）
+            let openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'openclaw.mjs');
+            if (!fs.existsSync(openclawEntry)) {
+                openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'openclaw.mjs');
+            }
+            if (!fs.existsSync(openclawEntry)) {
+                throw new Error('内置 OpenClaw 启动器缺失，请重新安装应用');
+            }
+            // 优先使用打包内置的或系统全局符合版本要求的 Node 运行时
+            const nodeExePath = getAvailableNodePath();
+            // 2026.9+ 的共享状态库要求显式 Doctor 迁移；每个内核版本只跑一次，
+            // 且始终使用与随后 Gateway 完全相同的 home/state/config 环境。
+            if (nodeExePath) {
+                const migrationEnv = buildGatewayChildEnv(process.env, {
+                    homePath: migrationAuth.homePath,
+                    stateDir: migrationAuth.stateDir,
+                    token: migrationAuth.token
+                });
+                const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+                migrationEnv[pathKey] = `${path.dirname(nodeExePath)}${path.delimiter}${process.env[pathKey] || ''}`;
+                const migration = await withStartupTimeout(
+                    ensureOpenClawPostUpgradeMigration({
+                        nodeExePath,
+                        openclawEntry,
+                        stateDir: migrationAuth.stateDir,
+                        env: migrationEnv
+                    }),
+                    180_000,
+                    '迁移 OpenClaw 配置与状态'
+                );
+                if (migration && migration.migrated) {
+                    ensureOpenClawConfigInitialized();
+                    lockGatewayAuthBeforeStart();
+                    markStartupPhase('openclaw-post-upgrade-migrated');
+                }
+            }
             // 每次启动 Gateway 前强制同步渠道插件信任记录（load.paths + plugins.installs），
             try {
-                prepareChannelPluginsBeforeGateway();
+                await prepareChannelPluginsBeforeGateway();
             } catch (e) {
-                console.warn('[PluginSeed] pre-gateway prepare skipped:', e.message);
+                throw new Error(`内置插件初始化失败: ${e.message}`);
             }
 
             // 硬修复：软化 migration + npm + 模板 + 同步渠道插件配置
@@ -5431,7 +5505,7 @@ async function startGatewayProcess(opts = {}) {
                 console.log('[GatewayBoot] harden:', (hard.notes || []).join(', '));
                 if (cfg && hard.configChanged) {
                     writeConfigFileAtomic(JSON.stringify(cfg, null, 2));
-                    try { prepareChannelPluginsBeforeGateway(); } catch (e2) {}
+                    await prepareChannelPluginsBeforeGateway();
                 }
             } catch (e) {
                 console.warn('[GatewayBoot] harden skipped:', e.message);
@@ -5482,43 +5556,6 @@ async function startGatewayProcess(opts = {}) {
                 console.error('[TokenGuard] Failed to deploy runtime artifacts:', e.message);
             }
 
-            // 优先通过物理路径直接定位（asar 打包时走 unpacked，供沙箱 Node 读取）
-            let openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'dist', 'index.js');
-            if (!fs.existsSync(openclawEntry)) {
-                openclawEntry = path.join(__dirname, 'node_modules', 'openclaw', 'dist', 'index.js');
-            }
-            if (!fs.existsSync(openclawEntry)) {
-                openclawEntry = require.resolve('openclaw/dist/index.js');
-            }
-            
-            // 优先使用打包内置的或系统全局符合版本要求的 Node 运行时
-            const nodeExePath = getAvailableNodePath();
-            // 2026.9+ 的共享状态库要求显式 Doctor 迁移；每个内核版本只跑一次，
-            // 且始终使用与随后 Gateway 完全相同的 home/state/config 环境。
-            if (nodeExePath) {
-                const migrationEnv = buildGatewayChildEnv(process.env, {
-                    homePath: lockedAuth.homePath,
-                    stateDir: lockedAuth.stateDir,
-                    token: lockedAuth.token
-                });
-                const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
-                migrationEnv[pathKey] = `${path.dirname(nodeExePath)}${path.delimiter}${process.env[pathKey] || ''}`;
-                const migration = await withStartupTimeout(
-                    ensureOpenClawPostUpgradeMigration({
-                        nodeExePath,
-                        openclawEntry,
-                        stateDir: lockedAuth.stateDir,
-                        env: migrationEnv
-                    }),
-                    180_000,
-                    '迁移 OpenClaw 配置与状态'
-                );
-                if (migration && migration.migrated) {
-                    ensureOpenClawConfigInitialized();
-                    lockedAuth = lockGatewayAuthBeforeStart();
-                    markStartupPhase('openclaw-post-upgrade-migrated');
-                }
-            }
             // OpenClaw 2026.9 将共享认证档案迁入 state/openclaw.sqlite。
             // 历史 models.json 中的占位 key 可能已经被迁成 agnes-ai:default，且其
             // 优先级高于当前 provider key；每次 fork 前快速对齐，避免首发 401 后重试。
@@ -5685,7 +5722,7 @@ async function startGatewayProcess(opts = {}) {
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('gateway-status', 'running');
             }
-            showNotification('Nexora Agent已成功启动', 'AI 本地Nexora Agent已在后台运行，开始监听 18789 端口。');
+            showNotification('Nexora Agent正在启动', '正在初始化本地内核，首次启动可能需要几分钟。控制台就绪后即可使用。');
 
             let watchPort = preferredGatewayPort;
             try {
@@ -8322,15 +8359,16 @@ async function startBundledChannelLogin(pluginIdOrOpts) {
         wechatLoginSuccessWatcher = null;
     }
 
-    try { prepareChannelPluginsBeforeGateway(); } catch (e) {
+    try { await prepareChannelPluginsBeforeGateway(); } catch (e) {
         console.warn('[Channel Login] prepareChannelPluginsBeforeGateway:', e.message);
+        return { success: false, error: e.message };
     }
 
     if (spec.openclawChannel === 'openclaw-weixin') {
         return startDirectWeixinChannelLogin(spec);
     }
 
-    const openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'dist', 'index.js');
+    const openclawEntry = resolveAppFsPath('node_modules', 'openclaw', 'openclaw.mjs');
     if (!fs.existsSync(openclawEntry)) {
         return { success: false, error: '内置 OpenClaw 模块缺失，无法唤醒绑定' };
     }
@@ -11404,7 +11442,7 @@ async function performOpenclawStableUpdate(options = {}) {
 
         const stagedPackage = readJsonFileSafe(path.join(stageModules, 'openclaw', 'package.json'), {});
         const stagedVersion = normalizeOpenClawVersion(stagedPackage.version);
-        const stagedEntry = path.join(stageModules, 'openclaw', 'dist', 'index.js');
+        const stagedEntry = path.join(stageModules, 'openclaw', 'openclaw.mjs');
         if (stagedVersion !== release.latestVersion || !fs.existsSync(stagedEntry)) {
             throw new Error(`候选核心校验失败: expected=${release.latestVersion}, actual=${stagedVersion || 'missing'}`);
         }
@@ -11691,8 +11729,11 @@ async function ensureOpenClawPostUpgradeMigration(params) {
 
     let version = 'unknown';
     try {
+        const packageRoot = path.basename(openclawEntry) === 'openclaw.mjs'
+            ? path.dirname(openclawEntry)
+            : path.join(path.dirname(openclawEntry), '..');
         version = JSON.parse(
-            fs.readFileSync(path.join(path.dirname(openclawEntry), '..', 'package.json'), 'utf8')
+            fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')
         ).version || version;
     } catch (_) {}
     const safeVersion = String(version).replace(/[^a-zA-Z0-9._-]/g, '_');

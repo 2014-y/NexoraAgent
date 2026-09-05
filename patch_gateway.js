@@ -7,6 +7,21 @@ if (globalThis.__TOKENGUARD_PATCHED__) {
 }
 globalThis.__TOKENGUARD_PATCHED__ = true;
 
+// Bootstrap patches inspect the same dist files several times. Keep their reads
+// local to this synchronous bootstrap, then release the source strings before
+// loading the gateway. Do not replace fs methods used by the application.
+const bootstrapPatchSources = new Map();
+function readBootstrapPatchSource(file) {
+    if (!bootstrapPatchSources.has(file)) {
+        bootstrapPatchSources.set(file, require('fs').readFileSync(file, 'utf8'));
+    }
+    return bootstrapPatchSources.get(file);
+}
+function writeBootstrapPatchSource(file, text) {
+    require('fs').writeFileSync(file, text, 'utf8');
+    bootstrapPatchSources.set(file, text);
+}
+
 // ─── 孤儿进程守卫 ───
 // 网关由 Electron fork（带 IPC 通道）。若 Electron 崩溃/被强杀而未走正常停网关流程，
 // 子进程会变成孤儿：继续占用 18789、微信/QQ 保持登录，下次启动又被强杀于半写状态。
@@ -133,7 +148,7 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
                     const file = pathMod.join(dist, name);
                     let text = '';
                     try {
-                        text = fsMod.readFileSync(file, 'utf8');
+                        text = readBootstrapPatchSource(file);
                     } catch (_) {
                         continue;
                     }
@@ -166,7 +181,7 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
                     }
                     if (!changed || next === text) continue;
                     try {
-                        fsMod.writeFileSync(file, next, 'utf8');
+                        writeBootstrapPatchSource(file, next);
                         patched += 1;
                     } catch (_) {}
                 }
@@ -224,7 +239,7 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
                     const file = pathMod.join(dist, name);
                     let text = '';
                     try {
-                        text = fsMod.readFileSync(file, 'utf8');
+                        text = readBootstrapPatchSource(file);
                     } catch (_) {
                         continue;
                     }
@@ -262,7 +277,7 @@ globalThis.__TOKENGUARD_PATCHED__ = true;
                     );
                     if (next === text || !next.includes(MARK)) continue;
                     try {
-                        fsMod.writeFileSync(file, next, 'utf8');
+                        writeBootstrapPatchSource(file, next);
                         patched += 1;
                     } catch (_) {}
                 }
@@ -443,7 +458,7 @@ function ensureInterruptedNetworkPatternOnDisk() {
                     const file = pathMod.join(dist, name);
                     let text = '';
                     try {
-                        text = fsMod.readFileSync(file, 'utf8');
+                        text = readBootstrapPatchSource(file);
                     } catch (e) {
                         continue;
                     }
@@ -463,7 +478,7 @@ function ensureInterruptedNetworkPatternOnDisk() {
                     );
                     if (out === text) continue;
                     try {
-                        fsMod.writeFileSync(file, out, 'utf8');
+                        writeBootstrapPatchSource(file, out);
                         patched += 1;
                     } catch (e) {}
                 }
@@ -521,7 +536,7 @@ function ensureMalformedFormatPatternOnDisk() {
         for (const file of candidates) {
             let text = '';
             try {
-                text = fsMod.readFileSync(file, 'utf8');
+                text = readBootstrapPatchSource(file);
             } catch (e) {
                 continue;
             }
@@ -530,7 +545,7 @@ function ensureMalformedFormatPatternOnDisk() {
             const next = text.replace(/format:\s*\[/, (m) => m + NEXORA_MALFORMED_FORMAT_SNIPPET);
             if (next === text) continue;
             try {
-                fsMod.writeFileSync(file, next, 'utf8');
+                writeBootstrapPatchSource(file, next);
                 patched += 1;
             } catch (e) {}
         }
@@ -596,7 +611,7 @@ function ensureMediaLocalRootsOnDisk() {
         for (const file of candidates) {
             let text = '';
             try {
-                text = fsMod.readFileSync(file, 'utf8');
+                text = readBootstrapPatchSource(file);
             } catch (e) {
                 continue;
             }
@@ -622,7 +637,7 @@ function ensureMediaLocalRootsOnDisk() {
             }
             if (next === text) continue;
             try {
-                fsMod.writeFileSync(file, next, 'utf8');
+                writeBootstrapPatchSource(file, next);
                 patched += 1;
             } catch (e) {}
         }
@@ -695,7 +710,7 @@ function ensureChatMediaParseOnDisk() {
         for (const file of candidates) {
             let text = '';
             try {
-                text = fsMod.readFileSync(file, 'utf8');
+                text = readBootstrapPatchSource(file);
             } catch (e) {
                 continue;
             }
@@ -748,7 +763,7 @@ function ensureChatMediaParseOnDisk() {
 
             if (!changed || next === text) continue;
             try {
-                fsMod.writeFileSync(file, next, 'utf8');
+                writeBootstrapPatchSource(file, next);
                 patched += 1;
             } catch (e) {}
         }
@@ -778,6 +793,7 @@ ensureMalformedFormatPatternOnDisk();
 ensureInterruptedNetworkPatternOnDisk();
 ensureMediaLocalRootsOnDisk();
 ensureChatMediaParseOnDisk();
+bootstrapPatchSources.clear();
 
 function looksLikeRawToolCall(content) {
     if (typeof content !== 'string') return false;

@@ -114,7 +114,11 @@ async function main() {
     throw new Error(`NSIS installer missing from output directory: ${OUT}`);
   }
 
-  readAsarText('main.js');
+  for (const file of ['main.js', 'patch_gateway.js', 'openclaw-plugin-registry.js', 'index.css']) {
+    if (readAsarText(file) !== fs.readFileSync(path.join(ROOT, file), 'utf8')) {
+      throw new Error(`app.asar contains stale source: ${file}`);
+    }
+  }
   readAsarText('gateway-runtime.js');
   const packedManifest = readAsarText('runtime-pack-manifest.js');
   const packedId = extractPackId(packedManifest, 'app.asar runtime manifest');
