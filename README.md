@@ -31,7 +31,7 @@
 
 [🐣 小白零门槛安装教程](#-小白零门槛一键安装与使用全指南-novice-guide) •
 [💡 系统用途与应用场景](#-系统用途与全场景应用框架) •
-[🖥️ 16大侧栏菜单功能逐一深度解析](#-16-大侧栏菜单功能逐一深度解析) •
+[🖥️ 主要功能介绍](#-主要功能介绍) •
 [🔄 系统运行全流程与机制](#-系统全链路运行流程与架构图解) •
 [🏛️ 四层主权架构白皮书](#-四层系统架构白皮书-four-tier-enterprise-architecture) •
 [🛠️ 自愈诊断与故障排查](#-故障诊断与自愈排查手册)
@@ -59,7 +59,6 @@
  ├─────────────────────────────────────────────────────────────────────────────────────────────┤
  │ [SYSTEM]    Bootstrapping Nexora Agent Core Engine...                          [SUCCESS 🟢]  │
  │ [SANDBOX]   Attached Portable Node.js LTS Hardened Environment                 (18ms ⚡)    │
- │ [SECURITY]  Applied NO_PROXY Domain Identities. Zero-Trust Shield Active.      [SECURE 🛡️]   │
  │ [ROUTER]    Omni-Channel Connectors Loaded: WeChat 🟢, Feishu 🔷, QQBot 🐧, Slack 💬       │
  │ [RECONNECT] Exponential Backoff Circuit Breaker Primed. Auto-Retry Floor: Infinity          │
  │ [MEMORY]    Incremental Long-Term Memory Synced (~/.openclaw/MEMORY.md). Deduplicated. 🧠   │
@@ -90,7 +89,7 @@ flowchart LR
 > 2. 一个大模型厂商的 API Key（推荐使用 **DeepSeek** 或 **阿里云百炼**，注册即送免费试用额度）。
 
 ### 🚀 步骤一：一键下载与傻瓜式安装
-1. **下载安装包**：在项目仓库的 [Releases](https://github.com/2014-y/NexoraAgent/releases) 页面下载最新版 `Nexora Agent Setup.exe` 安装文件。
+1. **下载安装包**：在 [Windows 2.0.5 发布页](https://github.com/2014-y/NexoraAgent/releases/tag/v2.0.5) 下载 `Nexora-Agent-Setup-2.0.5.exe`（Windows x64）。其他版本见 [Releases](https://github.com/2014-y/NexoraAgent/releases)。
 2. **双击安装**：双击运行下载好的 `.exe` 文件。向导会自动选择最佳路径安装，并在桌面建立 `Nexora Agent` 赛博风快捷启动图标。
 3. **零环境依赖**：软件**内置了便携式免安装 Node.js LTS 沙箱**，您**完全不需要**手动下载 Python、Node.js、Git 或配置任何复杂的环境变量！
 
@@ -101,7 +100,7 @@ flowchart LR
 2. 在左侧主界面顶部找到 **「🚀 启动 Nexora Agent」** 按钮并点击。
 3. 观察左上角的状态指示灯变化：
    * 🔴 **红色**：服务停止中。
-   * 🟡 **黄色**：系统正在自动挂载本地沙箱环境与网络加速内核。
+   * 🟡 **黄色**：系统正在自动挂载本地运行环境与网关资源。
    * 🟢 **绿色**：**核心服务就绪！** 出现 `端口: 18789` 提示，表示 AI 大脑中枢已在本地成功唤醒。
 
 ---
@@ -133,7 +132,7 @@ graph TD
     A[👥 用户及团队终端<br/>💬 微信 / 🔷 飞书 / 🐧 QQ / 🌐 网页] -->|🛡️ 安全隔离通讯| B(🤖 Nexora Agent 本地主权中枢)
     B -->|🔒 零信任加密通道| C[🧠 大模型矩阵<br/>⚡ DeepSeek / ☁️ 阿里云百炼 / 🚀 SiliconFlow / 🏠 离线Ollama]
     B -->|🖱️ 本地自动化控制| D[🖥️ 物理操作系统控制<br/>⚙️ Win32 API / 📷 屏幕截屏 / 📁 文件读写]
-    B -->|🎨 本地媒体生成| E[🛠️ 技能中心<br/>🎨 文生图 / 🎬 文生视频 / 🎙️ 离线 TTS 语音 Matrix]
+    B -->|🎨 本地媒体生成| E[🛠️ 技能中心<br/>🎨 文生图 / 🎬 文生视频]
     B -->|📊 全盘数据监控| F[📈 数据中心 Dashboard<br/>💻 CPU / 🧠 GPU / 🪙 Token 消耗 / 🌊 流量流速]
 ```
 
@@ -143,7 +142,6 @@ graph TD
 
 ### 2. 🏢 企业级私域流量与客服自动化
 * 🎧 **全双工智能客服**：无需昂贵的 SaaS 系统，在本地电脑即可拉起 7×24 小时微信/飞书客服机器人，支持多图发送、文档解析与智能故障排除。
-* 🛡️ **防封号双路路由**：社交平台通信数据包纯本地 IP 直连，大模型 API 走加密隧道，技术层面规避风控封号风险。
 
 ### 3. 🖱️ 极客与开发者 RPA 桌面自动化
 * 🖥️ **物理桌面控制**：AI 可直接分析当前屏幕内容，利用原生的 `user32.dll` 驱动模拟物理鼠标点击与键盘敲击，自动完成表单填写、软件测试与数据抓取。
@@ -166,29 +164,17 @@ graph TD
 <p>🔄 独创 v3 智能心跳监测算法。遇到局域网闪断或路由重启，自动开启指数退避静默热重连，45 秒内自适应恢复上线。</p>
 </td>
 <td width="33%" valign="top">
-<h3>🌐 智能双路防封路由</h3>
-<b>Anti-Anti-Agent Gateway</b>
-<p>🛡️ 独创域名安全白名单分流。微信、飞书、QQ 官方心跳 100% 本地物理 IP 直连，大模型走代理加密，技术层面彻底防风控封号。</p>
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
 <h3>🧠 增量长期记忆中枢</h3>
 <b>Markdown Long-Term Memory</b>
 <p>📝 内置记忆自动提取与去重引擎。将用户的偏好与设定增量沉淀至本地 Markdown 库，跨会话自动注入 Prompt，打造越用越聪明的专属 AI 人格。</p>
 </td>
-<td width="33%" valign="top">
-<h3>🗣️ 全离线神经网络语音</h3>
-<b>Offline Neural Voice Matrix</b>
-<p>🎙️ 集成 VAD 静音滑窗判定算法与 VITS 神经网络中英混合语音推理，配合 Windows SAPI COM 降级兜底，零网络依赖朗读。</p>
-</td>
+</tr>
+<tr>
 <td width="33%" valign="top">
 <h3>🖥️ 物理级 Win32 桌面控制</h3>
 <b>Win32 Synthetic Actuator</b>
 <p>🖱️ 穿透 DPI 动态缩放，调用 user32.dll 物理事件驱动。大模型可如真人般操控 Windows 桌面，完成截图、点击与按键自动化。</p>
 </td>
-</tr>
-<tr>
 <td width="33%" valign="top">
 <h3>🔄 超长会话无缝滚存</h3>
 <b>Session Overflow Rollover</b>
@@ -199,7 +185,9 @@ graph TD
 <b>Native Skill Center</b>
 <p>🎨 提供生图、生视频、抓屏与网络诊断等多维技能插件，支持热加载与灵活调度，大幅扩展大模型的能力边界。</p>
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td colspan="3" valign="top">
 <h3>📊 数据中心仪表盘</h3>
 <b>Data Center Telemetry</b>
 <p>📈 提供全盘可视化监控，实时图表展示 CPU/内存/网络吞吐量及 Token 消耗动态，系统健康度一清二楚。</p>
@@ -209,30 +197,28 @@ graph TD
 
 ---
 
-## 🖥️ 16 大侧栏菜单功能逐一深度解析 📌
+## 🖥️ 主要功能介绍 📌
 
-系统左侧导航栏集成了 16 个核心功能面板与管理视界，以下为您逐一清清楚楚、明明白白详细拆解 💡：
+以下介绍常用功能面板及其主要用途：
 
 ```text
  ┌─────────────────────────┬───────────────────────────────────────────────────────────────────────┐
  │ NEXORA AGENT NAV 🚀     │ 🟢 核心服务就绪 | 端口: 18789  [ 🚀 启动/终止 ] [ 🔍 探针诊断 ]         │
  ├─────────────────────────┼───────────────────────────────────────────────────────────────────────┤
  │ ⚡ 1. 控制面板          │ 🚀 核心服务控制台、三色指示灯状态控制、启动探针管理与负载微波图        │
- │ ⚡ 2. 网络中转          │ 🌐 内置 Mihomo 网络加速内核配置、代理模式选择与 NO_PROXY 白名单分流     │
- │ 📱 3. 通讯管理          │ 📱 微信/飞书/QQ/Slack/Matrix 全渠道机器人卡片与 Base64 扫码绑定        │
- │ 🧠 4. 模型配置          │ 🔑 大模型厂商 API Key 注入、模型探针延迟测试、识图视觉模型自动对齐      │
- │ 🎭 5. 模型角色          │ 🎭 系统 Prompt 提示词预设、AI 人格语气与专家角色模板库                 │
- │ 💬 6. 模型会话          │ 💬 实时 AI 对话交互、模型下拉切换、富媒体气泡与无缝滚存提示             │
- │ 🦞 7. OpenClaw          │ 🦞 原生底层 Web 管理面板无缝嵌套与赛博暗黑 CSS 主题自动同步             │
- │ 📈 8. 用量监控          │ 🪙 Token 消费统计、模型调用频次与首字延迟 (TTFT) 深度耗时分析          │
- │ 🧩 9. 内置插件          │ 🧩 8 大内置扩展插件生态列表、启停开关与热加载参数控制                  │
- │ 🛠️ 10. 技能中心         │ 🎨 文生图、🎬 文生视频、🖱️ 物理桌面 RPA、📷 网页截屏技能扩展            │
- │ 🎙️ 11. 语音服务         │ 🎙️ VAD 滑动窗口概率推导离线语音、Sherpa-Onnx 神经网络与 SAPI 声卡朗读   │
- │ 📂 12. 会话归档         │ 📁 历史超长会话检索、关键字搜索、滚存备份记录查看与 Markdown 导出      │
- │ 📊 13. 数据总览         │ 📈 可视化 ECharts 仪表盘、CPU/内存/网络带宽/Token 消耗实时折线图        │
- │ 💻 14. 内置终端         │ 💻 免安装便携 PTY 伪终端控制台，支持命令行脚本直接交互与诊断           │
- │ 📜 15. 运行日志         │ 📜 毫秒级时间戳流式 stdout/stderr 日志捕获与级别过滤视界                │
- │ ⚙️ 16. 系统设置         │ ⚙️ 多语言切换 (i18n)、开机自启、高级参数与 Doctor 诊断面板              │
+ │ 📱 2. 通讯管理          │ 📱 微信/飞书/QQ/Slack/Matrix 全渠道机器人卡片与 Base64 扫码绑定        │
+ │ 🧠 3. 模型配置          │ 🔑 大模型厂商 API Key 注入、模型探针延迟测试、识图视觉模型自动对齐      │
+ │ 🎭 4. 模型角色          │ 🎭 系统 Prompt 提示词预设、AI 人格语气与专家角色模板库                 │
+ │ 💬 5. 模型会话          │ 💬 实时 AI 对话交互、模型下拉切换、富媒体气泡与无缝滚存提示             │
+ │ 🦞 6. OpenClaw          │ 🦞 原生底层 Web 管理面板无缝嵌套与赛博暗黑 CSS 主题自动同步             │
+ │ 📈 7. 用量监控          │ 🪙 Token 消费统计、模型调用频次与首字延迟 (TTFT) 深度耗时分析          │
+ │ 🧩 8. 内置插件          │ 🧩 8 大内置扩展插件生态列表、启停开关与热加载参数控制                  │
+ │ 🛠️ 9. 技能中心         │ 🎨 文生图、🎬 文生视频、🖱️ 物理桌面 RPA、📷 网页截屏技能扩展            │
+ │ 📂 10. 会话归档         │ 📁 历史超长会话检索、关键字搜索、滚存备份记录查看与 Markdown 导出      │
+ │ 📊 11. 数据总览         │ 📈 可视化 ECharts 仪表盘、CPU/内存/网络带宽/Token 消耗实时折线图        │
+ │ 💻 12. 内置终端         │ 💻 免安装便携 PTY 伪终端控制台，支持命令行脚本直接交互与诊断           │
+ │ 📜 13. 运行日志         │ 📜 毫秒级时间戳流式 stdout/stderr 日志捕获与级别过滤视界                │
+ │ ⚙️ 14. 系统设置         │ ⚙️ 多语言切换 (i18n)、开机自启、高级参数与 Doctor 诊断面板              │
  └─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,7 +230,7 @@ graph TD
   * **「启动/终止 Nexora Agent」主按键**：一键平滑拉起或平滑关闭后台 Node.js 沙箱与网关主线程。
   * **三色运行状态指示灯**：
     * 🔴 **已停止**：网关服务处于关闭休眠状态，零 CPU/内存占用。
-    * 🟡 **启动中**：正在挂载便携沙箱、解压核心资源、检查端口与唤醒加速内核。
+    * 🟡 **启动中**：正在挂载便携沙箱、解压核心资源、检查端口与启动网关。
     * 🟢 **服务就绪**：网关已在本地端口（默认 `18789`）开启监听，随时响应全渠道请求。
   * **加载百分比与端口标识**：实时显示当前网关启动进度（0% ~ 100%）与监听地址（`http://127.0.0.1:18789`）。
   * **运行状态微型趋势图 (Canvas Mini-Chart)**：在侧栏底部实时绘制 CPU 占用与网络吞吐的波动波形曲线。
@@ -252,21 +238,7 @@ graph TD
 
 ---
 
-### 2. ⚡ 网络中转 (`acceleration-view`)
-* 🌐 **核心定位**：管理内置 Mihomo 网络加速内核与防封安全代理路由。
-* 🔘 **主要控件与界面元素**：
-  * **代理模式单选组**：
-    * `Rule (规则分流)`：智能判定，公有云大模型走加密加速，社交平台直连。
-    * `Global (全局代理)`：除白名单外的出站流量强行走选定的代理节点。
-    * `Direct (直连模式)`：关闭代理中转，所有出站流量本地 IP 直连。
-  * **订阅地址输入框与「更新订阅」按键**：支持粘贴第三方加速订阅 URL 并一键获取最新节点。
-  * **节点选择列表与延迟测速**：展示所有节点及 TCP 握手延迟（毫秒），支持手动点击测速与节点选择。
-  * **`NO_PROXY` 域名白名单字典**：展示与编辑强行排除在代理之外的域名（内置 `*.weixin.qq.com`、`*.feishu.cn`、`*.qq.com`）。
-* 🛡️ **技术价值**：确保存储凭证与微信/飞书心跳包纯本地直连，技术层面彻底杜绝代理 IP 引起的账号封禁风险。
-
----
-
-### 3. 📱 通讯管理 (`communication-view`)
+### 2. 📱 通讯管理 (`communication-view`)
 * 📱 **核心定位**：一站式托管与管理微信、飞书、QQBot、Slack、Matrix 等全渠道社交机器人。
 * 🔘 **主要控件与界面元素**：
   * **渠道状态卡片**：展示微信、飞书、QQ 等通道的运行状态（🟢 运行中 / 🔴 已停止）。
@@ -276,7 +248,7 @@ graph TD
 
 ---
 
-### 4. 🧠 模型配置 (`config-view`)
+### 3. 🧠 模型配置 (`config-view`)
 * 🔑 **核心定位**：统一管理与配置各大公有云及本地私有大模型的 API Key 与端点。
 * 🔘 **主要控件与界面元素**：
   * **厂商启停开关**：支持一键开关 DeepSeek、阿里云百炼 (Qwen)、SiliconFlow、OpenAI、Ollama、LM Studio 等服务商。
@@ -286,7 +258,7 @@ graph TD
 
 ---
 
-### 5. 🎭 模型角色 (`roles-view`)
+### 4. 🎭 模型角色 (`roles-view`)
 * 🎭 **核心定位**：定制与预设 AI 助手的 System Prompt 系统提示词、语气、性格与专业领域。
 * 🔘 **主要控件与界面元素**：
   * **预设角色卡片库**：内置代码专家、翻译官、私域客服、文案大师、学术润色师等角色模板。
@@ -295,7 +267,7 @@ graph TD
 
 ---
 
-### 6. 💬 模型会话 (`chat-view`)
+### 5. 💬 模型会话 (`chat-view`)
 * 💬 **核心定位**：用户与大模型直接对话、调试提示词与预览技能生成的交互中心。
 * 🔘 **主要控件与界面元素**：
   * **模型选择下拉菜单**：实时列出所有已启用的云端与本地大模型，支持秒级无感切换。
@@ -306,7 +278,7 @@ graph TD
 
 ---
 
-### 7. 🦞 OpenClaw (`openclaw-panel-view`)
+### 6. 🦞 OpenClaw (`openclaw-panel-view`)
 * 🦞 **核心定位**：无缝嵌套 OpenClaw 底层网关的原生管理 Web 视界。
 * 🔘 **主要控件与界面元素**：
   * **Webview 嵌套视界**：无需打开外部浏览器，直接在客户端内部浏览与操作原生底层网关。
@@ -314,7 +286,7 @@ graph TD
 
 ---
 
-### 8. 📈 用量监控 (`dashboard-view`)
+### 7. 📈 用量监控 (`dashboard-view`)
 * 🪙 **核心定位**：深度分析大模型 API 的调用频次、Token 消费账单与响应耗时。
 * 🔘 **主要控件与界面元素**：
   * **Token 消耗柱状图**：按天/周统计 Prompt Token 与 Completion Token 的消耗趋势。
@@ -323,16 +295,16 @@ graph TD
 
 ---
 
-### 9. 🧩 内置插件 (`plugins-view`)
+### 8. 🧩 内置插件 (`plugins-view`)
 * 🧩 **核心定位**：查看、管理与配置系统中安装的所有功能插件（如去重、重连、滚存、记忆轮转等）。
 * 🔘 **主要控件与界面元素**：
-  * **8 大内置插件生态列表**：展示 `error-filter`、`session-overflow-rollover`、`memory-rotate`、`voice-bridge` 等已加载的插件。
+  * **8 大内置插件生态列表**：展示 `error-filter`、`session-overflow-rollover`、`memory-rotate` 等已加载的插件。
   * **启停开关按钮**：支持对单个插件进行一键启用与禁用。
   * **插件参数配置框**：支持修改插件的阈值与运行参数。
 
 ---
 
-### 10. 🛠️ 技能中心 (`skills-view`)
+### 9. 🛠️ 技能中心 (`skills-view`)
 * 🛠️ **核心定位**：管理与扩展 AI 大模型的物理扩展技能与本地操作权限。
 * 🔘 **主要控件与技能项**：
   * 📷 **桌面抓屏 (Screen Capture)**：调用物理抓屏工具截取屏幕并分析。
@@ -342,16 +314,7 @@ graph TD
 
 ---
 
-### 11. 🎙️ 语音服务 (`voice-view`)
-* 🎙️ **核心定位**：管理离线语音识别（ASR）与神经网络语音合成（TTS）。
-* 🔘 **主要控件与界面元素**：
-  * **VAD 静音阈值滑动条**：设置人声概率触发门槛（默认 0.55）与静音截断时长。
-  * **发音人与语速选择**：选择不同的 Sherpa-Onnx 离线神经网络发音人音色与语速。
-  * **SAPI 降级开关**：当缺少神经网络模型时，自动降级至 Windows 系统原生声卡朗读。
-
----
-
-### 12. 📂 会话归档 (`session-archive-view`)
+### 10. 📂 会话归档 (`session-archive-view`)
 * 📁 **核心定位**：历史对话记录的统一存储、检索、管理与导出面板。
 * 🔘 **主要控件与界面元素**：
   * **历史会话卡片列表**：按创建时间倒序排列显示所有历史会话及其摘要标题。
@@ -361,7 +324,7 @@ graph TD
 
 ---
 
-### 13. 📊 数据总览 (`data-center-view`)
+### 11. 📊 数据总览 (`data-center-view`)
 * 📈 **核心定位**：全盘可视化系统运维、性能与硬件资源 Telemetry 实时仪表盘。
 * 🔘 **主要控件与界面元素**：
   * **CPU & 内存占用折线图**：动态刷新展示 CPU 使用率 (%) 与内存占用 (MB/GB) 变化。
@@ -370,7 +333,7 @@ graph TD
 
 ---
 
-### 14. 💻 内置终端 (`terminal-view`)
+### 12. 💻 内置终端 (`terminal-view`)
 * 💻 **核心定位**：在软件内部提供一个隔离的免安装便携 PTY 命令行控制台。
 * 🔘 **主要控件与界面元素**：
   * **终端交互控制台**：支持直接输入 PowerShell、Cmd 或 Bash 指令并实时查看输出。
@@ -378,7 +341,7 @@ graph TD
 
 ---
 
-### 15. 📜 运行日志 (`syslogs-view`)
+### 13. 📜 运行日志 (`syslogs-view`)
 * 📜 **核心定位**：实时捕获并流式输出后台沙箱与网关的原始 stdout / stderr 日志。
 * 🔘 **主要控件与界面元素**：
   * **流式日志输出窗口**：按毫秒级时间戳高亮显示系统运行的每一个细节。
@@ -387,7 +350,7 @@ graph TD
 
 ---
 
-### 16. ⚙️ 系统设置 (`settings-view`)
+### 14. ⚙️ 系统设置 (`settings-view`)
 * ⚙️ **核心定位**：全局系统偏好设置、多语言控制与自愈诊断面板。
 * 🔘 **主要控件与界面元素**：
   * **多语言选择下拉框 (i18n)**：支持中文、英文等多国语言界面秒级无缝切换。
@@ -406,24 +369,20 @@ sequenceDiagram
     participant Main as 🖥️ Electron 主进程
     participant Sandbox as 📦 免安装 Node.js 沙箱
     participant Gateway as 🦞 OpenClaw 网关引擎
-    participant Proxy as ⚡ 加速内核 (Mihomo)
 
     User->>Main: 点击「🚀 启动 Nexora Agent」
-    Main->>Proxy: 唤醒网络加速内核 (监听 17890 端口)
-    Proxy-->>Main: 加速内核就绪 (注入 NO_PROXY 白名单)
     Main->>Sandbox: 挂载 .node-sandbox 便携环境 (18ms ⚡)
     Sandbox->>Gateway: 拉起 start-gateway.js (端口 18789)
     Gateway-->>Main: 输出 "Gateway Online" 标志位
     Main->>User: 状态灯置绿 🟢 (核心服务就绪)
 ```
 
-### 2. 🌐 多渠道消息收发与防封分流流程
+### 2. 🌐 多渠道消息收发流程
 ```mermaid
 flowchart TD
-    A[📱 外部社交平台<br/>🟢 微信 / 🔷 飞书 / 🐧 QQ] -->|🛡️ 物理 IP 直连<br/>不走代理流量| B[📱 通讯管理适配器]
+    A[📱 外部社交平台<br/>🟢 微信 / 🔷 飞书 / 🐧 QQ] -->|接收消息| B[📱 通讯管理适配器]
     B -->|格式标准化| C[🧠 OpenClaw LLM 统一路由]
-    C -->|大模型请求流量<br/>走高隐蔽加密隧道| D[⚡ 网络加速内核 Mihomo]
-    D -->|🔒 HTTPS 加密| E[☁️ 公有云 / 私有云大模型]
+    C -->|调用配置的模型 API| E[☁️ 公有云 / 私有云大模型]
     E -->|返回回复内容| C
     C -->|解析技能 / 媒体指令| F{🎨 包含 MEDIA 指令?}
     F -- 是 --> G[🎨 生成本地图片/视频/截图]
@@ -456,7 +415,6 @@ Nexora Agent 采用了分层解耦的四层软件架构设计，保障了系统�
 +-----------------------------------------------------------------------------------+
 | Layer 3: Omni-Channel Actuators & Interface (全双工适配与交互层 📱)                 |
 | - WeChat Connector 🟢 / Feishu Connector 🔷 / QQBot Connector 🐧                   |
-| - Sherpa-Onnx Neural ASR & VITS TTS Offline Voice Gateway 🎙️                       |
 | - Inline Media Rich-Text Bubble Renderer & Data Center Telemetry 📊               |
 +-----------------------------------------------------------------------------------+
                                    │ (JSON-RPC / WebSockets / IPC)
@@ -468,12 +426,10 @@ Nexora Agent 采用了分层解耦的四层软件架构设计，保障了系统�
 | - Context Compaction & Token Salience Floor (reserveTokensFloor)                  |
 | - Automatic Session Overflow Seamless Rollover Engine 🔄                          |
 +-----------------------------------------------------------------------------------+
-                                   │ (Loopback Proxy / Internal Mesh)
+                                   │ (IPC / Process Lifecycle)
                                    ▼
 +-----------------------------------------------------------------------------------+
-| Layer 1: Protocol Proxy & Security Firewall (安全协议与防封路由层 🛡️)               |
-| - Mihomo Core Agent (Local Port 17890) ⚡                                         |
-| - NO_PROXY White-List Traffic Separator (*.weixin.qq.com / *.feishu.cn) 🌐        |
+| Layer 1: Gateway Lifecycle & Recovery (网关生命周期与故障恢复层 🛠️)               |
 | - Automatic Crash-Loop Breaker Bypass & Override Handler 🛠️                       |
 +-----------------------------------------------------------------------------------+
                                    │ (Win32 System Calls & Native Addons)
@@ -511,16 +467,6 @@ Nexora Agent 采用了分层解耦的四层软件架构设计，保障了系统�
 <td><b>微信连接成功但网络断开后不自动恢复</b></td>
 <td>网络波动引发 WebSocket 物理连接断开</td>
 <td>系统已内置 v3 高可用重连引擎，网络恢复后 45 秒内自动静默热重连，无需重新扫码。</td>
-</tr>
-<tr>
-<td><b>语音网桥报错 <code>ECONNREFUSED 18791</code></b></td>
-<td>语音服务未开启或 18791 端口被残留进程占用</td>
-<td>进入「系统设置」 $\rightarrow$ 取消勾选「开启语音」 $\rightarrow$ 2 秒后重新勾选开启，强制强置端口。</td>
-</tr>
-<tr>
-<td><b>加速内核提示 <code>17890</code> 端口冲突</b></td>
-<td>本地运行了其它占用端口的网络转发软件</td>
-<td>关闭第三方软件，或在设置面板中将 HTTP 加速端口修改为其他空闲端口（如 17898）。</td>
 </tr>
 <tr>
 <td><b>扫码后提示二维码失效</b></td>
